@@ -1,6 +1,6 @@
 # nativeMons
 
-[![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
+[![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml)
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
 through its own engine, and the engines stay forks that keep pulling their upstream updates.
