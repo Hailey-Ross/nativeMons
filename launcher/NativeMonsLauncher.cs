@@ -445,7 +445,7 @@ class LauncherForm : Form {
         return psi;
     }
     // Asks the Gen1Recomp fork something (src/nativemons/ModsCli.lua). Null when it can't run.
-    static string Gen1Cli(string command) {
+    public static string Gen1Cli(string command) {
         if (!File.Exists(Config.Love) || !File.Exists(Path.Combine(Config.Gen1, "main.lua"))) return null;
         var psi = Gen1Start("");
         psi.EnvironmentVariables["NATIVEMONS_CLI"] = command;
@@ -539,6 +539,8 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Both engines", "", true, delegate { OpenEngineSettings("both"); }) { Icon = '\uE713', Info = "Fullscreen and volume, for every game." });
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
+        p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
+        p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
@@ -626,6 +628,202 @@ class LauncherForm : Form {
         });
     }
 
+    // ---------- exporting saves ----------
+    // Everything needed to put a save back on a device. Copies byte for byte: the file is already in cartridge format.
+    public static string ExportSave(GameEntry g, bool checkpoint, string outFolder, string backup, out bool ok) {
+        ok = false;
+        string why, file = SaveOf(g, out why);
+        if (file == null) return why;
+        int code; string info = Bridge("info \"" + file + "\"", out code);
+        if (code != 0) return "This save didn't pass its checks, so it wasn't exported: " + info.Trim();
+        file = file.Replace('/', '\\');
+        long size = new FileInfo(file).Length;
+        if (!checkpoint) {
+            Directory.CreateDirectory(outFolder);
+            string target = Path.Combine(outFolder, g.Id + ".sav");
+            if (File.Exists(target)) File.Copy(target, target + ".old", true);
+            File.Copy(file, target, true);
+            ok = true;
+            return "Exported to:\n" + target + "\n\nThis is a plain cartridge save (" + size + " bytes). Rename it to match your ROM if your emulator or flash cart needs that.";
+        }
+        string fileName = "sav.dat";
+        string secure = null;
+        if (g.IsDs) {
+            if (backup == null) return "DS saves need a Checkpoint backup of this game, because Checkpoint names the file after the game on your 3DS. Back the game up in Checkpoint, copy that folder to this PC and choose it.";
+            fileName = Directory.GetFiles(backup, "*.sav").Select(Path.GetFileName).FirstOrDefault();
+            if (fileName == null) return "That folder has no .sav file, so it isn't a Checkpoint backup of a DS game.";
+        } else if (g.Console != "Game Boy" && g.Console != "Game Boy Color") {
+            return "Game Boy Advance games aren't on the 3DS as Virtual Console, so Checkpoint can't restore them. Use a plain .sav for flash carts or open_agb_firm.";
+        }
+        if (backup != null) {
+            string reference = Path.Combine(backup, fileName);
+            if (!File.Exists(reference)) return "That folder has no " + fileName + ", so it isn't a Checkpoint backup of this game.";
+            long expected = new FileInfo(reference).Length;
+            if (expected != size) return "Sizes don't match, so nothing was exported: your 3DS backup is " + expected + " bytes and this save is " + size + ". It could report as corrupted on the 3DS. Check that the backup is of the same game and region.";
+            string sv = Path.Combine(backup, "SecureValue");
+            if (File.Exists(sv)) secure = sv;
+        }
+        // Virtual Console saves are 32 KB, plus a 16-byte clock on Crystal. Anything longer carries another emulator's clock.
+        if (!g.IsDs && size != 32768 && size != 32784)
+            return "This save came from another emulator: at " + size + " bytes it has that emulator's clock on the end, and Virtual Console expects 32768 or 32784. It could report as corrupted on the 3DS, so nothing was exported. A plain .sav still works everywhere else.";
+        string folder = Path.Combine(outFolder, "nativeMons-" + g.Id);
+        Directory.CreateDirectory(folder);
+        File.Copy(file, Path.Combine(folder, fileName), true);
+        if (secure != null) File.Copy(secure, Path.Combine(folder, "SecureValue"), true);
+        ok = true;
+        return "Exported to:\n" + folder + "\n\nTo restore it:\n1. Over FTP, copy this folder to /3ds/Checkpoint/saves/<your game's folder>/, with the FTP client in binary mode.\n2. Check " + fileName + " on the 3DS is " + size + " bytes.\n3. In Checkpoint, select this backup, choose Restore, then start the game."
+            + (backup == null ? "\n\nNo 3DS backup was given to compare with, so the size wasn't checked." : "") + "\n\nBack up your 3DS save first.";
+    }
+    Page ExportGamesPage() {
+        var p = new Page { Title = "Export saves: which game?" };
+        foreach (var game in Library.Games.Where(x => x.Playable)) {
+            var g = game;
+            p.Items.Add(new Item(g.Title, "", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898', Theme = g.Theme, Info = "Uses this game's save from " + GameEntry.EngineName(g.Engine()) + "." });
+        }
+        return p;
+    }
+    Page ExportPage(GameEntry g) {
+        var p = new Page { Title = "Export " + g.Title, Theme = g.Theme };
+        p.Items.Add(new Item("Plain .sav file", "", true, delegate { RunExport(g, false, null); }) { Icon = '\uE898', Info = "For emulators, flash carts and PKHeX." });
+        bool vc = g.Console == "Game Boy" || g.Console == "Game Boy Color";
+        if (vc) p.Items.Add(new Item("3DS Virtual Console", "", true, delegate { RunExport(g, true, null); }) { Icon = '\uE898', Info = "Makes a Checkpoint folder holding sav.dat, for restoring to the 3DS over FTP." });
+        if (vc || g.IsDs) p.Items.Add(new Item(g.IsDs ? "3DS, from a backup" : "3DS, matched to a backup", "", true, delegate { RunExport(g, true, PickFolder("Choose a Checkpoint backup of " + g.Title + " from your 3DS")); }) { Icon = '\uE898', Info = g.IsDs ? "Uses a Checkpoint backup of this game for the exact file name and size. Make one on your 3DS first and copy it to this PC." : "The safest way: checks the size against a Checkpoint backup of this game and copies its SecureValue." });
+        return p;
+    }
+    string PickFolder(string prompt) {
+        using (var d = new FolderBrowserDialog { Description = prompt }) return d.ShowDialog(this) == DialogResult.OK ? d.SelectedPath : null;
+    }
+    void RunExport(GameEntry g, bool checkpoint, string backup) {
+        string outFolder = PickFolder("Where should the export go?");
+        if (outFolder == null) return;
+        string message = null; bool ok = false;
+        Busy("Exporting " + g.Title, delegate { message = ExportSave(g, checkpoint, outFolder, backup, out ok); return null; }, delegate(string e) { ShowText(e == null && ok ? "Exported" : "Not exported", e ?? message, null); });
+    }
+
+    // ---------- importing saves ----------
+    class FoundSave { public string File, Note; public GameEntry Game; }
+    // What PKHeX calls each kind of save, and the games it can belong to.
+    static readonly Dictionary<string, string[]> SaveKinds = new Dictionary<string, string[]> {
+        { "RD", new[] { "red" } }, { "GN", new[] { "blue" } }, { "BU", new[] { "blue" } }, { "YW", new[] { "yellow" } }, { "RB", new[] { "red", "blue" } }, { "RBY", new[] { "red", "blue", "yellow" } },
+        { "GD", new[] { "gold" } }, { "SI", new[] { "silver" } }, { "GS", new[] { "gold", "silver" } }, { "C", new[] { "crystal" } },
+        { "R", new[] { "ruby" } }, { "S", new[] { "sapphire" } }, { "RS", new[] { "ruby", "sapphire" } }, { "E", new[] { "emerald" } }, { "FR", new[] { "firered" } }, { "LG", new[] { "leafgreen" } }, { "FRLG", new[] { "firered", "leafgreen" } },
+        { "HG", new[] { "heartgold" } }, { "SS", new[] { "soulsilver" } }, { "HGSS", new[] { "heartgold", "soulsilver" } }, { "Pt", new[] { "platinum" } },
+        { "B", new[] { "black" } }, { "W", new[] { "white" } }, { "BW", new[] { "black", "white" } }, { "B2", new[] { "black2" } }, { "W2", new[] { "white2" } }, { "B2W2", new[] { "black2", "white2" } } };
+    // The game a save's name or neighbouring ROM points to.
+    static GameEntry GameByName(string file) {
+        string stem = Path.Combine(Path.GetDirectoryName(file), Path.GetFileNameWithoutExtension(file));
+        foreach (var g in Library.Games)
+            foreach (var rom in new[] { g.Gen1Rom, g.FulldexRom, g.FoundUnsupported })
+                if (rom != null && string.Equals(Path.Combine(Path.GetDirectoryName(rom), Path.GetFileNameWithoutExtension(rom)), stem, StringComparison.OrdinalIgnoreCase)) return g;
+        string name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file).ToLowerInvariant().Replace(" version", ""), "[^a-z0-9]+", " ");
+        return Library.Games.Where(g => (" " + name + " ").Contains(" " + g.Title.Replace("Pokemon ", "").ToLowerInvariant() + " ")).OrderByDescending(g => g.Title.Length).FirstOrDefault();
+    }
+    // Reads the save itself. When its contents and its name disagree, its contents win, and the player is told.
+    static FoundSave Identify(string file) {
+        int code; string o = Bridge("info \"" + file + "\"", out code);
+        if (code != 0) return null;
+        var f = o.Trim().Split('\t');
+        if (f.Length < 3) return null;
+        string[] kinds;
+        var named = GameByName(file);
+        if (!SaveKinds.TryGetValue(f[1], out kinds)) return new FoundSave { File = file, Note = "This is a " + f[1] + " save, and no game here can use it." };
+        if (named != null && kinds.Contains(named.Id)) return new FoundSave { File = file, Game = named };
+        var game = kinds.Select(id => Library.Games.Find(g => g.Id == id)).FirstOrDefault(g => g != null && g.Playable) ?? Library.Games.Find(g => g.Id == kinds[0]);
+        var save = new FoundSave { File = file, Game = game };
+        if (named != null) save.Note = "It's named for " + named.Title + ", but it's really a " + (game != null ? game.Title : f[1]) + " save.";
+        return save;
+    }
+    static List<string> SaveFolders() {
+        var folders = Config.RomFolders();
+        string extra = Path.Combine(Config.State, "save-folders.txt");
+        if (File.Exists(extra)) folders.AddRange(File.ReadAllLines(extra).Where(x => x.Trim() != ""));
+        return folders.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+    void OpenImportSaves() {
+        var found = new List<FoundSave>();
+        Busy("Looking for saves", delegate {
+            foreach (var folder in SaveFolders()) {
+                if (!Directory.Exists(folder)) continue;
+                string[] files;
+                try { files = Directory.GetFiles(folder, "*.sav", SearchOption.AllDirectories); } catch { continue; }
+                foreach (var file in files) {
+                    if (file.IndexOf("backup", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    var save = Identify(file);
+                    if (save != null) found.Add(save);
+                }
+            }
+            return null;
+        }, delegate(string e) {
+            if (e != null) { ShowText("Import saves", e, null); return; }
+            var p = new Page { Title = "Import saves" };
+            foreach (var one in found) p.Items.Add(SaveRow(one));
+            p.Items.Add(new Item("Choose a file", "", true, delegate { ChooseSaveFile(); }) { Icon = '\uE8E5', Info = "Pick any .sav file. It's read to work out which game it belongs to." });
+            p.Items.Add(new Item("Add a save folder", "", true, delegate { AddSaveFolder(); }) { Icon = '\uE710', Info = "Also search another folder, such as another emulator's saves. Your ROM folders are always searched." });
+            pages.Push(p);
+        });
+    }
+    Item SaveRow(FoundSave one) {
+        bool ready = one.Game != null && one.Game.Playable;
+        string title = one.Game != null ? one.Game.Title : "Unknown game";
+        string info = !ready ? (one.Game == null ? "" : "Its ROM isn't in your ROM folders, so there's nowhere to put it yet. ") : "Copies it to " + GameEntry.EngineName(one.Game.Engine()) + ". The file here isn't changed. ";
+        var it = new Item(title, "", ready, delegate { ImportSave(one); }) { Icon = '\uE896', Info = info + (one.Note ?? ""), Records = new[] { "File: " + Path.GetFileName(one.File), "Folder: " + Path.GetDirectoryName(one.File) } };
+        if (one.Game != null) it.Theme = one.Game.Theme;
+        return it;
+    }
+    void ChooseSaveFile() {
+        using (var d = new OpenFileDialog { Filter = "Cartridge save (*.sav)|*.sav|All files (*.*)|*.*", Title = "Choose a save" }) {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            FoundSave save = null; string file = d.FileName;
+            Busy("Reading the save", delegate { save = Identify(file); return null; }, delegate(string e) {
+                if (e != null || save == null) { ShowText("Can't read that save", e ?? "PKHeX doesn't recognise this file as a save.", null); return; }
+                if (save.Game == null || !save.Game.Playable) { ShowText("Can't import that save", (save.Note ?? "") + " Its game isn't in your ROM folders.", null); return; }
+                ImportSave(save);
+            });
+        }
+    }
+    void AddSaveFolder() {
+        using (var d = new FolderBrowserDialog { Description = "Choose a folder with your saves" }) {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            string extra = Path.Combine(Config.State, "save-folders.txt");
+            File.AppendAllText(extra, d.SelectedPath + Environment.NewLine);
+            pages.Pop();
+            OpenImportSaves();
+        }
+    }
+    void ImportSave(FoundSave one) {
+        var g = one.Game;
+        if (g.Engine() != "fulldex") {
+            // A new save slot: anything already there is kept.
+            Action run = delegate {
+                string problem = null;
+                Busy("Importing " + g.Title, delegate { problem = ImportBack(g, one.File); return null; }, delegate(string e) { ImportDone(g, e ?? problem); });
+            };
+            if (!g.Imported) Import(g, run); else run();
+            return;
+        }
+        string target = Path.Combine(Config.FulldexDir, "saves", g.Save);
+        if (!File.Exists(target)) { CopyInSave(g, one.File, target); return; }
+        var p = new Page { Title = "Replace your " + g.Title + " save?", Body = "There's already a Fulldex save for this game. It'll be copied to save-backups first, so it can be restored.\n\n" + (one.Note ?? ""), Theme = g.Theme };
+        p.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
+        p.Items.Add(new Item("Replace it", "", true, delegate { pages.Pop(); CopyInSave(g, one.File, target); }) { Icon = '\uE896' });
+        pages.Push(p);
+    }
+    void CopyInSave(GameEntry g, string file, string target) {
+        try {
+            if (File.Exists(target)) {
+                string backups = Path.Combine(Config.State, "save-backups");
+                Directory.CreateDirectory(backups);
+                File.Copy(target, Path.Combine(backups, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-replaced-" + Path.GetFileName(target)), true);
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.Copy(file, target, true);
+            ImportDone(g, null);
+        } catch (Exception x) { ImportDone(g, x.Message); }
+    }
+    void ImportDone(GameEntry g, string problem) {
+        ShowText(problem == null ? "Imported" : "Not imported", problem ?? "Your save is ready in " + g.Title + ". It now counts in My Collection and Move Pokemon.", null);
+    }
+
     // Every installed game adds the entries it has, counted once however many games share them, and every save adds what it has caught.
     void OpenCollection() {
         var caughtBy = new Dictionary<GameEntry, HashSet<int>>();
@@ -654,7 +852,7 @@ class LauncherForm : Form {
             foreach (var g in games) {
                 bool has = caughtBy.ContainsKey(g);
                 var it = new Item(g.Title + ": " + (has ? caughtBy[g].Count + " of " + g.Dex : "no save"), "", has, null) { Icon = '\uE7FC', Theme = g.Theme };
-                it.Info = has ? "Caught in this save, out of the " + g.Dex + " entries in this game." : "Not started: it counts towards the total entries, but has nothing caught yet.";
+                it.Info = has ? "Caught in this save, out of the " + g.Dex + " entries in this game." : "No save here yet. It still adds its entries to the total. Bring one in with Settings > Import saves.";
                 if (has) {
                     int only = caughtBy[g].Count(n => !caughtBy.Where(o => o.Key != g).Any(o => o.Value.Contains(n)));
                     it.Records = new[] { "Only here: " + only };
@@ -697,6 +895,7 @@ class LauncherForm : Form {
             }) { Icon = '' });
         }
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
+        p.Items.Add(new Item("Export save", "Send it to a 3DS, flash cart or emulator.", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898' });
         p.Items.Add(new Item("Open in PKHeX", "View or edit this game's save in PKHeX.", true, delegate { OpenInPkhex(g); }) { Icon = '\uE70F' });
         if (engine != "fulldex") p.Items.Add(new Item("Bring back the edited save", "Takes the save you edited in PKHeX. Your older save slots stay.", true, delegate { BringBack(g); }) { Icon = '\uE896' });
         if (g.Imported && g.Gen1Rom != null) p.Items.Add(new Item("Prepare again", "Rebuilds the game data from your ROM. Saves are kept.", true, delegate { Import(g, null); }) { Icon = '' });
@@ -1850,7 +2049,6 @@ class LauncherForm : Form {
         using (var b = new SolidBrush(Line)) g.FillEllipse(b, cx - r * 1.1f, cy - r * 1.06f, r * 2.2f, r * 2.26f);
         using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(area, Mix(c, Color.White, hoverPrompt == key ? 0.45f : 0.2f), Mix(c, Color.Black, 0.18f), 90f)) g.FillEllipse(b, area);
         Write(g, key, itemBold, Color.FromArgb(16, 18, 24), area, StringAlignment.Center, StringAlignment.Center, false);
-        Write(g, label, smallBold, th.Ink, new RectangleF(cx - r * 1.6f, cy + r * 1.1f, r * 3.2f, smallBold.Height * 1.3f), StringAlignment.Center, StringAlignment.Near, false);
     }
     void HardKey(Graphics g, RectangleF r, string key, string glyph) {
         promptHits.Add(new KeyValuePair<RectangleF, string>(r, key));
@@ -2155,6 +2353,17 @@ static class NativeMonsLauncher {
     static void Main(string[] argv) {
         Application.EnableVisualStyles();
         Config.Load();
+        // --export <game id> <plain|checkpoint> <folder> [checkpoint backup]: exports without opening the window; the result goes in <folder>\export-result.txt.
+        if (argv.Length >= 4 && argv[0] == "--export") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var game = Library.Games.Find(x => x.Id == argv[1]);
+            bool done = false;
+            string result = game == null || !game.Playable ? "That game isn't available." : LauncherForm.ExportSave(game, argv[2] == "checkpoint", argv[3], argv.Length > 4 ? argv[4] : null, out done);
+            Directory.CreateDirectory(argv[3]);
+            File.WriteAllText(Path.Combine(argv[3], "export-result.txt"), (done ? "ok\n" : "failed\n") + result);
+            Environment.ExitCode = done ? 0 : 2;
+            return;
+        }
         if (argv.Length >= 2 && argv[0] == "--snapshot") {
             var form = new LauncherForm();
             int sw = 600, sh = 1000;
