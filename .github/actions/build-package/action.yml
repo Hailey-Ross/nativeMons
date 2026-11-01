@@ -61,6 +61,10 @@ runs:
       shell: pwsh
       run: dotnet publish tools\mon-bridge\MonBridge.csproj -c Release -o dist\nativeMons\tools\mon-bridge
 
+    - name: Build the OpenHome converter
+      shell: pwsh
+      run: tools\openhome-bridge\build.ps1 -Out dist\nativeMons\tools\openhome -Work openhome-work
+
     - name: Check the package
       shell: pwsh
       run: |
@@ -68,4 +72,7 @@ runs:
         if ($bad) { $bad.FullName; throw "Game data in the package" }
         foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
           if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }
+        }
+        foreach ($p in 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe') {
+          if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
         }

@@ -73,6 +73,8 @@ static class Config {
     public static string Love { get { return Get("love", @"love\lovec.exe"); } }
     public static string Gen1 { get { return Get("gen1recomp", @"engines\gen1recomp"); } }
     public static string Fulldex { get { return Get("fulldex", @"engines\fulldex\Pokemon Fulldex.exe"); } }
+    public static string Node { get { return Get("node", @"tools\openhome\node.exe"); } }
+    public static string OpenHomeTool { get { return Get("openhome", @"tools\openhome\convert.cjs"); } }
     public static string PlatinumPort { get { return Get("pokeplatinum", @"engines\pokeplatinum\main.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
@@ -373,9 +375,52 @@ static class GameArt {
         }
         foreach (var t in thumbs) t.Dispose();
     }
-    public static bool CanCapture(GameEntry g) { return g.ArtFrame > 0 && g.IsDs && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom); }
+    public static bool CanCapture(GameEntry g) {
+        if (g.IsDs) return g.ArtFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom);
+        return g.Gen1 != null && g.Imported;
+    }
+    // Game Boy and GBA games: Gen1Recomp shows its own title screen in a window kept out of sight, with the sound off. A single
+    // screen has no logo half to sort, and whatever surrounds the game in the window is cut away.
+    static string CaptureGen1(GameEntry g) {
+        string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
+        try {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            Directory.CreateDirectory(temp);
+            var psi = LauncherForm.Gen1Start("");
+            psi.EnvironmentVariables["POKEPORT_VERSION"] = g.Gen1;
+            psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
+            psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TitleArt.lua";
+            psi.EnvironmentVariables["NATIVEMONS_TITLE_ART"] = temp.Replace('\\', '/');
+            using (var p = Process.Start(psi)) {
+                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                p.BeginOutputReadLine(); p.BeginErrorReadLine();
+                if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
+            }
+            var shots = Directory.GetFiles(temp, "*.png").OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            if (shots.Length != Count) return "Only " + shots.Length + " pictures came out.";
+            int left = int.MaxValue, top = int.MaxValue, right = 0, bottom = 0, width = 0, height = 0;
+            foreach (var file in shots) using (var pic = new Bitmap(file)) {
+                width = pic.Width; height = pic.Height;
+                for (int y = 0; y < pic.Height; y += 2) for (int x = 0; x < pic.Width; x += 2) {
+                    var c = pic.GetPixel(x, y);
+                    if (c.R + c.G + c.B > 24) { left = Math.Min(left, x); top = Math.Min(top, y); right = Math.Max(right, x); bottom = Math.Max(bottom, y); }
+                }
+            }
+            if (left >= right || top >= bottom) return "The title screen came out blank.";
+            var area = Rectangle.FromLTRB(left, top, Math.Min(width, right + 2), Math.Min(height, bottom + 2));
+            Directory.CreateDirectory(Folder(g.Id));
+            var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+            var quality = new System.Drawing.Imaging.EncoderParameters(1);
+            quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
+            for (int i = 0; i < Count; i++) using (var pic = new Bitmap(shots[i])) using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(FrameFile(g.Id, i), jpeg, quality);
+            if (g.Theme != null) Dress(g.Theme);
+            return null;
+        } catch (Exception x) { return x.Message; }
+        finally { try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+    }
     // Null when done, or why not. It uses no save, at low priority, and the ROM is only read.
     public static string Capture(GameEntry g) {
+        if (!g.IsDs) return CaptureGen1(g);
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
         try {
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
@@ -749,6 +794,8 @@ static class SaveGuard {
     public static string Bridge(string args, out int code) {
         var psi = new ProcessStartInfo(Config.MonBridge, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
         psi.EnvironmentVariables["NATIVEMONS_ORIGINALS"] = Path.Combine(Config.State, "pokemon-originals");
+        psi.EnvironmentVariables["NATIVEMONS_NODE"] = Config.Node;
+        psi.EnvironmentVariables["NATIVEMONS_OPENHOME"] = Config.OpenHomeTool;
         using (var p = Process.Start(psi)) {
             var e = p.StandardError.ReadToEndAsync(); var o = p.StandardOutput.ReadToEndAsync();
             if (!p.WaitForExit(60000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
@@ -934,7 +981,7 @@ class LauncherForm : Form {
     }
 
     // ---------- the engines ----------
-    static ProcessStartInfo Gen1Start(string args) {
+    public static ProcessStartInfo Gen1Start(string args) {
         var psi = new ProcessStartInfo(Config.Love, "\"" + Config.Gen1 + "\"" + args) {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Config.Gen1,
             RedirectStandardOutput = true, RedirectStandardError = true };
@@ -2040,7 +2087,7 @@ class LauncherForm : Form {
         return new Page { Title = "Credits", Body = Gen1Credit
             + "\n\nPokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
-            + "\n\nOpen in OpenHome uses your own copy of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome)."
+            + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
@@ -2212,7 +2259,7 @@ class LauncherForm : Form {
             RunMove(from, file, box, slot, name, to, target, opts);
         }) { Icon = '\uE72C' };
         p.Items.Add(retry);
-        if (forced) p.Items.Add(new Item("About this move", "", false, null) { Icon = '\uE946', Info = "No real transfer exists here, so it is copied by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal. Its original data is kept, and comes back when it returns to its own generation." });
+        if (forced) p.Items.Add(new Item("About this move", "", false, null) { Icon = '\uE946', Info = "No real transfer exists here, so OpenHome's converter makes the copy. Its form, ball and origin may change, and PKHeX may flag it as not legal. Its original data is kept, and comes back when it returns to its own generation." });
         refresh();
         return p;
     }

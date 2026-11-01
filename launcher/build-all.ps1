@@ -110,7 +110,19 @@ $bridgeOut = Join-Path $out 'tools\mon-bridge'
 & dotnet publish $bridgeProject -c Release -m:4 -v q -o $bridgeOut "-p:BaseIntermediateOutputPath=$work/obj/" "-p:BaseOutputPath=$work/bin/"
 if ($LASTEXITCODE -ne 0) { throw 'mon-bridge did not build.' }
 
-Step 'Checking the result'
+# Optional: without it, moves that need a hand copy still work, with the simpler copy built into mon-bridge.
+Step 'OpenHome converter'
+$converter = Join-Path $out 'tools\openhome'
+$tools = 'git', 'node', 'corepack', 'rustup' | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
+if ($tools) { Write-Host "Skipped: needs $($tools -join ', '). Moves use the simpler copy." }
+else {
+    $openHomeWork = Join-Path $work 'openhome'
+    try { & (Join-Path $repo 'tools\openhome-bridge\build.ps1') -Out $converter -Work $openHomeWork }
+    catch { Write-Host "Skipped: $($_.Exception.Message) Moves use the simpler copy." }
+    Set-Location $repo
+}
+
+Step 'Checking the result\'
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
 foreach ($needed in 'NativeMonsLauncher.exe', 'games.json', 'love\lovec.exe', 'engines\gen1recomp\main.lua', 'engines\fulldex\Pokemon Fulldex.exe', 'engines\pokeplatinum\main.exe', 'tools\nds-patcher\hails_patcher.py', 'tools\mon-bridge\mon-bridge.exe') {
     if (-not (Test-Path -LiteralPath (Join-Path $out $needed))) { throw "Missing from the build: $needed" }
