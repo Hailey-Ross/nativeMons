@@ -629,18 +629,86 @@ class LauncherForm : Form {
         var p = new Page { Title = "Move " + name + " to...", Theme = from.Theme };
         foreach (var game in Library.Games.Where(x => x.Playable && x != from)) {
             var g = game;
-            p.Items.Add(new Item(g.Title, "", true, delegate { MoveNow(from, file, box, slot, name, g); }) { Icon = '', Theme = g.Theme, Info = "Moves it to the first free PC box slot. PKHeX decides whether that's possible: some moves between generations can't be done." });
+            p.Items.Add(new Item(g.Title, "", true, delegate { MoveNow(from, file, box, slot, name, g); }) { Icon = '', Theme = g.Theme, Info = "Moves it to the first free PC box slot. If something stands in the way, you'll be asked how to resolve it." });
         }
         return p;
     }
+    // First ask what stands in the way. Anything the player must decide goes on a page; a clean move just happens.
     void MoveNow(GameEntry from, string file, string box, string slot, string name, GameEntry to) {
         string running = RunningGames();
         if (running != "") { ShowText("Close the game first", "Already running: " + running + ". Saves can't change while it plays.", null); return; }
+        string plan = null, target = null, why = null; int planCode = 0;
+        Busy("Checking " + name, delegate {
+            target = SaveOf(to, out why);
+            if (target == null) return null;
+            plan = Bridge("plan \"" + file + "\" " + box + " " + slot + " \"" + target + "\"", out planCode);
+            return null;
+        }, delegate(string e) {
+            if (e != null || target == null) { ShowText("Not moved", e ?? why, null); return; }
+            var rows = plan.Split('\n').Select(l => l.TrimEnd('\r').Split('\t')).Where(f => f[0] != "").ToList();
+            if (planCode != 0) { var n = rows.Find(f => f[0] == "nope"); ShowText("Not moved", n != null && n.Length > 1 ? n[1] : plan.Trim(), null); return; }
+            bool forced = rows.Exists(f => f[0] == "forced");
+            if (!forced && !rows.Exists(f => f[0] == "conflict")) { RunMove(from, file, box, slot, name, to, target, ""); return; }
+            pages.Push(ResolvePage(from, file, box, slot, name, to, target, rows, forced));
+        });
+    }
+    // A blocked move: the player deletes or changes each conflict, then retries.
+    Page ResolvePage(GameEntry from, string file, string box, string slot, string name, GameEntry to, string target, List<string[]> rows, bool forced) {
+        var p = new Page { Title = name + " to " + to.Title.Replace("Pokemon ", ""), Theme = to.Theme };
+        var answers = new Dictionary<string, string>();   // move number -> new id, "0" deletes
+        var kept = rows.Count(f => f[0] == "ok");
+        var conflicts = rows.Where(f => f[0] == "conflict").ToList();
+        var item = rows.Find(f => f[0] == "item");
+        bool dropItem = false;
+        Item retry = null;
+        Action refresh = delegate {
+            int left = kept + conflicts.Count(c => answers.ContainsKey(c[1]) && answers[c[1]] != "0");
+            bool done = conflicts.All(c => answers.ContainsKey(c[1])) && (item == null || dropItem);
+            retry.On = done && left > 0;
+            retry.Hint = !done ? "Decide each conflict first." : left == 0 ? "It needs at least one move: change one instead of deleting it." : "";
+            retry.Info = retry.Hint != "" ? retry.Hint : "Moves it with your choices. Both saves are backed up first.";
+        };
+        foreach (var c in conflicts) {
+            string number = c[1], moveName = c[2];
+            Item it = null;
+            it = new Item(moveName + ": decide", "", true, delegate {
+                var choice = new Page { Title = moveName + " doesn't exist in " + to.Title.Replace("Pokemon ", ""), Theme = to.Theme };
+                choice.Items.Add(new Item("Delete this move", "", true, delegate { answers[number] = "0"; it.Text = moveName + ": delete"; refresh(); pages.Pop(); }) { Icon = '\uE74D', Info = "It leaves with one move fewer." });
+                choice.Items.Add(new Item("Change it to...", "", true, delegate { pages.Push(ChangeMovePage(to, target, delegate(string id, string newName) { answers[number] = id; it.Text = moveName + " to " + newName; refresh(); pages.Pop(); pages.Pop(); })); }) { Icon = '\uE70F', Info = "Pick any move from that game." });
+                pages.Push(choice);
+            }) { Icon = '\uE8AB', Info = "This move doesn't exist in that game. Delete it, or change it to another move." };
+            p.Items.Add(it);
+        }
+        if (item != null) {
+            Item it = null;
+            it = new Item("Remove " + item[1] + "?", "", true, delegate { dropItem = !dropItem; it.Text = dropItem ? item[1] + ": remove" : "Remove " + item[1] + "?"; refresh(); }) { Icon = '\uE74D', Info = "Held items can't cross between these games. Select to agree to removing it." };
+            p.Items.Add(it);
+        }
+        retry = new Item("Retry the move", "", false, delegate {
+            pages.Pop();
+            string opts = string.Join(" ", answers.Select(a => "move:" + a.Key + ":" + a.Value).ToArray()) + (dropItem ? " dropitem" : "");
+            RunMove(from, file, box, slot, name, to, target, opts);
+        }) { Icon = '\uE72C' };
+        p.Items.Add(retry);
+        if (forced) p.Items.Add(new Item("About this move", "", false, null) { Icon = '\uE946', Info = "No real transfer exists here, so it is copied by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal." });
+        refresh();
+        return p;
+    }
+    Page ChangeMovePage(GameEntry to, string target, Action<string, string> chosen) {
+        var p = new Page { Title = "Change to which move?", Theme = to.Theme };
+        int code; string list = Bridge("moves \"" + target + "\"", out code);
+        foreach (var row in list.Split('\n')) {
+            var f = row.TrimEnd('\r').Split('\t');
+            if (f.Length < 2) continue;
+            string id = f[0], n = f[1];
+            p.Items.Add(new Item(n, "", true, delegate { chosen(id, n); }) { Icon = '\uE8AB', Info = "Use " + n + " instead." });
+        }
+        return p;
+    }
+    void RunMove(GameEntry from, string file, string box, string slot, string name, GameEntry to, string target, string options) {
         string message = null; bool ok = false;
         Busy("Moving " + name, delegate {
-            string why, target = SaveOf(to, out why);
-            if (target == null) { message = why; return null; }
-            int code; string o = Bridge("move \"" + file + "\" " + box + " " + slot + " \"" + target + "\" \"" + Path.Combine(Config.State, "save-backups") + "\"", out code);
+            int code; string o = Bridge("move \"" + file + "\" " + box + " " + slot + " \"" + target + "\" \"" + Path.Combine(Config.State, "save-backups") + "\" " + options, out code);
             var f = o.Trim().Split('\t');
             if (code != 0) { message = f.Length > 1 ? f[1] : o.Trim(); return null; }
             // Destination first: any failure after this duplicates the Pokemon, it never loses it.
