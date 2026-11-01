@@ -292,6 +292,30 @@ static class Program
     }
     static bool from2(PKM p) => p.Format <= 2;
 
+    // OpenHome's converter (tools/openhome-bridge), which keeps more than ForceCopy can. Null when it isn't there, fails, or
+    // gives back anything but this Pokemon in the right format, and the caller falls back to ForceCopy.
+    static PKM? OpenHomeCopy(PKM pk, SaveFile to)
+    {
+        string? node = Environment.GetEnvironmentVariable("NATIVEMONS_NODE"), tool = Environment.GetEnvironmentVariable("NATIVEMONS_OPENHOME");
+        if (string.IsNullOrEmpty(node) || string.IsNullOrEmpty(tool) || !File.Exists(node) || !File.Exists(tool)) return null;
+        string input = Path.GetTempFileName(), output = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(input, pk.Data.ToArray());
+            var start = new System.Diagnostics.ProcessStartInfo(node) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
+            foreach (var a in new[] { tool, pk.Extension, input, to.BlankPKM.Extension, output }) start.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(start)!;
+            var quiet = p.StandardError.ReadToEndAsync(); var quieter = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } return null; }
+            if (p.ExitCode != 0) return null;
+            var made = EntityFormat.GetFromBytes(File.ReadAllBytes(output), to.Context);
+            if (made is null || made.GetType() != to.PKMType || made.Species != pk.Species) return null;
+            return made;
+        }
+        catch { return null; }
+        finally { try { File.Delete(input); File.Delete(output); } catch { } }
+    }
+
     static int Move(string fromPath, int box, int slot, string toPath, string backups, string[] options)
     {
         var from = Open(fromPath);
@@ -323,7 +347,12 @@ static class Program
         var work = Task.Run(() =>
         {
             PKM? converted;
-            if (force) converted = ForceCopy(pk, to);
+            if (force)
+            {
+                converted = OpenHomeCopy(pk, to);
+                Console.Error.WriteLine(converted is null ? "converter: hand copy" : "converter: OpenHome");
+                converted ??= ForceCopy(pk, to);
+            }
             else
             {
                 converted = EntityConverter.ConvertToType(pk, to.PKMType, out var result);

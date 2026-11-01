@@ -25,7 +25,7 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 
 ## What's in it
 
-- **One launcher** for every game, shaped like a handheld device, taking on each version's colours. DS games show their own animated title screen, captured from your ROM on your PC, and others have a scene of their own.
+- **One launcher** for every game, shaped like a handheld device, taking on each version's colours. Games show their own animated title screen, captured from your ROM on your PC. A game without one yet has a scene of its own.
 - **Several saves per game**, each with a name you choose. Switch, copy, rename or delete them from a game's page, and import saves with their trainer, play time, badges and party shown first.
 - **My Collection:** the different Pokémon you've caught across all your saves, counting each once, against the Pokédex entries your games cover.
 - **Move Pokémon** between games from their PC boxes, using PKHeX.Core, with both saves backed up first. If attacks or a held item stand in the way, you choose what to delete or change, then retry. A Pokémon copied by hand keeps its original data, which comes back when it returns to its own generation.
@@ -47,9 +47,9 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 ## Known issues
 
 - **Shared saves:** a save with Gen1Recomp mod content may not pass the conversion check, in which case the two stay separate and the launcher tells you. Quicksaves and save states aren't shared, only in-game saves. Not yet played back and forth by hand.
-- **Hand-copied Pokémon:** moves with no real transfer between the games, such as Gen 5 to Gen 3, copy the Pokémon across by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal. Try one in battle before relying on it.
+- **Cross-generation moves:** moves with no real transfer between the games, such as Gen 5 to Gen 3, use OpenHome's converter. Form, ball and origin may change, and PKHeX may flag the result as not legal. Try one in battle before relying on it.
 - **Platinum PC port:** experimental, from its own project. Sharing a save with Fulldex has only been tried on early saves, so keep a backup. Report problems here first.
-- **Title screens:** only for DS games so far, and not for encrypted ROMs until they're patched.
+- **Title screens:** not for encrypted DS ROMs until they're patched, and Game Boy and GBA games only once they've been prepared by playing them with Gen1Recomp.
 - **3DS export:** only part of this has been tried on a real 3DS. Game Boy saves from another emulator can't be exported for Virtual Console, because they carry that emulator's clock.
 - **Gen1Recomp launcher features** with no replacement yet: carts, box tools, skins and mod asset-pack import. Online play is removed.
 - **My Collection** counts National Dex entries, so the total is the largest Pokédex among your games.

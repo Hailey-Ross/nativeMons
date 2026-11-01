@@ -11,6 +11,24 @@ through its own engine, and the engines stay forks that keep pulling their upstr
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
 
+## Supported games
+
+| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port |
+|---|---|:-:|:-:|:-:|
+| 1 | Red, Blue, Yellow | ✓ | | |
+| 2 | Gold, Silver, Crystal | ✓ | | |
+| 3 | Ruby, Sapphire | ✓ | | |
+| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | |
+| 4 | HeartGold, SoulSilver | | ✓ | |
+| 4 | Platinum | | ✓ | ✓ |
+| 5 | Black, White, Black 2, White 2 | | ✓ | |
+
+**Not supported yet:** Diamond and Pearl, Generation 6 and later (3DS and Switch games), and ROM hacks.
+
+Where a game has more than one engine it starts in Fulldex, and you can switch on its page. Each engine accepts certain versions of a ROM, mostly the US release: the launcher tells you if yours isn't one. Windows only for now.
+
+## What it's built from
+
 | Part | What it adds | Source |
 |---|---|---|
 | `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
@@ -64,8 +82,10 @@ on a game's page opens its save in your own copy of PKHeX.
 
 Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher fetches a Pokémon along with its whole evolution line, and works without them. **Settings > Download all sprites** downloads every picture for Generations 1 to 5, normal and shiny, for offline play.
 
+Moves with no real transfer between the games use the conversion code from [OpenHome](https://github.com/andrewbenington/OpenHome) (GPL-3.0), and PKHeX checks the result. A Pokémon that doesn't exist in the target game can't go there.
+
 ## Build and set up
-Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE and Fulldex's published Windows build. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings and saves.
+Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE and Fulldex's published Windows build. With Node and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings and saves.
 
 `launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`,
 `gen1recomp`, `fulldex`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
