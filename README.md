@@ -1,6 +1,7 @@
 # nativeMons
 
 [![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml)
+[![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
 through its own engine, and the engines stay forks that keep pulling their upstream updates.
@@ -20,7 +21,7 @@ GAME FREAK inc. or The Pokémon Company.
 
 ## Download
 - **[Bleeding edge](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
-- **Stable:** built from `main`, once a working build has been promoted there.
+- **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable):** the latest working build, from `main`.
 
 Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patching `.nds` ROMs needs Python 3.
 
