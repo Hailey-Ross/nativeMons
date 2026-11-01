@@ -35,6 +35,7 @@ static class Program
             if (args.Length == 2 && args[0] == "moves") return Moves(args[1]);
             if (args.Length == 1 && args[0] == "families") return Families();
             if (args.Length == 2 && args[0] == "check") return Check(args[1]);
+            if (args.Length == 2 && args[0] == "summary") return Summary(args[1]);
             if (args.Length == 3 && args[0] == "compare") return Compare(args[1], args[2]);
             if (args.Length == 3 && args[0] == "repair") return Repair(args[1], args[2]);
             if (args.Length == 2 && args[0] == "caught") return Caught(args[1]);
@@ -49,7 +50,35 @@ static class Program
     }
 
     static SaveFile Open(string path) =>
-        SaveUtil.GetSaveFile(path) ?? throw new InvalidDataException("Not a save this tool can read: " + Path.GetFileName(path));
+        Read(path) ?? throw new InvalidDataException("Not a save this tool can read: " + Path.GetFileName(path));
+
+    static SaveFile? Read(string path)
+    {
+        var sav = SaveUtil.GetSaveFile(path);
+        if (sav is not SAV3E) return sav;
+        var data = File.ReadAllBytes(path);
+        return HasFireRedLayout(data) ? new SAV3FRLG(data) : sav;
+    }
+
+    // PKHeX tells Gen 3 games apart by one value in the save's header, and calls anything but 0 or 1 Emerald. Some real
+    // FireRed saves hold FFFFFFFF there. The party count settles it, as it sits at a different place in each layout and a
+    // real Emerald save always has 0 to 6 at Emerald's place.
+    static bool HasFireRedLayout(byte[] data)
+    {
+        const int sectionSize = 0x1000, sectionsPerSlot = 14, signature = 0x08012025;
+        bool seen = false;
+        foreach (int slot in new[] { 0, 0xE000 })
+            for (int i = 0; i < sectionsPerSlot; i++)
+            {
+                int start = slot + i * sectionSize;
+                if (start + sectionSize > data.Length) return false;
+                if (BitConverter.ToInt32(data, start + 0xFF8) != signature || BitConverter.ToUInt16(data, start + 0xFF4) != 1) continue;
+                int fireRedCount = data[start + 0x34], emeraldCount = data[start + 0x234];
+                if (fireRedCount is < 1 or > 6 || emeraldCount <= 6) return false;
+                seen = true;
+            }
+        return seen;
+    }
 
     static string Clean(string s) => s.Replace('\t', ' ').Replace('\n', ' ').Replace('\r', ' ');
 
@@ -93,6 +122,8 @@ static class Program
         if (pk.Species == 0) return Refuse("That box slot is empty.");
         if (!SpeciesFits(pk.Species, to))
             return Refuse(GameInfo.Strings.Species[pk.Species] + " doesn't exist in " + to.Version + ", so it can't go there.");
+        // Going home to its original format: nothing to resolve, since its own moves and item come back with it.
+        if (FindOriginal(pk, to, PlanOriginals(toPath)) is not null) return 0;
         bool force = NeedsForce(from, to);
         if (force) Console.WriteLine("forced");
         var moves = new[] { pk.Move1, pk.Move2, pk.Move3, pk.Move4 };
@@ -127,10 +158,31 @@ static class Program
         return 0;
     }
 
+    // For telling saves apart: trainer, hours, minutes, badges (-1 when unknown), caught, party.
+    static int Summary(string path)
+    {
+        var sav = Open(path);
+        int badges = -1;
+        var property = sav.GetType().GetProperty("Badges");
+        if (property?.GetValue(sav) is { } value)
+        {
+            try { badges = System.Numerics.BitOperations.PopCount(Convert.ToUInt64(value)); } catch { badges = -1; }
+        }
+        int caught = sav.HasPokeDex ? Enumerable.Range(1, sav.MaxSpeciesID).Count(i => sav.GetCaught((ushort)i)) : -1;
+        var party = new List<string>();
+        for (int i = 0; i < sav.PartyCount; i++)
+        {
+            var mon = sav.GetPartySlotAtIndex(i);
+            if (mon.Species != 0) party.Add(GameInfo.Strings.Species[mon.Species] + " " + mon.CurrentLevel);
+        }
+        Console.WriteLine(string.Join('\t', Clean(sav.OT), sav.PlayedHours, sav.PlayedMinutes, badges, caught, string.Join(", ", party)));
+        return 0;
+    }
+
     // Corruption check: readable, and every checksum in it right.
     static int Check(string path)
     {
-        var sav = SaveUtil.GetSaveFile(path);
+        var sav = Read(path);
         if (sav is null) { Console.WriteLine("bad\tThis isn't a save that can be read: it may be damaged."); return 3; }
         if (!sav.ChecksumsValid) { Console.WriteLine("bad\tIts checksums are wrong: " + Clean(sav.ChecksumInfo)); return 3; }
         Console.WriteLine(string.Join('\t', "ok", sav.Version, Clean(sav.OT), Facts(sav).Count));
@@ -152,7 +204,7 @@ static class Program
         if (sav.HasPokeDex)
             facts.Add("caught " + string.Join(',', Enumerable.Range(1, sav.MaxSpeciesID).Where(i => sav.GetCaught((ushort)i))));
         foreach (var pouch in sav.Inventory.Pouches)
-            foreach (var item in pouch.Items.Where(x => x.Index != 0).OrderBy(x => x.Index))
+            foreach (var item in pouch.Items.Where(x => x.Index != 0 && x.Count != 0).OrderBy(x => x.Index))
                 facts.Add("item " + pouch.Type + " " + item.Index + " x" + item.Count);
         return facts;
     }
@@ -173,8 +225,28 @@ static class Program
     static int Repair(string from, string to)
     {
         var sav = Open(from);
-        File.WriteAllBytes(to, sav.Write().ToArray());
+        var data = sav.Write().ToArray();
+        if (sav is SAV3FRLG) MarkAsFireRed(data);
+        File.WriteAllBytes(to, data);
         return Check(to);
+    }
+
+    // Stricter readers, Gen1Recomp's among them, go by the header value alone (see HasFireRedLayout), so a repaired copy gets
+    // the value FireRed normally has. It's only ever written to the new file.
+    static void MarkAsFireRed(byte[] data)
+    {
+        const int sectionSize = 0x1000, sectionsPerSlot = 14, trainerLength = 3884;
+        foreach (int slot in new[] { 0, 0xE000 })
+            for (int i = 0; i < sectionsPerSlot; i++)
+            {
+                int start = slot + i * sectionSize;
+                if (start + sectionSize > data.Length || BitConverter.ToUInt16(data, start + 0xFF4) != 0) continue;
+                if (BitConverter.ToInt32(data, start + 0xFF8) != 0x08012025) continue;
+                BitConverter.TryWriteBytes(data.AsSpan(start + 0xAC), 1);
+                uint sum = 0;
+                for (int at = 0; at < trainerLength; at += 4) sum += BitConverter.ToUInt32(data, start + at);
+                BitConverter.TryWriteBytes(data.AsSpan(start + 0xFF6), (ushort)((sum >> 16) + sum));
+            }
     }
 
     static int Moves(string path)
@@ -228,6 +300,9 @@ static class Program
         if (pk.Species == 0) return Refuse("That box slot is empty.");
         string name = GameInfo.Strings.Species[pk.Species];
         if (!SpeciesFits(pk.Species, to)) return Refuse(name + " doesn't exist in " + to.Version + ", so it can't go there.");
+        string originals = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(backups))!, "pokemon-originals");
+        string? home = FindOriginal(pk, to, originals);
+        if (home is not null) return MoveHome(from, to, pk, box, slot, fromPath, toPath, backups, home, name);
 
         // The player's answers: move:<1-4>:<new id, 0 deletes>. dropitem agrees to losing a held item.
         var moves = new[] { pk.Move1, pk.Move2, pk.Move3, pk.Move4 };
@@ -281,6 +356,9 @@ static class Program
         File.Copy(fromPath, Path.Combine(backups, stamp + "-from-" + Path.GetFileName(fromPath)), true);
         File.Copy(toPath, Path.Combine(backups, stamp + "-to-" + Path.GetFileName(toPath)), true);
 
+        // A hand copy loses what the older game can't hold, so its full data is kept for the trip back.
+        if (force) KeepOriginal(pk, moved, originals);
+
         to.SetBoxSlotAtIndex(moved, open);
         from.SetBoxSlotAtIndex(from.BlankPKM, box, slot);
 
@@ -288,6 +366,54 @@ static class Program
         WriteSafely(toPath, to);
         WriteSafely(fromPath, from);
         Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal"));
+        return 0;
+    }
+
+    // Who a Pokemon is, whatever save it's in. Evolving doesn't change it. Game Boy formats have no personality value.
+    static string Identity(PKM p) => p.Format >= 3
+        ? "pid-" + p.PID.ToString("x8") + "-" + p.TID16
+        : "dv-" + p.IV_ATK + "." + p.IV_DEF + "." + p.IV_SPE + "." + p.IV_SPA + "-" + p.TID16;
+
+    static string PlanOriginals(string savePath) => Environment.GetEnvironmentVariable("NATIVEMONS_ORIGINALS") ?? "";
+
+    static void KeepOriginal(PKM original, PKM copy, string folder)
+    {
+        Directory.CreateDirectory(folder);
+        string file = Path.Combine(folder, Identity(copy) + "." + original.Extension);
+        File.WriteAllBytes(file + ".part", original.Data.ToArray());
+        File.Move(file + ".part", file, true);
+    }
+
+    // The kept file for this Pokemon, when it's in the format this save uses.
+    static string? FindOriginal(PKM pk, SaveFile to, string folder)
+    {
+        if (folder == "" || !Directory.Exists(folder)) return null;
+        string file = Path.Combine(folder, Identity(pk) + "." + to.BlankPKM.Extension);
+        return File.Exists(file) ? file : null;
+    }
+
+    static int MoveHome(SaveFile from, SaveFile to, PKM pk, int box, int slot, string fromPath, string toPath, string backups, string file, string name)
+    {
+        var original = EntityFormat.GetFromBytes(File.ReadAllBytes(file), to.Context);
+        if (original is null || original.GetType() != to.PKMType) return Refuse("The original copy of " + name + " couldn't be read.");
+        // What happened while it was away still counts: it may have evolved or gained levels.
+        if (pk.Species != original.Species && SpeciesFits(pk.Species, to)) original.Species = pk.Species;
+        if (pk.CurrentLevel > original.CurrentLevel) original.CurrentLevel = pk.CurrentLevel;
+        to.AdaptToSaveFile(original);
+        original.RefreshChecksum();
+        bool legal = new LegalityAnalysis(original).Valid;
+        int open = to.NextOpenBoxSlot();
+        if (open < 0) return Refuse("The boxes in " + to.Version + " are full.");
+        Directory.CreateDirectory(backups);
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        File.Copy(fromPath, Path.Combine(backups, stamp + "-from-" + Path.GetFileName(fromPath)), true);
+        File.Copy(toPath, Path.Combine(backups, stamp + "-to-" + Path.GetFileName(toPath)), true);
+        to.SetBoxSlotAtIndex(original, open);
+        from.SetBoxSlotAtIndex(from.BlankPKM, box, slot);
+        WriteSafely(toPath, to);
+        WriteSafely(fromPath, from);
+        File.Delete(file);
+        Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal") + "\trestored");
         return 0;
     }
 

@@ -23,6 +23,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         LOVE_VERSION: "11.5"
         FULLDEX_RELEASE: "pc-v1"
+        PLATINUM_RELEASE: "v0.1.13"
       run: |
         $dist = "dist\nativeMons"
         Copy-Item LICENSE, README.md $dist
@@ -42,6 +43,11 @@ runs:
         gh release download $env:FULLDEX_RELEASE -R mamesj/pokemon-fulldex -p "pokemon-ds-wide-pc-windows-x86_64.zip" -O fulldex.zip
         Expand-Archive fulldex.zip fulldex-unpacked
         Move-Item "fulldex-unpacked\pokemon-ds-wide" "$dist\engines\fulldex"
+
+        # The Platinum PC port: the program only, no game data. Those come from the player's ROM.
+        gh release download $env:PLATINUM_RELEASE -R cybervisi0n/pokeplatinum -p "release_win64.zip" -O pokeplatinum.zip
+        Expand-Archive pokeplatinum.zip "$dist\engines\pokeplatinum"
+        Copy-Item launcher\LICENSE-libntr.txt "$dist\engines\pokeplatinum"
 
         # hails.nds-Patcher.
         New-Item -ItemType Directory -Force "$dist\tools\nds-patcher" | Out-Null
