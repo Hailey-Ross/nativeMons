@@ -37,7 +37,7 @@ static class Native {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
-    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern bool ReleaseRunCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
     // Windows only lets the foreground owner hand the foreground on; joining its input for the call lifts that.
@@ -73,6 +73,7 @@ static class Config {
     public static string Gen1 { get { return Get("gen1recomp", @"engines\gen1recomp"); } }
     public static string Fulldex { get { return Get("fulldex", @"engines\fulldex\Pokemon Fulldex.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
+    public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string GamesFile { get { return Get("games", "games.json"); } }
     public static string Python { get { string v; return values.TryGetValue("python", out v) ? v : "python"; } }
     public static string FulldexDir { get { return Path.GetDirectoryName(Fulldex); } }
@@ -402,6 +403,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Mods", mods ? "Mods for the Gen1Recomp games." : "Needs a Gen1Recomp game.", mods, delegate { pages.Push(ModGamesPage()); }) { Icon = '' });
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
+        p.Items.Add(new Item("Move Pokemon", "Send a Pokemon from one game to another, using PKHeX.", File.Exists(Config.MonBridge) && have > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
         p.Items.Add(new Item("Credits", "The projects this is built from.", true, delegate { pages.Push(CreditsPage()); }) { Icon = '' });
         p.Items.Add(new Item("Last session", "How the last game ended.", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
@@ -440,6 +442,8 @@ class LauncherForm : Form {
             }) { Icon = '' });
         }
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
+        p.Items.Add(new Item("Open in PKHeX", "View or edit this game's save in PKHeX.", true, delegate { OpenInPkhex(g); }) { Icon = '\uE70F' });
+        if (engine != "fulldex") p.Items.Add(new Item("Bring back the edited save", "Takes the save you edited in PKHeX. Your older save slots stay.", true, delegate { BringBack(g); }) { Icon = '\uE896' });
         if (g.Imported && g.Gen1Rom != null) p.Items.Add(new Item("Prepare again", "Rebuilds the game data from your ROM. Saves are kept.", true, delegate { Import(g, null); }) { Icon = '' });
         if (engine == "fulldex" && Library.NeedsPatch(g.FulldexRom)) p.Items.Add(new Item("Patch this ROM", "It won't load until its secure area is decrypted.", true, delegate { pages.Push(PatchPage(g, false)); }) { Icon = '' });
         return p;
@@ -540,6 +544,7 @@ class LauncherForm : Form {
     Page CreditsPage() {
         return new Page { Title = "Credits", Body = Gen1Credit
             + "\n\nPokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
+            + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
     }
@@ -552,6 +557,125 @@ class LauncherForm : Form {
     void ShowLog(string title, string body, Action back) {
         var last = log.Skip(Math.Max(0, log.Count - 12)).ToArray();
         ShowText(title, body, back, last.Length > 0 ? string.Join("\n", last) : null);
+    }
+
+    // ---------- moving Pokemon (tools\mon-bridge, built on PKHeX.Core) ----------
+    static string RunCapture(ProcessStartInfo psi, int seconds, out int code) {
+        psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+        psi.StandardOutputEncoding = Encoding.UTF8;
+        using (var p = Process.Start(psi)) {
+            var err = p.StandardError.ReadToEndAsync();
+            var o = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(seconds * 1000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
+            code = p.ExitCode;
+            return code == 0 || o.Result.Trim() != "" ? o.Result : err.Result;
+        }
+    }
+    static string Bridge(string args, out int code) { return RunCapture(new ProcessStartInfo(Config.MonBridge, args), 60, out code); }
+    // Gen1Recomp keeps its own save format, so a cartridge .sav is exported for the move. Fulldex's are ready as they are.
+    static string SaveOf(GameEntry g, out string why) {
+        why = null;
+        if (g.Engine() == "fulldex") {
+            string f = Path.Combine(Config.FulldexDir, "saves", g.Save ?? "");
+            if (File.Exists(f)) return f;
+            why = "No Fulldex save yet for " + g.Title + ". Play and save once first.";
+            return null;
+        }
+        var psi = Gen1Start("");
+        psi.EnvironmentVariables["NATIVEMONS_CLI"] = "export " + g.Gen1;
+        int code; string o = RunCapture(psi, 60, out code).Trim();
+        if (code == 0 && o != "") return o.Split('\n').Last().Trim();
+        why = o != "" ? o : "No save yet for " + g.Title + ". Play and save once first.";
+        return null;
+    }
+    static string ImportBack(GameEntry g, string file) {
+        if (g.Engine() == "fulldex") return null;
+        var psi = Gen1Start("");
+        psi.EnvironmentVariables["NATIVEMONS_CLI"] = "import " + g.Gen1 + " " + file;
+        int code; string o = RunCapture(psi, 60, out code);
+        return code == 0 ? null : (o.Trim() != "" ? o.Trim() : "Gen1Recomp could not take the save back.");
+    }
+    Page MoveFromPage() {
+        var p = new Page { Title = "Move Pokemon: from which game?" };
+        foreach (var game in Library.Games.Where(x => x.Playable)) {
+            var g = game;
+            p.Items.Add(new Item(g.Title, "", true, delegate { OpenBoxes(g); }) { Icon = '', Theme = g.Theme, Info = "Choose a Pokemon from this game's PC boxes. Saves from " + GameEntry.EngineName(g.Engine()) + " are used.", Records = new[] { "Backups: both saves are copied first" } });
+        }
+        return p;
+    }
+    void OpenBoxes(GameEntry g) {
+        string rows = null, why = null, file = null;
+        Busy("Reading " + g.Title, delegate {
+            file = SaveOf(g, out why);
+            if (file == null) return null;
+            int code; rows = Bridge("list \"" + file + "\"", out code);
+            if (code != 0) why = rows.Trim();
+            return null;
+        }, delegate(string e) {
+            string problem = e ?? why;
+            if (problem != null) { ShowText("Can't read that save", problem, null); return; }
+            var p = new Page { Title = g.Title + ": boxes", Theme = g.Theme };
+            foreach (var row in rows.Split('\n')) {
+                var f = row.TrimEnd('\r').Split('\t');
+                if (f.Length < 6) continue;
+                string box = f[0], slot = f[1], name = f[2] + " Lv " + f[4];
+                p.Items.Add(new Item(name, "", true, delegate { pages.Push(MoveToPage(g, file, box, slot, name)); }) { Icon = '', Info = f[3] + ", from trainer " + f[5] + ".", Records = new[] { "Box: " + (int.Parse(box) + 1), "Slot: " + (int.Parse(slot) + 1) } });
+            }
+            if (p.Items.Count == 0) p.Items.Add(new Item("Boxes are empty", "Only Pokemon in the PC boxes can be moved, not your party.", false, null));
+            pages.Push(p);
+        });
+    }
+    Page MoveToPage(GameEntry from, string file, string box, string slot, string name) {
+        var p = new Page { Title = "Move " + name + " to...", Theme = from.Theme };
+        foreach (var game in Library.Games.Where(x => x.Playable && x != from)) {
+            var g = game;
+            p.Items.Add(new Item(g.Title, "", true, delegate { MoveNow(from, file, box, slot, name, g); }) { Icon = '', Theme = g.Theme, Info = "Moves it to the first free PC box slot. PKHeX decides whether that's possible: some moves between generations can't be done." });
+        }
+        return p;
+    }
+    void MoveNow(GameEntry from, string file, string box, string slot, string name, GameEntry to) {
+        string running = RunningGames();
+        if (running != "") { ShowText("Close the game first", "Already running: " + running + ". Saves can't change while it plays.", null); return; }
+        string message = null; bool ok = false;
+        Busy("Moving " + name, delegate {
+            string why, target = SaveOf(to, out why);
+            if (target == null) { message = why; return null; }
+            int code; string o = Bridge("move \"" + file + "\" " + box + " " + slot + " \"" + target + "\" \"" + Path.Combine(Config.State, "save-backups") + "\"", out code);
+            var f = o.Trim().Split('\t');
+            if (code != 0) { message = f.Length > 1 ? f[1] : o.Trim(); return null; }
+            // Destination first: any failure after this duplicates the Pokemon, it never loses it.
+            string back = ImportBack(to, target) ?? ImportBack(from, file);
+            ok = back == null;
+            message = ok ? name + " is now in " + to.Title + "'s PC boxes." + (f.Length > 2 && f[2] == "not-legal" ? "\n\nPKHeX's legality check flags it as not legal, which matters only for online play." : "") : back;
+            return null;
+        }, delegate(string e) {
+            while (pages.Count > 1) pages.Pop();
+            ShowText(ok ? "Moved" : "Not moved", e ?? message, null);
+        });
+    }
+    void BringBack(GameEntry g) {
+        using (var d = new OpenFileDialog { Filter = "Cartridge save (*.sav)|*.sav", Title = "Choose the edited save" }) {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            string file = d.FileName, problem = null;
+            Busy("Bringing back the save", delegate { problem = ImportBack(g, file); return null; }, delegate(string e) { ShowText(e == null && problem == null ? "Done" : "Not changed", e ?? problem ?? g.Title + " will start from the edited save. Your older slots are kept.", null); });
+        }
+    }
+    // Opens the game's save in the player's own copy of PKHeX, which the launcher asks for the first time.
+    void OpenInPkhex(GameEntry g) {
+        string exe = Config.Read("pkhex-path.txt", "");
+        if (!File.Exists(exe)) {
+            using (var d = new OpenFileDialog { Filter = "PKHeX|PKHeX*.exe|Programs (*.exe)|*.exe", Title = "Where is PKHeX? (projectpokemon.org/home/files/file/1-pkhex)" }) {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                exe = d.FileName; Config.Write("pkhex-path.txt", exe);
+            }
+        }
+        string why = null, file = null;
+        Busy("Opening " + g.Title + " in PKHeX", delegate { file = SaveOf(g, out why); return null; }, delegate(string e) {
+            if (e != null || file == null) { ShowText("Can't open that save", e ?? why, null); return; }
+            try { Process.Start(new ProcessStartInfo(exe, "\"" + file + "\"") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }); }
+            catch (Exception x) { ShowText("Can't start PKHeX", x.Message, null); return; }
+            if (g.Engine() != "fulldex") ShowText("Editing an exported copy", "Gen1Recomp keeps its own save format, so PKHeX has an exported copy:\n" + file + "\n\nSave your changes there in PKHeX, then choose Bring back the edited save on this game's page.", null);
+        });
     }
 
     // ---------- running things ----------
@@ -738,7 +862,7 @@ class LauncherForm : Form {
     // No window frame, so dragging the shell moves the device.
     protected override void OnMouseDown(MouseEventArgs e) {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
+        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseRunCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
     }
     readonly List<KeyValuePair<RectangleF, string>> promptHits = new List<KeyValuePair<RectangleF, string>>();
     string hoverPrompt;
