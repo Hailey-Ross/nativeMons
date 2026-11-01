@@ -1,0 +1,10 @@
+[submodule "engines/gen1recomp"]
+	path = engines/gen1recomp
+	url = https://github.com/Hailey-Ross/gen1recomp.git
+	branch = hails-additions
+[submodule "engines/fulldex"]
+	path = engines/fulldex
+	url = https://github.com/Hailey-Ross/pokemon-fulldex.git
+[submodule "tools/nds-patcher"]
+	path = tools/nds-patcher
+	url = https://github.com/Hailey-Ross/hails.nds-Patcher.git

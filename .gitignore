@@ -1,0 +1,15 @@
+# Local notes
+.claude/
+# Never commit game content
+*.nds
+*.gb
+*.gbc
+*.gba
+*.sav
+key1.bin
+# Build output and local state
+build/
+bin/
+obj/
+*.exe
+*.log

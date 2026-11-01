@@ -1,0 +1,20 @@
+[
+  { "id": "red",       "title": "Pokemon Red",        "console": "Game Boy",       "gen1": "red",       "header": "POKEMON RED", "colors": ["#D6302B", "#8E1712", "#F2665C"], "finish": "flame" },
+  { "id": "blue",      "title": "Pokemon Blue",       "console": "Game Boy",       "gen1": "blue",      "header": "POKEMON BLUE", "colors": ["#2C68D6", "#143B8C", "#64A0F5"], "finish": "tide" },
+  { "id": "yellow",    "title": "Pokemon Yellow",     "console": "Game Boy",       "gen1": "yellow",    "header": "POKEMON YELLOW", "colors": ["#F8D030", "#C89A10", "#FFEE9A"], "finish": "bolt" },
+  { "id": "gold",      "title": "Pokemon Gold",       "console": "Game Boy Color", "gen1": "gold",      "header": "POKEMON_GLD", "colors": ["#E6B422", "#8A5F0C", "#FFF2A6"], "finish": "gold" },
+  { "id": "silver",    "title": "Pokemon Silver",     "console": "Game Boy Color", "gen1": "silver",    "header": "POKEMON_SLV", "colors": ["#C4CBD3", "#68727E", "#F8FAFC"], "finish": "silver" },
+  { "id": "crystal",   "title": "Pokemon Crystal",    "console": "Game Boy Color", "gen1": "crystal",   "header": "PM_CRYSTAL", "colors": ["#2A78B8", "#0B2350", "#BFEFFF"], "finish": "crystal" },
+  { "id": "ruby",      "title": "Pokemon Ruby",       "console": "Game Boy Advance", "gen1": "ruby",    "header": "AXVE", "colors": ["#C2123F", "#6E0722", "#F04C74"], "finish": "plain" },
+  { "id": "sapphire",  "title": "Pokemon Sapphire",   "console": "Game Boy Advance", "gen1": "sapphire", "header": "AXPE", "colors": ["#1B3FA8", "#0C2062", "#4C78E0"], "finish": "plain" },
+  { "id": "firered",   "title": "Pokemon FireRed",    "console": "Game Boy Advance", "gen1": "firered", "fulldex": "BPRE", "header": "BPRE", "save": "firered.sav", "colors": ["#EE5A24", "#9A2E0A", "#FF9460"], "finish": "flame" },
+  { "id": "leafgreen", "title": "Pokemon LeafGreen",  "console": "Game Boy Advance", "gen1": "leafgreen", "fulldex": "BPGE", "header": "BPGE", "save": "leafgreen.sav", "colors": ["#4FB648", "#26701F", "#94E08C"], "finish": "plain" },
+  { "id": "emerald",   "title": "Pokemon Emerald",    "console": "Game Boy Advance", "gen1": "emerald", "fulldex": "BPEE", "header": "BPEE", "save": "emerald.sav", "colors": ["#10A060", "#065A36", "#58D49A"], "finish": "plain" },
+  { "id": "heartgold", "title": "Pokemon HeartGold",  "console": "Nintendo DS", "fulldex": "IPKE", "header": "IPKE", "save": "heartgold.sav", "colors": ["#E8B030", "#8F5E10", "#FFEDAE"], "finish": "gold" },
+  { "id": "soulsilver","title": "Pokemon SoulSilver", "console": "Nintendo DS", "fulldex": "IPGE", "header": "IPGE", "save": "soulsilver.sav", "colors": ["#BCC6D4", "#5F6C80", "#F4F7FC"], "finish": "silver" },
+  { "id": "platinum",  "title": "Pokemon Platinum",   "console": "Nintendo DS", "fulldex": "CPUE", "header": "CPUE", "save": "platinum.sav", "colors": ["#B0AEC0", "#62607A", "#EEEDF6"], "finish": "silver" },
+  { "id": "black",     "title": "Pokemon Black",      "console": "Nintendo DS", "fulldex": "IRBO", "header": "IRBO", "save": "black.sav", "colors": ["#34373F", "#121318", "#62666F"], "finish": "plain" },
+  { "id": "white",     "title": "Pokemon White",      "console": "Nintendo DS", "fulldex": "IRAO", "header": "IRAO", "save": "white.sav", "colors": ["#ECECEC", "#A8A8AE", "#FFFFFF"], "finish": "plain" },
+  { "id": "black2",    "title": "Pokemon Black 2",    "console": "Nintendo DS", "fulldex": "IREO", "header": "IREO", "save": "black2.sav", "colors": ["#2A3340", "#0E141C", "#3F7FB5"], "finish": "plain" },
+  { "id": "white2",    "title": "Pokemon White 2",    "console": "Nintendo DS", "fulldex": "IRDO", "header": "IRDO", "save": "white2.sav", "colors": ["#EFE8E8", "#B0868A", "#FFFFFF"], "finish": "plain" }
+]
