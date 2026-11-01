@@ -1,0 +1,38 @@
+# Every push to dev replaces the bleeding-edge prerelease.
+name: Bleeding Edge
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bleeding-edge
+  cancel-in-progress: true
+
+jobs:
+  bleeding-edge:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/build-package
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $short = "${{ github.sha }}".Substring(0, 7)
+          $zip = "nativeMons-bleeding-edge-windows-x64.zip"
+          $note = "**Bleeding edge:** built from every commit to the dev branch and may be broken. Back up your saves. Built from commit ${{ github.sha }}.`n`nNo games are included: you need your own ROMs. See the README for credits and licences."
+          Compress-Archive dist\nativeMons $zip
+          gh release delete bleeding-edge --cleanup-tag --yes 2>$null
+          $global:LASTEXITCODE = 0
+          gh release create bleeding-edge $zip --target "${{ github.sha }}" --title "Bleeding edge (dev, $short)" --notes $note --prerelease

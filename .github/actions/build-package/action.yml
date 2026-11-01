@@ -1,0 +1,65 @@
+name: Build the package
+description: Builds the launcher and mon-bridge, stages the engines into dist\nativeMons, and checks the result.
+
+inputs:
+  github-token:
+    description: Token for downloading Fulldex's release
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check that no removed launcher files came back
+      shell: bash
+      run: sh engines/gen1recomp/tools/nativemons/check-removed.sh
+
+    - name: Build the launcher
+      shell: cmd
+      run: launcher\build.bat "%GITHUB_WORKSPACE%\dist\nativeMons"
+
+    - name: Stage the engines
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        LOVE_VERSION: "11.5"
+        FULLDEX_RELEASE: "pc-v1"
+      run: |
+        $dist = "dist\nativeMons"
+        Copy-Item LICENSE, README.md $dist
+
+        # Gen1Recomp: what the game needs at run time, with its licence.
+        $gen1 = "$dist\engines\gen1recomp"
+        New-Item -ItemType Directory -Force $gen1 | Out-Null
+        $skip = '.git', '.github', 'docs', 'test', 'tests', 'mobile', 'ports', 'flatpak', 'scripts'
+        Get-ChildItem engines\gen1recomp -Force | Where-Object { $skip -notcontains $_.Name } | Copy-Item -Destination $gen1 -Recurse
+
+        # LOVE, which runs Gen1Recomp.
+        Invoke-WebRequest "https://github.com/love2d/love/releases/download/$env:LOVE_VERSION/love-$env:LOVE_VERSION-win64.zip" -OutFile love.zip
+        Expand-Archive love.zip love-unpacked
+        Move-Item "love-unpacked\love-$env:LOVE_VERSION-win64" "$dist\love"
+
+        # Fulldex: its own published Windows build, unmodified.
+        gh release download $env:FULLDEX_RELEASE -R mamesj/pokemon-fulldex -p "pokemon-ds-wide-pc-windows-x86_64.zip" -O fulldex.zip
+        Expand-Archive fulldex.zip fulldex-unpacked
+        Move-Item "fulldex-unpacked\pokemon-ds-wide" "$dist\engines\fulldex"
+
+        # hails.nds-Patcher.
+        New-Item -ItemType Directory -Force "$dist\tools\nds-patcher" | Out-Null
+        Copy-Item tools\nds-patcher\*.py, tools\nds-patcher\LICENSE "$dist\tools\nds-patcher"
+
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "10.0.x"
+
+    - name: Build mon-bridge
+      shell: pwsh
+      run: dotnet publish tools\mon-bridge\MonBridge.csproj -c Release -o dist\nativeMons\tools\mon-bridge
+
+    - name: Check the package
+      shell: pwsh
+      run: |
+        $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Extension -in '.gb', '.gbc', '.gba', '.nds', '.sav' -or $_.Name -eq 'key1.bin' }
+        if ($bad) { $bad.FullName; throw "Game data in the package" }
+        foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
+          if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }
+        }
