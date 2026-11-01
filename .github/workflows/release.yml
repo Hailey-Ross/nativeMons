@@ -60,6 +60,14 @@ jobs:
           New-Item -ItemType Directory -Force "$dist\tools\nds-patcher" | Out-Null
           Copy-Item tools\nds-patcher\*.py, tools\nds-patcher\LICENSE "$dist\tools\nds-patcher"
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build mon-bridge
+        shell: pwsh
+        run: dotnet publish tools\mon-bridge\MonBridge.csproj -c Release -o dist\nativeMons\tools\mon-bridge
+
       - name: Check the package
         shell: pwsh
         run: |

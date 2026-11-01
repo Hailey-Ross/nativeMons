@@ -1,5 +1,7 @@
 # nativeMons
 
+[![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
+
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
 through its own engine, and the engines stay forks that keep pulling their upstream updates.
 
@@ -13,7 +15,19 @@ GAME FREAK inc. or The Pokémon Company.
 | `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
 | Pokémon Fulldex | DS and GBA games in widescreen at 60 fps | [mamesj/pokemon-fulldex](https://github.com/mamesj/pokemon-fulldex), a fork of [ClickingMaster/ssrecomp](https://github.com/ClickingMaster/ssrecomp), using melonDS and mGBA |
 | `tools/nds-patcher` | Decrypts `.nds` secure areas | [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) |
+| `tools/mon-bridge` | Reads saves and moves Pokémon | [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors |
 | `launcher` | The menu | Window and input code from the steam launcher of [the Skate 3 Rust Engine's hails-additions branch](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) (SK8-ENGINE) |
+
+## Download
+- **[Bleeding edge](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
+- **Stable:** built from `main`, once a working build has been promoted there.
+
+Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patching `.nds` ROMs needs Python 3.
+
+## Moving Pokémon
+**Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are
+backed up to `state\save-backups` first. PKHeX decides what's possible, and some moves between generations can't be done. **Open in PKHeX**
+on a game's page opens its save in your own copy of PKHeX.
 
 ## Build and set up
 `launcher\build.bat <output folder>` needs only Windows. Beside the exe, `state\nativemons.cfg` can set the paths `love`,
