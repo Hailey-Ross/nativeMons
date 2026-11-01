@@ -528,17 +528,104 @@ class LauncherForm : Form {
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
         p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && have > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
-        p.Items.Add(new Item("More", "Sprites, credits, last session.", true, delegate { pages.Push(MorePage()); }) { Icon = '\uE712' });
+        p.Items.Add(new Item("Settings", "Both engines, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
         return p;
     }
-    Page MorePage() {
-        var p = new Page { Title = "More" };
-        p.Items.Add(new Item("Get all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Downloads every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
+    // ---------- settings ----------
+    // One place for both engines. Values are stored where each engine's own menus keep them, so the two always agree.
+    Page SettingsPage() {
+        var p = new Page { Title = "Settings" };
+        p.Items.Add(new Item("Both engines", "", true, delegate { OpenEngineSettings("both"); }) { Icon = '\uE713', Info = "Fullscreen and volume, for every game." });
+        p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
+        p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
+        p.Items.Add(new Item("Download all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
         return p;
     }
+    static string FulldexCfg { get { return Path.Combine(Config.FulldexDir, "settings.cfg"); } }
+    static Dictionary<string, string> ReadFulldex() {
+        var d = new Dictionary<string, string>();
+        try { if (File.Exists(FulldexCfg)) foreach (var l in File.ReadAllLines(FulldexCfg)) { int e = l.IndexOf('='); if (e > 0) d[l.Substring(0, e)] = l.Substring(e + 1); } } catch { }
+        return d;
+    }
+    // Changes one line, keeping every other setting in the file.
+    static void WriteFulldex(string key, string value) {
+        var lines = File.Exists(FulldexCfg) ? File.ReadAllLines(FulldexCfg).ToList() : new List<string>();
+        int at = lines.FindIndex(l => l.StartsWith(key + "="));
+        if (at >= 0) lines[at] = key + "=" + value; else lines.Add(key + "=" + value);
+        Directory.CreateDirectory(Path.GetDirectoryName(FulldexCfg));
+        File.WriteAllLines(FulldexCfg, lines.ToArray());
+    }
+    static string Gen1Ask(string command) {
+        var psi = Gen1Start("");
+        psi.EnvironmentVariables["NATIVEMONS_CLI"] = command;
+        int code; string o = RunCapture(psi, 30, out code);
+        return code == 0 ? o : null;
+    }
+    static void WriteGen1(string key, string value) { Gen1Ask("option " + key + " " + value); }
+    // A row that steps through its choices when pressed.
+    Item Choice(string label, string info, string[] names, int current, Action<int> apply) {
+        Item it = null; int at = Math.Max(0, current);
+        it = new Item(label + ": " + names[at], "", true, delegate {
+            at = (at + 1) % names.Length;
+            it.Text = label + ": " + names[at];
+            int chosen = at;
+            Task.Run(delegate { try { apply(chosen); } catch { } });
+        }) { Icon = '\uE713', Info = info };
+        return it;
+    }
+    Item FulldexSwitch(Dictionary<string, string> cfg, string key, string label, bool fallback, string info) {
+        string v; bool on = cfg.TryGetValue(key, out v) ? v == "1" : fallback;
+        return Choice(label, info, new[] { "ON", "OFF" }, on ? 0 : 1, delegate(int i) { WriteFulldex(key, i == 0 ? "1" : "0"); });
+    }
+    void OpenEngineSettings(string group) {
+        bool hasFulldex = File.Exists(Config.Fulldex), hasGen1 = File.Exists(Path.Combine(Config.Gen1, "main.lua"));
+        var gen1 = new Dictionary<string, string>();
+        Busy("Reading settings", delegate {
+            if (hasGen1 && group != "fulldex") foreach (var row in (Gen1Ask("options") ?? "").Split('\n')) { var f = row.TrimEnd('\r').Split('\t'); if (f.Length == 2) gen1[f[0]] = f[1]; }
+            return null;
+        }, delegate(string e) {
+            var cfg = hasFulldex ? ReadFulldex() : new Dictionary<string, string>();
+            Func<string, string, string> g1 = delegate(string k, string d) { string v; return gen1.TryGetValue(k, out v) && v != "nil" ? v : d; };
+            var p = new Page();
+            if (group == "both") {
+                p.Title = "Both engines";
+                string v;
+                bool full = hasFulldex ? (!cfg.TryGetValue("fullscreen", out v) || v == "1") : g1("videoMode", "windowed") == "borderless";
+                p.Items.Add(Choice("Fullscreen", "Every game opens fullscreen, or in a window.", new[] { "ON", "OFF" }, full ? 0 : 1, delegate(int i) {
+                    if (hasFulldex) WriteFulldex("fullscreen", i == 0 ? "1" : "0");
+                    if (hasGen1) WriteGen1("videoMode", i == 0 ? "borderless" : "windowed");
+                }));
+                string[] levels = { "OFF", "20%", "40%", "60%", "80%", "100%" };
+                int percent; if (!(cfg.TryGetValue("volume", out v) && int.TryParse(v, out percent))) percent = hasFulldex ? 100 : int.Parse(g1("musicVol", "7")) * 100 / 7;
+                p.Items.Add(Choice("Volume", "Music and sound for every game.", levels, Math.Min(5, (percent + 10) / 20), delegate(int i) {
+                    if (hasFulldex) WriteFulldex("volume", (i * 20).ToString());
+                    if (hasGen1) { string level = ((i * 7 + 2) / 5).ToString(); WriteGen1("musicVol", level); WriteGen1("sfxVol", level); }
+                }));
+            } else if (group == "fulldex") {
+                p.Title = "Fulldex";
+                p.Items.Add(FulldexSwitch(cfg, "wide", "Widescreen world", true, "Draws the world out to the sides of a widescreen display."));
+                p.Items.Add(FulldexSwitch(cfg, "fps60", "60 FPS", true, "Adds in-between frames for smoother motion."));
+                p.Items.Add(FulldexSwitch(cfg, "smooth", "Smooth scaling", false, "Softens the picture instead of keeping sharp pixels."));
+                p.Items.Add(FulldexSwitch(cfg, "wide_map", "Wide map loading", true, "Black, White, Black 2 and White 2: loads more of the map, so the sides don't run out of land."));
+                p.Items.Add(FulldexSwitch(cfg, "busy_detail", "Lower res when busy", false, "Drops the resolution when your PC can't keep up."));
+                p.Items.Add(FulldexSwitch(cfg, "show_fps", "FPS counter", false, "Shows frames per second in a corner."));
+                string[] heights = { "720", "1080", "1440", "2160" };
+                string lines; if (!cfg.TryGetValue("wide_lines", out lines)) lines = "1080";
+                p.Items.Add(Choice("3D resolution", "How sharply the 3D world is drawn. Higher needs a stronger PC.", new[] { "720P", "1080P", "1440P", "4K" }, Array.IndexOf(heights, lines), delegate(int i) { WriteFulldex("wide_lines", heights[i]); }));
+            } else {
+                p.Title = "Gen1Recomp";
+                string[] speeds = { "1", "3", "5" };
+                p.Items.Add(Choice("Text speed", "How fast text appears in dialogue.", new[] { "FAST", "MEDIUM", "SLOW" }, Array.IndexOf(speeds, g1("textSpeed", "3")), delegate(int i) { WriteGen1("textSpeed", speeds[i]); }));
+                p.Items.Add(Choice("Battle animations", "Plays the move animations in battle.", new[] { "ON", "OFF" }, g1("animations", "true") == "true" ? 0 : 1, delegate(int i) { WriteGen1("animations", i == 0 ? "true" : "false"); }));
+                p.Items.Add(Choice("Battle layout", "The original screen shape, or a wider battle view.", new[] { "ORIGINAL", "WIDE" }, g1("battleLayout", "og") == "wide" ? 1 : 0, delegate(int i) { WriteGen1("battleLayout", i == 1 ? "wide" : "og"); }));
+            }
+            pages.Push(p);
+        });
+    }
+
     // Every installed game adds the entries it has, counted once however many games share them, and every save adds what it has caught.
     void OpenCollection() {
         var caughtBy = new Dictionary<GameEntry, HashSet<int>>();
@@ -730,7 +817,7 @@ class LauncherForm : Form {
 
     void GetAllSprites() {
         string summary = null;
-        Busy("Getting all sprites", delegate {
+        Busy("Downloading all sprites", delegate {
             Sprites.GetAll(delegate(int done, int total, int fresh, int failed) {
                 progress = done / (float)total;
                 if (done % 25 == 0 || done == total) BeginInvoke((Action)delegate { log.Add(done + " of " + total + " checked"); });
@@ -738,7 +825,7 @@ class LauncherForm : Form {
                 if (done == total) summary = fresh + " downloaded, " + (total - fresh - failed) + " already here." + (failed > 0 ? "\n\n" + failed + " couldn't be fetched. Run this again when you're online: it only fetches what's missing." : "\n\nEvery picture is ready for offline play.");
             });
             return null;
-        }, delegate(string e) { ShowText("All sprites", e ?? summary, null); });
+        }, delegate(string e) { ShowText("Download all sprites", e ?? summary, null); });
     }
 
     // ---------- moving Pokemon (tools\mon-bridge, built on PKHeX.Core) ----------
