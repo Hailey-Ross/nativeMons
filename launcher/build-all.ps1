@@ -9,6 +9,7 @@ $ProgressPreference = 'SilentlyContinue'
 $loveVersion = '11.5'
 $fulldexRelease = 'pc-v1'
 $platinumRelease = 'v0.1.13'
+$nativeplatRelease = 'windows-5d5a59a6d'
 
 $here = $PSScriptRoot
 $repo = Split-Path $here -Parent
@@ -94,6 +95,21 @@ else {
     Write-Host 'Downloaded.'
 }
 
+# nativeplat: Platinum, Diamond and Pearl, built by our fork's public workflow. The program only: the player's ROMs and saves
+# go in userdata beside it, so nothing is removed.
+Step "nativeplat $nativeplatRelease"
+$nativeplat = Join-Path $out 'engines\nativeplat'
+$mark = Join-Path $nativeplat '.nativemons-version'
+if ((Test-Path -LiteralPath $mark) -and (Get-Content -LiteralPath $mark) -eq $nativeplatRelease) { Write-Host 'Already there.' }
+else {
+    $unpacked = Fetch "https://github.com/Hailey-Ross/gen4recomp/releases/download/$nativeplatRelease/nativeplat-windows-x64.zip" 'nativeplat'
+    New-Item -ItemType Directory -Force $nativeplat | Out-Null
+    Copy-Item -Path (Join-Path $unpacked 'nativeplat-windows-x64\*') -Destination $nativeplat -Recurse -Force
+    Set-Content -LiteralPath (Join-Path $nativeplat 'portable.txt') ''
+    Set-Content -LiteralPath $mark $nativeplatRelease
+    Write-Host 'Downloaded.'
+}
+
 Step 'hails.nds-Patcher\'
 $patcher = Join-Path $out 'tools\nds-patcher'
 New-Item -ItemType Directory -Force $patcher | Out-Null
@@ -124,7 +140,7 @@ else {
 
 Step 'Checking the result\'
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
-foreach ($needed in 'NativeMonsLauncher.exe', 'games.json', 'love\lovec.exe', 'engines\gen1recomp\main.lua', 'engines\fulldex\Pokemon Fulldex.exe', 'engines\pokeplatinum\main.exe', 'tools\nds-patcher\hails_patcher.py', 'tools\mon-bridge\mon-bridge.exe') {
+foreach ($needed in 'NativeMonsLauncher.exe', 'games.json', 'love\lovec.exe', 'engines\gen1recomp\main.lua', 'engines\fulldex\Pokemon Fulldex.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'tools\nds-patcher\hails_patcher.py', 'tools\mon-bridge\mon-bridge.exe') {
     if (-not (Test-Path -LiteralPath (Join-Path $out $needed))) { throw "Missing from the build: $needed" }
 }
 foreach ($removed in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {

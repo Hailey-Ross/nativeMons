@@ -6,26 +6,52 @@
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
 through its own engine, and the engines stay forks that keep pulling their upstream updates.
 
-**Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).**
+Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: **Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).**
 
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
 
 ## Supported games
 
-| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port |
-|---|---|:-:|:-:|:-:|
-| 1 | Red, Blue, Yellow | ✓ | | |
-| 2 | Gold, Silver, Crystal | ✓ | | |
-| 3 | Ruby, Sapphire | ✓ | | |
-| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | |
-| 4 | HeartGold, SoulSilver | | ✓ | |
-| 4 | Platinum | | ✓ | ✓ |
-| 5 | Black, White, Black 2, White 2 | | ✓ | |
+| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat |
+|---|---|:-:|:-:|:-:|:-:|
+| 1 | Red, Blue, Yellow | ✓ | | | |
+| 2 | Gold, Silver, Crystal | ✓ | | | |
+| 3 | Ruby, Sapphire | ✓ | | | |
+| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | | |
+| 4 | Diamond, Pearl | | | | ✓ |
+| 4 | HeartGold, SoulSilver | | ✓ | | |
+| 4 | Platinum | | ✓ | ✓ | ✓ |
+| 5 | Black, White, Black 2, White 2 | | ✓ | | |
 
-**Not supported yet:** Diamond and Pearl, Generation 6 and later (3DS and Switch games), and ROM hacks.
+**Not supported yet:** Generation 6 and later (3DS and Switch games), and ROM hacks.
 
 Where a game has more than one engine it starts in Fulldex, and you can switch on its page. Each engine accepts certain versions of a ROM, mostly the US release: the launcher tells you if yours isn't one. Windows only for now.
+
+## Accepted ROMs
+
+Gen1Recomp and nativeplat only run exact dumps, so they check each ROM's SHA-1. If yours is refused, the game's page shows the hash it found.
+
+| Game | Engine | Accepted SHA-1 |
+|---|---|---|
+| Red | Gen1Recomp | `ea9bcae617fdf159b045185467ae58b2e4a48b9a` |
+| Blue | Gen1Recomp | `d7037c83e1ae5b39bde3c30787637ba1d4c48ce2` |
+| Yellow | Gen1Recomp | `cc7d03262ebfaf2f06772c1a480c7d9d5f4a38e1` |
+| Gold | Gen1Recomp | `d8b8a3600a465308c9953dfa04f0081c05bdcb94` |
+| Silver | Gen1Recomp | `49b163f7e57702bc939d642a18f591de55d92dae` |
+| Crystal | Gen1Recomp | `f4cd194bdee0d04ca4eac29e09b8e4e9d818c133`<br>`f2f52230b536214ef7c9924f483392993e226cfb` |
+| FireRed | Gen1Recomp | `41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc`<br>`dd5945db9b930750cb39d00c84da8571feebf417` |
+| LeafGreen | Gen1Recomp | `574fa542ffebb14be69902d1d36f1ec0a4afd71e`<br>`7862c67bdecbe21d1d69ce082ce34327e1c6ed5e` |
+| Ruby | Gen1Recomp | `f28b6ffc97847e94a6c21a63cacf633ee5c8df1e`<br>`610b96a9c9a7d03d2bafb655e7560ccff1a6d894`<br>`5b64eacf892920518db4ec664e62a086dd5f5bc8` |
+| Sapphire | Gen1Recomp | `3ccbbd45f8553c36463f13b938e833f652b793e4`<br>`4722efb8cd45772ca32555b98fd3b9719f8e60a9`<br>`89b45fb172e6b55d51fc0e61989775187f6fe63c` |
+| Emerald | Gen1Recomp | `f3ae088181bf583e55daf962a92bb46f4f1d07b7` |
+| Diamond | nativeplat | `a46233d8b79a69ea87aa295a0efad5237d02841e` |
+| Pearl | nativeplat | `99083bf15ec7c6b81b4ba241ee10abd9e80999ac` |
+| Platinum | nativeplat | `0862ec35b24de5c7e2dcb88c9eea0873110d755c` (Rev 1)<br>`ce81046eda7d232513069519cb2085349896dec7` (Rev 0) |
+
+Fulldex and the Platinum PC port don't check a hash: they go by the game code in the ROM's header, so most dumps of a supported game work.
+
+Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. nativeplat's own import screen refuses Platinum Rev 0, but nativeMons places the ROM itself. The two revisions share the same game files, differing only in a GTS screen, and Platinum runs nativeplat's Rev 1 code either way.
 
 ## Download
 
@@ -71,6 +97,10 @@ Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotG
 
 One place for both engines: fullscreen and volume for every game, plus each engine's own options. They're stored where each engine's menus keep them, so changes show up on both sides.
 
+## nativeplat
+
+Diamond, Pearl and Platinum can run on [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, native ports from the pret decompilations. It's the only engine for Diamond and Pearl, and an option for Platinum under **Engine** on the game's page. Packages carry a Windows build made by [our fork's public workflow](https://github.com/Hailey-Ross/gen4recomp), program only: your ROM stays on your PC. It shares one save with the other engines, checked each time it comes back. This is experimental, so keep a backup. nativeMons isn't affiliated with that project, so please report problems here first.
+
 ## Pokémon Platinum PC port
 
 Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, from the pret decompilation and [libntr](https://github.com/cybervisi0n/libntr). Choose it with **Engine** on the game's page. The download has only the program: the first start unpacks the game's files from your own ROM, on your PC. It shares one save with Fulldex, checked each time it comes back. This is experimental, so keep a backup. nativeMons isn't affiliated with that project, so please report problems here first.
@@ -82,6 +112,7 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 | `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
 | `engines/fulldex` | DS and GBA games in widescreen at 60 fps. Packages use its published Windows build | [mamesj/pokemon-fulldex](https://github.com/mamesj/pokemon-fulldex), a fork of [ClickingMaster/ssrecomp](https://github.com/ClickingMaster/ssrecomp), using melonDS and mGBA |
 | Platinum PC port | A native Platinum. Packages carry its published Windows release, program only | [cybervisi0n/pokeplatinum](https://github.com/cybervisi0n/pokeplatinum) |
+| nativeplat | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
 | `tools/nds-patcher` | Decrypts `.nds` secure areas | [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) |
 | `tools/mon-bridge` | Reads saves and moves Pokémon | [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors |
 | `tools/openhome-bridge` | Converts Pokémon between games that have no real transfer | [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington, run on Node.js |
@@ -89,15 +120,16 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 
 ## Build
 
-Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE, Fulldex's published Windows build and the Platinum PC port's. With Node, Corepack and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings and saves.
+Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE, Fulldex's published Windows build, the Platinum PC port's and nativeplat's. With Node, Corepack and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings and saves.
 
-`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `openhome`, `node`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
+`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `openhome`, `node`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
 
 ## Credits
 
-Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
+Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
 
 - [Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp) by ClickingMaster, using [melonDS](https://github.com/melonDS-emu/melonDS) and [mGBA](https://github.com/mgba-emu/mgba).
+- [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, from the pret decompilations. Not affiliated with nativeMons.
 - [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr) (MIT), from the [pret](https://github.com/pret/pokeplatinum) decompilation. They aren't affiliated with nativeMons.
 - [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).

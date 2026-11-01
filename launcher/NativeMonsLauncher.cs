@@ -76,6 +76,7 @@ static class Config {
     public static string Node { get { return Get("node", @"tools\openhome\node.exe"); } }
     public static string OpenHomeTool { get { return Get("openhome", @"tools\openhome\convert.cjs"); } }
     public static string PlatinumPort { get { return Get("pokeplatinum", @"engines\pokeplatinum\main.exe"); } }
+    public static string Nativeplat { get { return Get("nativeplat", @"engines\nativeplat\nativeplat.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string GamesFile { get { return Get("games", "games.json"); } }
@@ -114,14 +115,15 @@ class Theme {
 class GameEntry {
     public Theme Theme = Theme.Default;
     public int Dex;   // how many National Dex entries this game has
-    public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port;
+    public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port, Nativeplat;
     public int ArtFrame;   // when this game's title screen is up, in frames from power-on
-    public string Gen1Rom, FulldexRom, FoundUnsupported;
+    public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
     public bool Imported;
     public bool OnGen1 { get { return Gen1 != null && (Imported || Gen1Rom != null); } }
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
     public bool OnPort { get { return Port != null && FulldexRom != null && File.Exists(Config.PlatinumPort); } }
-    public bool Playable { get { return OnGen1 || OnFulldex || OnPort; } }
+    public bool OnNativeplat { get { return Nativeplat != null && NativeplatRom != null && File.Exists(Config.Nativeplat); } }
+    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat; } }
     public bool IsDs { get { return Console == "Nintendo DS"; } }
     public bool HasBoth { get { return OnGen1 && OnFulldex; } }
     // The player's choice where both engines can run it; Fulldex by default (widescreen).
@@ -130,6 +132,7 @@ class GameEntry {
         if (OnFulldex) l.Add("fulldex");
         if (OnGen1) l.Add("gen1");
         if (OnPort) l.Add("port");
+        if (OnNativeplat) l.Add("nativeplat");
         return l;
     }
     public string Engine() {
@@ -138,8 +141,8 @@ class GameEntry {
         string chosen = Config.Read("engine-" + Id + ".txt", l[0]);
         return l.Contains(chosen) ? chosen : l[0];
     }
-    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : "Gen1Recomp (native, with mods)"; }
-    public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : "Gen1Recomp"; }
+    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : "Gen1Recomp (native, with mods)"; }
+    public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : "Gen1Recomp"; }
 }
 
 // Unpacks a DS ROM the way the Platinum PC port does on first launch, so its file picker never shows.
@@ -284,8 +287,6 @@ static class GameArt {
     static string FrameFile(string id, int i) { return Path.Combine(Folder(id), "frame-" + i.ToString("00") + ".jpg"); }
     static string LogoFile(string id) { return Path.Combine(Folder(id), "logo.png"); }
     public static bool Has(string id) { return id != null && File.Exists(FrameFile(id, Count - 1)); }
-    // Text goes on the picture, so it's always light, whatever the game's colours.
-    public static void Dress(Theme th) { if (Has(th.GameId)) th.Ink = Color.FromArgb(252, 250, 244); }
     static void Load(string id) {
         if (loadedId == id) return;
         var old = loaded; var oldLogo = loadedLogo;
@@ -376,17 +377,35 @@ static class GameArt {
         foreach (var t in thumbs) t.Dispose();
     }
     public static bool CanCapture(GameEntry g) {
-        if (g.IsDs) return g.ArtFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom);
-        return g.Gen1 != null && g.Imported;
+        if (g.IsDs && g.FulldexCode == null) return g.OnNativeplat;
+        if (g.IsDs) return g.ArtFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && (!Library.NeedsPatch(g.FulldexRom) || File.Exists(Config.Patcher));
+        return g.Gen1 != null && (g.Imported || g.Gen1Rom != null);
     }
     // Game Boy and GBA games: Gen1Recomp shows its own title screen in a window kept out of sight, with the sound off. A single
     // screen has no logo half to sort, and whatever surrounds the game in the window is cut away.
+    // A game that isn't prepared yet gets prepared under a throwaway identity, removed afterwards: preparing it for real would
+    // turn on save sharing for a game the player may only use with Fulldex.
+    const string ArtIdentity = "nativemons-art";
     static string CaptureGen1(GameEntry g) {
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
+        bool throwaway = !g.Imported;
+        string identityFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", ArtIdentity);
         try {
+            if (throwaway) {
+                var import = LauncherForm.Gen1Start("");
+                import.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+                import.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
+                import.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
+                using (var rom = new LauncherForm.PlainPath(g.Gen1Rom)) {
+                    import.EnvironmentVariables["POKEPORT_IMPORT_ROM"] = rom.Path_;
+                    int code; LauncherForm.RunCapture(import, 240, out code);
+                    if (code != 0) return "Could not prepare the game for its picture.";
+                }
+            }
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             Directory.CreateDirectory(temp);
             var psi = LauncherForm.Gen1Start("");
+            if (throwaway) psi.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
             psi.EnvironmentVariables["POKEPORT_VERSION"] = g.Gen1;
             psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TitleArt.lua";
@@ -413,7 +432,37 @@ static class GameArt {
             var quality = new System.Drawing.Imaging.EncoderParameters(1);
             quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
             for (int i = 0; i < Count; i++) using (var pic = new Bitmap(shots[i])) using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(FrameFile(g.Id, i), jpeg, quality);
-            if (g.Theme != null) Dress(g.Theme);
+            return null;
+        } catch (Exception x) { return x.Message; }
+        finally {
+            try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { }
+            try { if (throwaway && Directory.Exists(identityFolder)) Directory.Delete(identityFolder, true); } catch { }
+        }
+    }
+    // A game only nativeplat runs: its test mode shows the title screen with no window or sound and keeps no save.
+    static string CaptureNativeplat(GameEntry g) {
+        string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
+        try {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            Directory.CreateDirectory(temp);
+            var psi = new ProcessStartInfo(Config.Nativeplat) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(Config.Nativeplat), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
+            psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
+            psi.EnvironmentVariables["NP_AUTOTEST"] = "frames=" + (1500 + Count * Step) + ",shots=" + Step + ",size=512x384,layout=top,game=" + g.Nativeplat + ",png=" + Path.Combine(temp, "s.png") + ",rom=" + LauncherForm.NativeplatRomCopy(g) + ",press=1200:start:10";
+            using (var p = Process.Start(psi)) {
+                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                p.BeginOutputReadLine(); p.BeginErrorReadLine();
+                if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
+            }
+            Func<string, int> number = delegate(string f) { string n = Path.GetFileNameWithoutExtension(f); int at = n.LastIndexOf('-'), v; return at >= 0 && int.TryParse(n.Substring(at + 1), out v) ? v : -1; };
+            var shots = Directory.GetFiles(temp, "s-*.png").OrderBy(number).ToArray();
+            if (shots.Length < Count) return "Only " + shots.Length + " pictures came out.";
+            shots = shots.Skip(shots.Length - Count).ToArray();
+            Directory.CreateDirectory(Folder(g.Id));
+            var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+            var quality = new System.Drawing.Imaging.EncoderParameters(1);
+            quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
+            for (int i = 0; i < Count; i++) using (var pic = new Bitmap(shots[i])) pic.Save(FrameFile(g.Id, i), jpeg, quality);
             return null;
         } catch (Exception x) { return x.Message; }
         finally { try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
@@ -421,13 +470,27 @@ static class GameArt {
     // Null when done, or why not. It uses no save, at low priority, and the ROM is only read.
     public static string Capture(GameEntry g) {
         if (!g.IsDs) return CaptureGen1(g);
-        string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
+        if (g.FulldexCode == null) return CaptureNativeplat(g);
+        string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots"), patched = temp + "-rom";
         try {
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             Directory.CreateDirectory(temp);
-            string dir = Config.FulldexDir;
+            string dir = Config.FulldexDir, romFile = g.FulldexRom;
+            // An encrypted ROM won't start. Its picture comes from a patched copy, and the player's file isn't touched.
+            if (Library.NeedsPatch(romFile)) {
+                if (Directory.Exists(patched)) Directory.Delete(patched, true);
+                Directory.CreateDirectory(patched);
+                romFile = Path.Combine(patched, "rom.nds");
+                File.Copy(g.FulldexRom, romFile);
+                File.SetAttributes(romFile, FileAttributes.Normal);
+                var fix = new ProcessStartInfo(Config.Python, "\"" + Config.Patcher + "\" \"" + romFile + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(Config.Patcher), RedirectStandardOutput = true, RedirectStandardError = true };
+                int code; LauncherForm.RunCapture(fix, 120, out code);
+                // The patcher backs up what it changes, and this copy's backup would stop the next copy being patched.
+                try { File.Delete(Path.Combine(Path.GetDirectoryName(Config.Patcher), "backups", "rom.secure-area.bin")); } catch { }
+                if (code != 0 || Library.NeedsPatch(romFile)) return "Could not patch a copy of the ROM for its picture.";
+            }
             var at = Enumerable.Range(0, Count).Select(i => (g.ArtFrame + i * Step).ToString()).ToArray();
-            string args = "\"" + g.FulldexRom + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --shot-dir \"" + temp + "\" --shot-at " + string.Join(",", at) + " --frames " + (g.ArtFrame + Count * Step + 10);
+            string args = "\"" + romFile + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --shot-dir \"" + temp + "\" --shot-at " + string.Join(",", at) + " --frames " + (g.ArtFrame + Count * Step + 10);
             if (g.FulldexCode != "IPGE" && g.FulldexCode != "IPKE") args += " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             using (var p = Process.Start(psi)) {
@@ -438,10 +501,12 @@ static class GameArt {
             var shots = Directory.GetFiles(temp, "*.bmp").OrderBy(x => x, StringComparer.Ordinal).ToArray();
             if (shots.Length != Count) return "Only " + shots.Length + " pictures came out.";
             Sort(shots, g.Id);
-            if (g.Theme != null) Dress(g.Theme);
             return null;
         } catch (Exception x) { return x.Message; }
-        finally { try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+        finally {
+            try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { }
+            try { if (Directory.Exists(patched)) Directory.Delete(patched, true); } catch { }
+        }
     }
     // One game at a time, behind everything else. Anything the player starts simply waits or goes first.
     public static void CaptureMissing(Func<bool> busy) {
@@ -449,6 +514,72 @@ static class GameArt {
             if (busy()) return;
             Capture(g);
         }
+    }
+}
+
+// Options kept inside each game's save. Settings holds a default for all games, and each game can follow it or choose its own.
+// "own" leaves what the game has set alone. Nothing is written for a game unless one of these says so.
+class GameOption {
+    public string Key, Name; public string[] Values, Labels; public bool GameOnly; public int FirstGen = 1;
+    public string Label(string value) { int i = Array.IndexOf(Values, value); return i >= 0 ? Labels[i] : value; }
+}
+static class GameOptions {
+    public const string Own = "own", Follow = "follow";
+    public static readonly GameOption[] All = {
+        new GameOption { Key = "text", Name = "Text speed", Values = new[] { "slow", "mid", "fast" }, Labels = new[] { "Slow", "Medium", "Fast" } },
+        new GameOption { Key = "scene", Name = "Battle scene", Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" } },
+        new GameOption { Key = "style", Name = "Battle style", Values = new[] { "shift", "set" }, Labels = new[] { "Shift", "Set" } },
+        new GameOption { Key = "sound", Name = "Sound", Values = new[] { "mono", "stereo" }, Labels = new[] { "Mono", "Stereo" }, FirstGen = 2 },
+        new GameOption { Key = "button", Name = "Button mode", Values = new[] { "normal", "alt", "lequalsa" }, Labels = new[] { "Normal", "Alternate (LR or Start = X)", "L = A" }, GameOnly = true, FirstGen = 3 },
+        new GameOption { Key = "frame", Name = "Text frame", Values = Enumerable.Range(1, 20).Select(i => i.ToString()).ToArray(), Labels = Enumerable.Range(1, 20).Select(i => "Type " + i).ToArray(), GameOnly = true, FirstGen = 3 },
+    };
+    public static int Generation(GameEntry g) {
+        if (g.Console == "Game Boy") return 1;
+        if (g.Console == "Game Boy Color") return 2;
+        if (g.Console == "Game Boy Advance") return 3;
+        return g.Dex > 493 ? 5 : 4;
+    }
+    // Where a save's options are known. Gen 5's aren't yet.
+    public static bool Available(GameEntry g) { return Generation(g) <= 4; }
+    static string File_(GameEntry g) { return Path.Combine(Config.State, g == null ? "game-options.txt" : "game-options-" + g.Id + ".txt"); }
+    static Dictionary<string, string> Read(GameEntry g) {
+        var d = new Dictionary<string, string>();
+        try { if (File.Exists(File_(g))) foreach (var l in File.ReadAllLines(File_(g))) { int e = l.IndexOf('='); if (e > 0) d[l.Substring(0, e)] = l.Substring(e + 1); } } catch { }
+        // The first version of this setting had a file of its own.
+        if (g == null && !d.ContainsKey("text")) { string old = Config.Read("text-speed.txt", Own); if (old != Own) d["text"] = old; }
+        return d;
+    }
+    // What's stored for this place: for a game "follow" unless changed, for Settings "own" unless changed.
+    public static string Stored(GameEntry g, GameOption o) {
+        string v;
+        return Read(g).TryGetValue(o.Key, out v) ? v : g == null || o.GameOnly ? Own : Follow;
+    }
+    public static string Next(GameEntry g, GameOption o) {
+        var order = new List<string>();
+        if (g != null && !o.GameOnly) order.Add(Follow);
+        order.Add(Own); order.AddRange(o.Values);
+        return order[(order.IndexOf(Stored(g, o)) + 1) % order.Count];
+    }
+    public static void Store(GameEntry g, GameOption o, string value) {
+        var d = Read(g); d[o.Key] = value;
+        Directory.CreateDirectory(Config.State);
+        File.WriteAllLines(File_(g), d.Select(x => x.Key + "=" + x.Value).ToArray());
+    }
+    public static string Describe(GameEntry g, GameOption o, string value) {
+        if (value == Follow) return "Global";
+        return value == Own ? (g == null ? "Each game's own" : "This game's own") : o.Label(value);
+    }
+    // The settings this game should start with, as key=value.
+    public static List<string> ForGame(GameEntry g) {
+        var r = new List<string>();
+        if (!Available(g)) return r;
+        foreach (var o in All) {
+            if (Generation(g) < o.FirstGen) continue;
+            string v = Stored(g, o);
+            if (v == Follow) v = Stored(null, o);
+            if (v != Own) r.Add(o.Key + "=" + v);
+        }
+        return r;
     }
 }
 
@@ -571,13 +702,13 @@ static class Library {
         var json = new JavaScriptSerializer().Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(Config.GamesFile));
         Func<Dictionary<string, object>, string, string> str = delegate(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; };
         foreach (var d in json) {
-            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port") };
+            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat") };
             object c, dx;
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
             if (d.TryGetValue("colors", out c)) {
                 var hex = ((System.Collections.IEnumerable)c).Cast<object>().Select(x => (string)x).ToArray();
-                if (hex.Length == 3) { e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish")); e.Theme.GameId = e.Id; GameArt.Dress(e.Theme); }
+                if (hex.Length == 3) { e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish")); e.Theme.GameId = e.Id; }
             }
             list.Add(e);
         }
@@ -622,9 +753,9 @@ static class Library {
     // Why a game can't start: a ROM with no engine to run it is a different problem from a missing or wrong ROM.
     public static string WhyNotPlayable(GameEntry g) {
         string rom = g.FulldexRom ?? g.FoundUnsupported;
-        bool canRun = (g.Gen1 != null && Gen1Found) || (g.FulldexCode != null && File.Exists(Config.Fulldex));
+        bool canRun = (g.Gen1 != null && Gen1Found) || (g.FulldexCode != null && File.Exists(Config.Fulldex)) || (g.Nativeplat != null && File.Exists(Config.Nativeplat));
         if (rom != null && !canRun) return "Found " + Path.GetFileName(rom) + ", but this copy of nativeMons doesn't have the engine to run it. Use the full download from the Releases page.";
-        if (g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is not a version these games accept.";
+        if (g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is not a version this game's engine accepts. Its SHA-1 is " + g.FoundSha1 + ". The README lists the accepted ones.";
         return "No ROM found. Add its folder under ROM folders.";
     }
     static string HeaderOf(string file, string ext) {
@@ -639,16 +770,29 @@ static class Library {
         using (var f = File.OpenRead(file)) using (var s = SHA1.Create())
             return BitConverter.ToString(s.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
     }
+    // nativeplat's own import refuses Platinum Rev 0, but pret's build files show the revisions differ only in the header's
+    // revision byte and one GTS overlay, whose code nativeplat doesn't take from the ROM. Every game file is the same, and it
+    // doesn't check the hash when a game starts.
+    static readonly Dictionary<string, string[]> NativeplatDumps = new Dictionary<string, string[]> {
+        { "diamond", new[] { "a46233d8b79a69ea87aa295a0efad5237d02841e" } }, { "pearl", new[] { "99083bf15ec7c6b81b4ba241ee10abd9e80999ac" } },
+        { "platinum", new[] { "0862ec35b24de5c7e2dcb88c9eea0873110d755c", "ce81046eda7d232513069519cb2085349896dec7" } },
+    };
     static void Sort(List<GameEntry> list, string file, string ext, Dictionary<string, string> accepted) {
         string header = HeaderOf(file, ext);
         var g = list.Find(x => x.Header != null && (ext == ".gb" || ext == ".gbc" ? header.StartsWith(x.Header) && x.Gen1 != null : header == x.Header));
         if (g == null) return;
         if (g.FulldexCode != null && g.FulldexRom == null) g.FulldexRom = file;
+        // nativeplat only takes the exact dumps it was built against, so a game can have it or not depending on the ROM.
+        if (g.Nativeplat != null && g.NativeplatRom == null) {
+            string[] wanted;
+            if (NativeplatDumps.TryGetValue(g.Nativeplat, out wanted) && wanted.Contains(Sha1Of(file))) g.NativeplatRom = file;
+            else if (g.FulldexCode == null) { g.FoundUnsupported = file; g.FoundSha1 = Sha1Of(file); }
+        }
         if (g.Gen1 != null) {
             string v;
             // A clean dump beats anything else with the same header, such as a ROM hack of that game.
             if (accepted.TryGetValue(Sha1Of(file), out v) && v == g.Gen1) { g.Gen1Rom = file; if (g.FulldexCode != null) g.FulldexRom = file; }
-            else if (g.Gen1Rom == null) g.FoundUnsupported = file;
+            else if (g.Gen1Rom == null) { g.FoundUnsupported = file; g.FoundSha1 = Sha1Of(file); }
         }
     }
     // Whether an .nds ROM still has its secure area encrypted, which stops it loading without a DS BIOS.
@@ -867,13 +1011,15 @@ class Page {
     public string Body;          // a text page (notes, results) instead of a list
     public Action OnBack;        // null = pop the page
     public string Mono;          // a fixed-width block under the body
+    public float BodyScroll;     // how far a long body has been scrolled, in pixels
     public bool Main;
     public Theme Theme;
 }
 
 class LauncherForm : Form {
     const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, A = 0x1000, B = 0x2000;
-    public const string Gen1Credit = "Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp)";
+    // Term 1 of Gen1Recomp's LICENSE.MD sets the last sentence's exact wording, "at minimum", while we ship its engine. The rest says what it applies to.
+    public const string Gen1Credit = "Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).";
     const string Identity = "nativemons";   // Gen1Recomp's save folder, apart from any other install's saves
 
     int frame;
@@ -881,7 +1027,7 @@ class LauncherForm : Form {
     readonly Timer tick = new Timer();
     readonly List<string> log = new List<string>();
     bool dirty;
-    Process job; string jobTitle; bool jobIsGame, jobHid; DateTime jobStart; float progress = -1; Action<int> jobDone;
+    Process job; string jobTitle; bool jobIsGame, jobHid; DateTime jobStart, gameStart; float progress = -1; Action<int> jobDone;
     string waiting; bool starting; DateTime startSince; volatile string startStage;
     GameEntry current;
     ushort prevPad; int held; string lastAction = ""; bool lastFromPad; DateTime lastActionTime = DateTime.MinValue;
@@ -1012,6 +1158,9 @@ class LauncherForm : Form {
     static string RunningGames() {
         var names = new List<string>();
         if (PortRunning()) names.Add("the Platinum PC port");
+        var native = Process.GetProcessesByName("nativeplat");
+        if (native.Length > 0) names.Add("nativeplat");
+        foreach (var p in native) p.Dispose();
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
             if (found.Length > 0) names.Add(n);
@@ -1052,6 +1201,7 @@ class LauncherForm : Form {
         }
         if (err != null) ShowText("Something went wrong", err, null);
         else if (Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) { firstSetup = true; pages.Push(FoldersPage()); }
+        else AskAboutEncrypted();
         Invalidate();
     }
     void PickCurrent() {
@@ -1064,7 +1214,29 @@ class LauncherForm : Form {
             PickCurrent();
             ReplaceMain();
             if (then != null) then();
+            AskAboutEncrypted();
         });
+    }
+    // Encrypted ROMs are raised as soon as they're found, not when someone tries to play. Each file is asked about once,
+    // however the question is left; after that it stays flagged on its game's page, which can still patch it.
+    static string PatchAskedFile { get { return Path.Combine(Config.State, "patch-asked.txt"); } }
+    static List<string> PatchAsked() { try { return File.Exists(PatchAskedFile) ? File.ReadAllLines(PatchAskedFile).ToList() : new List<string>(); } catch { return new List<string>(); } }
+    void AskAboutEncrypted() {
+        var asked = PatchAsked();
+        var found = Library.Games.Where(g => g.FulldexRom != null && Library.NeedsPatch(g.FulldexRom) && !asked.Contains(g.FulldexRom)).ToList();
+        if (found.Count == 0) return;
+        try { Directory.CreateDirectory(Config.State); File.AppendAllLines(PatchAskedFile, found.Select(g => g.FulldexRom)); } catch { }
+        var p = new Page { Title = found.Count == 1 ? "Patch " + found[0].Title + "?" : "Patch " + found.Count + " games?" };
+        p.Body = "Found encrypted: " + string.Join(", ", found.Select(g => g.Title).ToArray()) + ".\n\nFulldex can't load these without a DS BIOS until their secure area is decrypted. hails.nds-Patcher does that. It changes 2 KB of each ROM file and keeps the original bytes in a backup, so it can be undone.";
+        p.Items.Add(new Item("Patch now", "Changes the ROM files, with backups.", File.Exists(Config.Patcher), delegate {
+            pages.Pop();
+            string files = string.Join(" ", found.Select(g => "\"" + g.FulldexRom + "\"").ToArray());
+            RunTool("Patching", Config.Python, "\"" + Config.Patcher + "\" " + files, Path.GetDirectoryName(Config.Patcher), delegate(int code) {
+                if (code != 0) ShowLog("Patching failed", "The patcher stopped with code " + code + ". It needs Python 3."); else ReplaceMain();
+            });
+        }) { Icon = '\uE72E' });
+        p.Items.Add(new Item("Not now", "Nothing is changed. You can patch from the game's page.", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
+        pages.Push(p);
     }
     void ReplaceMain() {
         var all = new List<Page>(pages); all.Reverse(); pages.Clear();
@@ -1098,9 +1270,40 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
+        p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Text speed, battle scene, battle style and sound, for every game." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
         return p;
+    }
+    Page GameOptionsPage(GameEntry g) {
+        var p = new Page { Title = g == null ? "Game options" : "Options: " + g.Title };
+        if (g != null) p.Theme = g.Theme;
+        foreach (var option in GameOptions.All) {
+            var o = option;
+            if (g == null ? o.GameOnly : GameOptions.Generation(g) < o.FirstGen) continue;
+            p.Items.Add(new Item(o.Name + ": " + GameOptions.Describe(g, o, GameOptions.Stored(g, o)), "Press to change.", true, delegate {
+                GameOptions.Store(g, o, GameOptions.Next(g, o));
+                var was = pages.Pop(); var again = GameOptionsPage(g); again.Sel = was.Sel; again.TopRow = was.TopRow; again.ScrollRow = was.ScrollRow; pages.Push(again);
+            }) { Icon = '\uE8D2', Info = g == null ? "Applies to every game when it starts, unless the game's own page says otherwise. It replaces what's set in the game. Not on Black, White, Black 2 and White 2 yet." : "Applies when this game starts, and replaces what's set in the game. Global follows Game options in Settings." });
+        }
+        return p;
+    }
+    // Called after the save is backed up and shared. Gen1Recomp is told at start instead (NATIVEMONS_OPTIONS). A save it can't
+    // change is left alone and the game still starts. The sync record moves with it, so this never looks like a conflict.
+    static void ApplyOptions(GameEntry g) {
+        try {
+            var wanted = GameOptions.ForGame(g);
+            string master = MasterOf(g);
+            if (wanted.Count == 0 || g.Engine() == "gen1" || !HasMaster(g) || !File.Exists(master) || SaveGuard.IsBlank(master) || !File.Exists(Config.MonBridge)) return;
+            string before = SaveGuard.Hash(master);
+            int code; SaveGuard.Bridge("options \"" + master + "\" " + string.Join(" ", wanted.ToArray()), out code);
+            string after = SaveGuard.Hash(master);
+            if (code != 0 || before == after) return;
+            var st = ReadSync(g);
+            string lastM, lastG, slot;
+            st.TryGetValue("master", out lastM); st.TryGetValue("gen1", out lastG); st.TryGetValue("slot", out slot);
+            if (lastM == before) WriteSync(g, after, lastG ?? "", slot ?? "");
+        } catch { }
     }
     static string FulldexCfg { get { return Path.Combine(Config.FulldexDir, "settings.cfg"); } }
     static Dictionary<string, string> ReadFulldex() {
@@ -1393,7 +1596,7 @@ class LauncherForm : Form {
     }
 
     // ---------- several saves per game ----------
-    static bool HasMaster(GameEntry g) { return g.FulldexCode != null && g.Save != null; }
+    static bool HasMaster(GameEntry g) { return (g.FulldexCode != null || g.Nativeplat != null) && g.Save != null; }
     static bool HasGen1Slots(GameEntry g) { return g.Gen1 != null && g.Imported; }
     static string ParkedSave(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "fulldex.sav"); }
     static string ParkedSync(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "sync.txt"); }
@@ -1729,7 +1932,7 @@ class LauncherForm : Form {
     static GameEntry GameByName(string file) {
         string stem = Path.Combine(Path.GetDirectoryName(file), Path.GetFileNameWithoutExtension(file));
         foreach (var g in Library.Games)
-            foreach (var rom in new[] { g.Gen1Rom, g.FulldexRom, g.FoundUnsupported })
+            foreach (var rom in new[] { g.Gen1Rom, g.FulldexRom, g.NativeplatRom, g.FoundUnsupported })
                 if (rom != null && string.Equals(Path.Combine(Path.GetDirectoryName(rom), Path.GetFileNameWithoutExtension(rom)), stem, StringComparison.OrdinalIgnoreCase)) return g;
         string name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file).ToLowerInvariant().Replace(" version", ""), "[^a-z0-9]+", " ");
         return Library.Games.Where(g => (" " + name + " ").Contains(" " + g.Title.Replace("Pokemon ", "").ToLowerInvariant() + " ")).OrderByDescending(g => g.Title.Length).FirstOrDefault();
@@ -1934,6 +2137,8 @@ class LauncherForm : Form {
         if (g.Gen1Rom != null) r.Add("Gen1Recomp: " + Path.GetFileName(g.Gen1Rom) + (g.Imported ? " (prepared)" : ""));
         else if (g.Imported) r.Add("Gen1Recomp: prepared");
         if (g.FulldexRom != null) r.Add("Fulldex: " + Path.GetFileName(g.FulldexRom));
+        if (Library.NeedsPatch(g.FulldexRom)) r.Add("Encrypted: needs patching for Fulldex");
+        if (g.NativeplatRom != null) r.Add("nativeplat: " + Path.GetFileName(g.NativeplatRom));
         if (SaveSets.All(g).Count > 1) r.Add("Save: " + SaveSets.Name(g, SaveSets.Active(g)));
         return r.ToArray();
     }
@@ -1946,11 +2151,12 @@ class LauncherForm : Form {
         var engines = g.Engines();
         if (engines.Count > 1) {
             string other = engines[(engines.IndexOf(engine) + 1) % engines.Count];
-            p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine), "Switch to " + GameEntry.EngineName(other) + (Shares(g) || g.Port != null ? ". They share one save." : "."), true, delegate {
+            p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine), "Switch to " + GameEntry.EngineName(other) + (Shares(g) || g.Port != null || g.Nativeplat != null ? ". They share one save." : "."), true, delegate {
                 Config.Write("engine-" + g.Id + ".txt", other); pages.Pop(); pages.Push(GamePage(g)); ReplaceMain();
             }) { Icon = '' });
         }
         p.Items.Add(new Item("Saves", "In use: " + SaveSets.Name(g, SaveSets.Active(g)) + ".", true, delegate { OpenSaves(g); }) { Icon = '\uE896' });
+        p.Items.Add(new Item("Game options", GameOptions.Available(g) ? "Text speed, battle style and more." : "Not available for this generation yet.", GameOptions.Available(g), delegate { pages.Push(GameOptionsPage(g)); }) { Icon = '\uE8D2' });
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
         p.Items.Add(new Item("Save backups", "Checked copies you can go back to.", true, delegate { pages.Push(BackupsPage(g)); }) { Icon = '\uE81C' });
         p.Items.Add(new Item("Export save", "Send it to a 3DS, flash cart or emulator.", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898' });
@@ -2084,13 +2290,14 @@ class LauncherForm : Form {
         return p;
     }
     Page CreditsPage() {
-        return new Page { Title = "Credits", Body = Gen1Credit
-            + "\n\nPokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
+        return new Page { Title = "Credits", Body = "Pokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
+            + "\n\nnativeplat by sohamb117 (github.com/sohamb117/gen4recomp), native Diamond, Pearl and Platinum from the pret decompilations. Not affiliated with nativeMons."
             + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
+            + "\n\n" + Gen1Credit
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
     }
     void ShowText(string title, string body, Action back) { ShowText(title, body, back, null); }
@@ -2118,7 +2325,7 @@ class LauncherForm : Form {
     }
 
     // ---------- moving Pokemon (tools\mon-bridge, built on PKHeX.Core) ----------
-    static string RunCapture(ProcessStartInfo psi, int seconds, out int code) {
+    internal static string RunCapture(ProcessStartInfo psi, int seconds, out int code) {
         psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
         using (var p = Process.Start(psi)) {
@@ -2355,6 +2562,7 @@ class LauncherForm : Form {
             BeforeGame(g, delegate { PlayFulldex(g); });
         }
         else if (g.Engine() == "port") BeforeGame(g, delegate { PlayPort(g); });
+        else if (g.Engine() == "nativeplat") BeforeGame(g, delegate { PlayNativeplat(g); });
         else if (!g.Imported) Import(g, delegate { BeforeGame(g, delegate { PlayGen1(g); }); });
         else BeforeGame(g, delegate { PlayGen1(g); });
     }
@@ -2363,7 +2571,9 @@ class LauncherForm : Form {
             string file = g.Imported || g.Engine() != "gen1" ? CurrentSave(g) : null;
             try { SaveGuard.Backup(g, file, "before-play"); } catch { }
             return null;
-        }, delegate(string e) { SyncThen(g, start); });
+        }, delegate(string e) {
+            SyncThen(g, delegate { Busy("Setting game options", delegate { ApplyOptions(g); return null; }, delegate(string e2) { start(); }); });
+        });
     }
     void Import(GameEntry g, Action then) {
         var psi = Gen1Start("");
@@ -2379,7 +2589,10 @@ class LauncherForm : Form {
         });
     }
     void PlayGen1(GameEntry g) {
-        RunJob(g.Title, Gen1Start(" --game=" + g.Gen1), true, delegate(int code) { Finished(g, code); });
+        var psi = Gen1Start(" --game=" + g.Gen1);
+        var wanted = GameOptions.ForGame(g);
+        if (wanted.Count > 0) psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = string.Join(",", wanted.ToArray());
+        RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
     }
     // Explicit arguments, as Fulldex's own list builds them: it then skips that list, and QUIT ends the program.
     void PlayFulldex(GameEntry g) {
@@ -2488,8 +2701,78 @@ class LauncherForm : Form {
             });
         });
     }
+    // ---------- nativeplat ----------
+    // It keeps raw cartridge saves in named slots under userdata (portable.txt beside it). We give each game one slot and treat
+    // it as the port's save.bin: the shared save goes in before the game and comes back, checked, after. Its own launcher only
+    // shows if something is wrong, because the ROM and the slot are both there before it starts.
+    const string NativeplatSlotName = "nativemons";
+    const int DsSaveBytes = 0x80000;
+    static string NativeplatDir { get { return Path.GetDirectoryName(Config.Nativeplat); } }
+    static string NativeplatSlot(GameEntry g) { return Path.Combine(NativeplatDir, "userdata", "saves", g.Nativeplat, NativeplatSlotName + ".sav"); }
+    static string NativeplatRecord(GameEntry g) { return Path.Combine(Config.State, "save-sync", g.Id + "-nativeplat.txt"); }
+    static string ReadNativeplatRecord(GameEntry g) { try { return File.Exists(NativeplatRecord(g)) ? File.ReadAllText(NativeplatRecord(g)).Trim() : null; } catch { return null; } }
+    static void WriteNativeplatRecord(GameEntry g, string hash) {
+        Directory.CreateDirectory(Path.GetDirectoryName(NativeplatRecord(g)));
+        File.WriteAllText(NativeplatRecord(g), hash ?? "");
+    }
+    // Null when all is well, or what the player should know. The shared save only changes once nativeplat's has passed.
+    public static string SaveFromNativeplat(GameEntry g) {
+        try {
+            string save = NativeplatSlot(g), master = MasterOf(g);
+            if (!File.Exists(save) || new FileInfo(save).Length == 0 || SaveGuard.IsBlank(save) || SaveGuard.Hash(save) == ReadNativeplatRecord(g)) return null;
+            string problem = SaveGuard.Problem(save);
+            if (problem != null) {
+                SaveGuard.Backup(g, save, "nativeplat");
+                return "nativeplat's save didn't pass its check, so your shared save wasn't changed. A copy is in your backups.\n\nWhy: " + problem;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(master));
+            SaveGuard.Backup(g, master, "before-nativeplat");
+            SaveGuard.Backup(g, save, "nativeplat");
+            SaveGuard.WriteInPlace(save, master);
+            if (SaveGuard.Hash(save) != SaveGuard.Hash(master)) return "nativeplat's save didn't copy correctly. Both are in your backups.";
+            WriteNativeplatRecord(g, SaveGuard.Hash(save));
+            return null;
+        } catch (Exception x) { return "nativeplat's save wasn't brought back, and it'll try again next time. " + x.Message; }
+    }
+    public static string NativeplatRomCopy(GameEntry g) {
+        string rom = Path.Combine(NativeplatDir, "userdata", "roms", g.Nativeplat + ".nds");
+        Directory.CreateDirectory(Path.GetDirectoryName(rom));
+        if (!File.Exists(rom)) { File.Copy(g.NativeplatRom, rom + ".part", true); File.Move(rom + ".part", rom); }
+        return rom;
+    }
+    // Everything nativeplat needs before it starts. Throws if it can't be got ready, so a save is never put at risk.
+    public static void PrepareNativeplat(GameEntry g) {
+        string marker = Path.Combine(NativeplatDir, "portable.txt");
+        if (!File.Exists(marker)) File.WriteAllText(marker, "");
+        NativeplatRomCopy(g);
+        string note = SaveFromNativeplat(g), save = NativeplatSlot(g), master = MasterOf(g);
+        if (note != null && File.Exists(save)) SaveGuard.Backup(g, save, "nativeplat-leftover");
+        Directory.CreateDirectory(Path.GetDirectoryName(save));
+        if (File.Exists(master) && !SaveGuard.IsBlank(master)) {
+            long size = new FileInfo(master).Length;
+            if (size != DsSaveBytes) throw new InvalidDataException("nativeplat needs a save of exactly 512 KB, and this one is " + size + " bytes.");
+            SaveGuard.WriteInPlace(master, save);
+        }
+        else File.WriteAllBytes(save, new byte[0]);
+        try { File.Delete(save + ".bak"); } catch { }
+        WriteNativeplatRecord(g, SaveGuard.Hash(save));
+    }
+    void PlayNativeplat(GameEntry g) {
+        string problem = null;
+        Busy("Getting " + g.Title + " ready", delegate { try { PrepareNativeplat(g); } catch (Exception x) { problem = x.Message; } return null; }, delegate(string e) {
+            if (e != null || problem != null) { ShowText("Could not start " + g.Title, "Nothing was changed.\n\n" + (e ?? problem), null); return; }
+            var psi = new ProcessStartInfo(Config.Nativeplat, "--game " + g.Nativeplat + " --slot " + NativeplatSlotName) { UseShellExecute = false, WorkingDirectory = NativeplatDir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            RunJob(g.Title, psi, true, delegate(int code) {
+                string note = null;
+                Busy("Saving " + g.Title, delegate { note = SaveFromNativeplat(g); return null; }, delegate(string e2) {
+                    if (e2 != null || note != null) noticeAfter = e2 ?? note;
+                    Finished(g, code);
+                });
+            });
+        });
+    }
     void Finished(GameEntry g, int code) {
-        var t = DateTime.Now - jobStart;
+        var t = DateTime.Now - gameStart;
         string text = g.Title + " ran for " + ((int)t.TotalMinutes) + ":" + t.Seconds.ToString("00") + ".";
         if (code != 0) text += " It ended with code " + code + ".";
         string detail = code != 0 ? "\n\n" + string.Join("\n", log.Skip(Math.Max(0, log.Count - 12)).ToArray()) : "";
@@ -2508,7 +2791,7 @@ class LauncherForm : Form {
         RunJob(title, new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true }, false, done);
     }
     void RunJob(string title, ProcessStartInfo psi, bool isGame, Action<int> done) {
-        log.Clear(); jobTitle = title; jobIsGame = isGame; jobHid = false; jobStart = DateTime.Now; progress = -1; jobDone = done;
+        log.Clear(); jobTitle = title; jobIsGame = isGame; jobHid = false; jobStart = DateTime.Now; if (isGame) gameStart = jobStart; progress = -1; jobDone = done;
         // Let the game take the foreground from us.
         Native.AllowSetForegroundWindow(-1);
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -2526,7 +2809,7 @@ class LauncherForm : Form {
     }
     // Gen1Recomp reads paths from the environment in the system's code page, which garbles accented names such as
     // "Pokémon". Such a file goes in through a plain-named temporary copy. Dispose removes it.
-    sealed class PlainPath : IDisposable {
+    internal sealed class PlainPath : IDisposable {
         public readonly string Path_; readonly string temp;
         public PlainPath(string file) {
             if (file.All(c => c < 128)) { Path_ = file; return; }
@@ -2608,7 +2891,7 @@ class LauncherForm : Form {
         }
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
-        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || (pages.Count > 0 && pages.Peek().Main) || GameArt.Has(Cur().GameId))) Invalidate();
+        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
@@ -2692,6 +2975,8 @@ class LauncherForm : Form {
             else if (p.Body == null) p.Sel = PageGridMove(p.Sel, a, p.Items.Count, 2);
             else if (a == "up" || a == "left") p.Sel = (p.Sel - 1 + p.Items.Count) % p.Items.Count;
             else if (a == "down" || a == "right") p.Sel = (p.Sel + 1) % p.Items.Count;
+        } else if ((a == "up" || a == "down") && p.Body != null) {
+            p.BodyScroll += (a == "down" ? 1 : -1) * bodyFont.Height * 3;   // the drawing keeps it within the text
         } else if (a == "ok" && p.Body != null) {
             if (p.OnBack != null) p.OnBack(); else pages.Pop();
         }
@@ -2790,18 +3075,6 @@ class LauncherForm : Form {
         return f;
     }
     static void VersionFill(Graphics g, RectangleF r, float rad, Theme th, float t) {
-        // A game's own title screen, where it's been captured, with shade so what's on top stays readable.
-        var art = r.Height >= 40 ? GameArt.Frame(th.GameId, t) : null;
-        if (art != null) {
-            using (var path = Round(r, rad)) {
-                var st = g.Save();
-                g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
-                GameArt.Draw(g, art, r);
-                using (var shade = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRectangle(shade, r);
-                g.Restore(st);
-            }
-            return;
-        }
         var layer = LayerFor((int)Math.Ceiling(r.Width), (int)Math.Ceiling(r.Height), th);
         using (var path = Round(r, rad)) {
             var st = g.Save();
@@ -3336,10 +3609,6 @@ class LauncherForm : Form {
     }
 
     void RenderMain(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
-        // The required credit stays on the launcher's main screen (Gen1Recomp's LICENSE.MD, term 1).
-        float creditH = smallFont.Height * 2.5f;
-        Write(g, Gen1Credit, smallFont, FootInk, new RectangleF(m, bottom - creditH, w - 2 * m, creditH), StringAlignment.Center, StringAlignment.Far, true);
-        bottom -= creditH + h * 0.012f;
         // The Play panel: the selected version's colour and finish.
         var hero = new RectangleF(m, top, w - 2 * m, (bottom - top) * 0.42f);
         float heroRad = w * 0.03f;
@@ -3349,37 +3618,38 @@ class LauncherForm : Form {
         float pad = hero.Width * 0.05f;
         Write(g, "NOW SELECTED", smallBold, th.Ink, new RectangleF(hero.X + pad, hero.Y + pad * 0.7f, hero.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
         string name = current != null ? current.Title : "No games yet";
-        var titleLogo = current != null ? GameArt.Logo(current.Id) : null;
-        float logoW = 0;
-        if (titleLogo != null) {
-            // The game's logo, from its title screen, at the top of the panel beside its name.
-            float logoH = hero.Height * 0.46f;
-            logoW = logoH * titleLogo.Width / titleLogo.Height;
-            var lr = new RectangleF(hero.Right - logoW - pad * 0.6f, hero.Y + pad * 0.5f, logoW, logoH);
-            using (var clip = Round(lr, lr.Height * 0.08f)) {
-                var st = g.Save();
-                g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
-                GameArt.Draw(g, titleLogo, lr);
-                g.Restore(st);
-                using (var pen = new Pen(Line, 2)) g.DrawPath(pen, clip);
-            }
-            logoW += pad * 0.8f;
-        }
-        var vr = new RectangleF(hero.X + pad, hero.Y + pad * 0.7f + smallFont.Height * 1.2f, hero.Width - 2 * pad - logoW, heroFont.Height * 1.2f);
+        var vr = new RectangleF(hero.X + pad, hero.Y + pad * 0.7f + smallFont.Height * 1.2f, hero.Width - 2 * pad, heroFont.Height * 1.2f);
         var vf = FitFont(g, name, vr.Size, heroFont, 0.6f, false);
         Write(g, name, vf, th.Ink, new RectangleF(vr.X, vr.Y + (heroFont.Height - vf.Height) / 2, vr.Width, vr.Height), StringAlignment.Near, StringAlignment.Near, false);
         string sub = current != null ? current.Console + " with " + GameEntry.EngineName(current.Engine()) : "Add a ROM folder to get started.";
-        Write(g, sub, smallBold, th.Ink, new RectangleF(hero.X + pad, vr.Bottom, hero.Width - 2 * pad - logoW, smallFont.Height * 2.5f), StringAlignment.Near, StringAlignment.Near, true);
+        Write(g, sub, smallBold, th.Ink, new RectangleF(hero.X + pad, vr.Bottom, hero.Width - 2 * pad, smallFont.Height * 2.5f), StringAlignment.Near, StringAlignment.Near, true);
         if (p.Items.Count > 0) {
             bool sel = p.Sel == 0, on = p.Items[0].On;
-            float bh = hero.Height * 0.3f;
+            // The selected game's intro plays inside this button, like a small splash, and nowhere else.
+            var intro = on && current != null ? GameArt.Frame(current.Id, t) : null;
+            float bh = hero.Height * (intro != null ? 0.36f : 0.3f);
             var pr = new RectangleF(hero.X + pad, hero.Bottom - bh - pad * 0.7f, hero.Width - 2 * pad, bh);
             hits.Add(new KeyValuePair<RectangleF, int>(pr, 0));
             if (sel && on) using (var glow = Round(new RectangleF(pr.X - 5, pr.Y - 5, pr.Width + 10, pr.Height + 10), pr.Height * 0.3f)) using (var gb = new SolidBrush(Fade(Color.White, 70 + (int)(45 * Math.Sin(t * 3))))) g.FillPath(gb, glow);
             Box(g, pr, pr.Height * 0.24f, th, sel, on);
-            Color ink = on ? (th.OnCream) : Text3;
+            if (intro != null) {
+                float inset = Math.Max(2f, pr.Height * 0.03f);
+                var inner = new RectangleF(pr.X + inset, pr.Y + inset, pr.Width - 2 * inset, pr.Height - 2 * inset);
+                using (var clip = Round(inner, inner.Height * 0.2f)) {
+                    var st = g.Save();
+                    g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+                    GameArt.Draw(g, intro, inner);
+                    using (var shade = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRectangle(shade, inner);
+                    g.Restore(st);
+                }
+            }
+            Color ink = intro != null ? Color.FromArgb(252, 250, 244) : on ? (th.OnCream) : Text3;
             var size = g.MeasureString("PLAY", playFont);
             float cx = pr.X + (pr.Width - size.Width - pr.Height * 0.5f) / 2;
+            if (intro != null) {
+                var pill = new RectangleF(cx - pr.Height * 0.3f, pr.Y + pr.Height * 0.2f, size.Width + pr.Height * 1f, pr.Height * 0.6f);
+                using (var path = Round(pill, pill.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(170, 0, 0, 0))) g.FillPath(b, path);
+            }
             Cursor3(g, cx, pr.Y + pr.Height / 2, pr.Height * 0.2f, ink);
             Write(g, "PLAY", playFont, ink, new RectangleF(cx + pr.Height * 0.4f, pr.Y, size.Width + 8, pr.Height), StringAlignment.Near, StringAlignment.Center, false);
         }
@@ -3461,7 +3731,18 @@ class LauncherForm : Form {
             Box(g, br, h * 0.018f, th, false, true);
             float pad = h * 0.032f, bodyText = br.Height - 2 * pad;
             if (p.Mono != null) bodyText = Math.Min(bodyText, g.MeasureString(p.Body, bodyFont, (int)(br.Width - 2 * pad)).Height + smallFont.Height * 0.5f);
-            Write(g, p.Body, bodyFont, Text1, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
+            // A body too long for its box scrolls, on a page with nothing else to move through.
+            float whole = p.Items.Count == 0 && p.Mono == null ? g.MeasureString(p.Body, bodyFont, (int)(br.Width - 2 * pad)).Height + bodyFont.Height : 0;
+            if (whole > bodyText) {
+                p.BodyScroll = Math.Max(0, Math.Min(p.BodyScroll, whole - bodyText));
+                var st = g.Save();
+                g.SetClip(new RectangleF(br.X, br.Y + pad, br.Width, bodyText), System.Drawing.Drawing2D.CombineMode.Intersect);
+                Write(g, p.Body, bodyFont, Text1, new RectangleF(br.X + pad, br.Y + pad - p.BodyScroll, br.Width - 2 * pad, whole), StringAlignment.Near, StringAlignment.Near, true);
+                g.Restore(st);
+                if (p.BodyScroll < whole - bodyText) Write(g, "\u25BC", smallFont, Text2, new RectangleF(br.X, br.Bottom - pad, br.Width - pad * 0.6f, pad * 0.8f), StringAlignment.Far, StringAlignment.Center, false);
+                if (p.BodyScroll > 0) Write(g, "\u25B2", smallFont, Text2, new RectangleF(br.X, br.Y + pad * 0.2f, br.Width - pad * 0.6f, pad * 0.8f), StringAlignment.Far, StringAlignment.Center, false);
+            }
+            else Write(g, p.Body, bodyFont, Text1, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
             if (p.Mono != null) {
                 var eb = new RectangleF(br.X + pad, br.Y + pad + bodyText, br.Width - 2 * pad, br.Height - 2 * pad - bodyText);
                 Card(g, eb, h * 0.01f, Color.FromArgb(40, 20, 22), Color.FromArgb(26, 14, 16), Color.FromArgb(120, 228, 76, 70), 1);
@@ -3590,7 +3871,8 @@ class LauncherForm : Form {
         }
         g.Restore(clip);
         Write(g, startStage ?? "", itemFont, FootInk, new RectangleF(0, track.Bottom + h * 0.04f, w, itemFont.Height * 1.4f), StringAlignment.Center, StringAlignment.Near, false);
-        Write(g, Gen1Credit, smallFont, FootInk, new RectangleF(w * 0.05f, h - smallFont.Height * 3.4f, w * 0.9f, smallFont.Height * 2.8f), StringAlignment.Center, StringAlignment.Near, true);
+        // Gen1Recomp's LICENSE.MD, term 1: its credit must show visibly in any launcher. Here on every start, and on the Credits page.
+        Write(g, Gen1Credit, smallFont, FootInk, new RectangleF(w * 0.05f, h - smallFont.Height * 5.4f, w * 0.9f, smallFont.Height * 4.8f), StringAlignment.Center, StringAlignment.Near, true);
         float fade = Ease(since / 0.45f);
         if (fade < 1) using (var veil = new SolidBrush(Color.FromArgb((int)(255 * (1 - fade)), 8, 10, 14))) g.FillRectangle(veil, all);
     }
