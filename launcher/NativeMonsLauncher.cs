@@ -37,7 +37,8 @@ static class Native {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
-    [DllImport("user32.dll")] public static extern bool ReleaseRunCapture();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetShortPathName(string path, StringBuilder shortPath, uint size);
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
     // Windows only lets the foreground owner hand the foreground on; joining its input for the call lifts that.
@@ -320,6 +321,64 @@ static class Sprites {
         while (DateTime.Now < until) { lock (gate) { if (queue.Count == 0 && workers == 0) return; } System.Threading.Thread.Sleep(50); }
     }
 }
+
+// Keeps saves safe. Every save that's about to change is copied first, the copy is checked byte for byte, and only
+// checked copies are kept. A game both engines can run shares one save: the cartridge file Fulldex uses.
+static class SaveGuard {
+    public static string Hash(string file) {
+        if (file == null || !File.Exists(file)) return "";
+        using (var f = File.OpenRead(file)) using (var s = SHA256.Create()) return BitConverter.ToString(s.ComputeHash(f)).Replace("-", "");
+    }
+    public static string BackupFolder(GameEntry g) { return Path.Combine(Config.State, "save-backups", g.Id); }
+    public static string Bridge(string args, out int code) {
+        var psi = new ProcessStartInfo(Config.MonBridge, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
+        using (var p = Process.Start(psi)) {
+            var e = p.StandardError.ReadToEndAsync(); var o = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(60000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
+            code = p.ExitCode;
+            return o.Result.Trim() != "" ? o.Result : e.Result;
+        }
+    }
+    // Null when the save is healthy, otherwise what's wrong with it. Without the tool, nothing can be checked.
+    public static string Problem(string file) {
+        if (!File.Exists(Config.MonBridge)) return null;
+        int code; string o = Bridge("check \"" + file + "\"", out code);
+        if (code == 0) return null;
+        var f = o.Trim().Split('\t');
+        return f.Length > 1 ? f[1] : o.Trim();
+    }
+    // A verified copy, skipped if the newest backup already holds these bytes. Damaged saves are kept too, and marked.
+    public static string Backup(GameEntry g, string file, string reason) {
+        if (file == null || !File.Exists(file)) return null;
+        string folder = BackupFolder(g);
+        Directory.CreateDirectory(folder);
+        string hash = Hash(file);
+        var newest = Directory.GetFiles(folder, "*.sav").OrderByDescending(x => x, StringComparer.Ordinal).FirstOrDefault();
+        if (newest != null && Hash(newest) == hash) return newest;
+        string mark = Problem(file) != null ? "-damaged" : "";
+        string target = Path.Combine(folder, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + reason + mark + ".sav");
+        string temp = target + ".part";
+        File.Copy(file, temp, true);
+        if (Hash(temp) != hash) { File.Delete(temp); throw new IOException("A backup didn't match its save, so nothing was changed. Check the drive."); }
+        File.Move(temp, target);
+        // The newest 30 stay. The oldest healthy one is never the last to go, as only extras are removed.
+        foreach (var old in Directory.GetFiles(folder, "*.sav").OrderByDescending(x => x, StringComparer.Ordinal).Skip(30)) { try { File.Delete(old); } catch { } }
+        return target;
+    }
+    public static string[] Backups(GameEntry g) {
+        string folder = BackupFolder(g);
+        return Directory.Exists(folder) ? Directory.GetFiles(folder, "*.sav").OrderByDescending(x => x, StringComparer.Ordinal).ToArray() : new string[0];
+    }
+    public static void WriteInPlace(string source, string target) {
+        string temp = target + ".part", hash = Hash(source);
+        Directory.CreateDirectory(Path.GetDirectoryName(target));
+        File.Copy(source, temp, true);
+        if (Hash(temp) != hash) { File.Delete(temp); throw new IOException("A copy didn't match its source, so nothing was changed."); }
+        File.Copy(temp, target, true);
+        File.Delete(temp);
+    }
+}
+class SyncResult { public bool Conflict, Changed, Failed; public string Note, Master, Gen1; }
 
 // One menu row: greyed rows (On = false) can be selected to read why, but do nothing.
 class Item {
@@ -628,6 +687,212 @@ class LauncherForm : Form {
         });
     }
 
+    // ---------- one save for both engines ----------
+    static string MasterOf(GameEntry g) { return Path.Combine(Config.FulldexDir, "saves", g.Save ?? ""); }
+    public static bool Shares(GameEntry g) { return g.HasBoth && File.Exists(Config.MonBridge); }
+    static string SyncFile(GameEntry g) { return Path.Combine(Config.State, "save-sync", g.Id + ".txt"); }
+    static Dictionary<string, string> ReadSync(GameEntry g) {
+        var d = new Dictionary<string, string>();
+        try { if (File.Exists(SyncFile(g))) foreach (var l in File.ReadAllLines(SyncFile(g))) { int e = l.IndexOf('='); if (e > 0) d[l.Substring(0, e)] = l.Substring(e + 1); } } catch { }
+        return d;
+    }
+    static void WriteSync(GameEntry g, string master, string gen1, string slot) {
+        Directory.CreateDirectory(Path.GetDirectoryName(SyncFile(g)));
+        string temp = SyncFile(g) + ".part";
+        File.WriteAllText(temp, "master=" + master + "\ngen1=" + gen1 + "\nslot=" + slot + "\n");
+        File.Copy(temp, SyncFile(g), true); File.Delete(temp);
+    }
+    // Gen1Recomp's save as a cartridge file. Null when it has none yet; "why" is set only when something went wrong.
+    static string Gen1Export(GameEntry g, out string why) {
+        why = null;
+        var psi = Gen1Start("");
+        psi.EnvironmentVariables["NATIVEMONS_CLI"] = "export " + g.Gen1;
+        int code; string o = RunCapture(psi, 90, out code).Trim();
+        if (code == 0 && o != "") return o.Split('\n').Last().Trim().Replace('/', '\\');
+        if (o.IndexOf("no save", StringComparison.OrdinalIgnoreCase) < 0) why = o != "" ? o : "Gen1Recomp couldn't export its save.";
+        return null;
+    }
+    static string Gen1Slot(GameEntry g, string command) {
+        var psi = Gen1Start("");
+        psi.EnvironmentVariables["NATIVEMONS_CLI"] = command;
+        int code; string o = RunCapture(psi, 60, out code);
+        return code == 0 ? o.Trim().Split('\n').Last().Trim() : null;
+    }
+    // Brings both engines level. Never throws, never replaces a save without a verified backup and a proven result, and
+    // whatever happens the game can still start: a failure leaves both saves alone and is tried again next time.
+    public static SyncResult SyncSave(GameEntry g, string prefer) {
+        var r = new SyncResult();
+        if (!Shares(g) || !g.Imported) return r;
+        try {
+            string why, gen1 = Gen1Export(g, out why);
+            if (why != null) return Kept(r, why);
+            string master = MasterOf(g);
+            bool hasMaster = File.Exists(master);
+            string hm = SaveGuard.Hash(master), hg = SaveGuard.Hash(gen1);
+            var st = ReadSync(g);
+            string lastM, lastG, slot;
+            st.TryGetValue("master", out lastM); st.TryGetValue("gen1", out lastG); st.TryGetValue("slot", out slot);
+            bool known = lastM != null;
+            bool mChanged = hasMaster && (!known || hm != lastM), gChanged = gen1 != null && (!known || hg != lastG);
+            if (!hasMaster && gen1 == null) return r;
+            if (hm == hg) { WriteSync(g, hm, hg, slot ?? ""); return r; }
+            if (!mChanged && !gChanged) return r;
+            string direction = mChanged && gChanged ? prefer : mChanged ? "fulldex" : "gen1";
+            if (direction == null) { r.Conflict = true; r.Master = master; r.Gen1 = gen1; return r; }
+            return direction == "fulldex" ? MasterToGen1(g, r, master, slot) : Gen1ToMaster(g, r, gen1, master, slot);
+        } catch (Exception x) { return Kept(r, x.Message); }
+    }
+    static SyncResult Kept(SyncResult r, string why) {
+        r.Failed = true;
+        r.Note = "Your saves weren't shared this time, and neither was changed. It'll try again next time.\n\nWhy: " + why;
+        return r;
+    }
+    static SyncResult Gen1ToMaster(GameEntry g, SyncResult r, string gen1, string master, string slot) {
+        string problem = SaveGuard.Problem(gen1);
+        if (problem != null) return Kept(r, "Gen1Recomp's save failed its check: " + problem);
+        SaveGuard.Backup(g, master, "before-sync");
+        SaveGuard.Backup(g, gen1, "gen1recomp");
+        SaveGuard.WriteInPlace(gen1, master);
+        int code; string o = SaveGuard.Bridge("compare \"" + gen1 + "\" \"" + master + "\"", out code);
+        if (code != 0) return Kept(r, "The result didn't match: " + o.Trim());
+        WriteSync(g, SaveGuard.Hash(master), SaveGuard.Hash(gen1), slot ?? "");
+        r.Changed = true;
+        return r;
+    }
+    static SyncResult MasterToGen1(GameEntry g, SyncResult r, string master, string slot) {
+        string problem = SaveGuard.Problem(master);
+        string source = master, repaired = null;
+        if (problem != null) {
+            // A wrong checksum may still be repairable. The repaired copy has to pass everything the original would.
+            repaired = Path.Combine(Config.State, "save-sync", g.Id + "-repaired.sav");
+            Directory.CreateDirectory(Path.GetDirectoryName(repaired));
+            int rc; SaveGuard.Bridge("repair \"" + master + "\" \"" + repaired + "\"", out rc);
+            if (rc != 0) return Kept(r, "The Fulldex save failed its check: " + problem);
+            source = repaired;
+        }
+        string why, before = Gen1Export(g, out why);
+        SaveGuard.Backup(g, master, "fulldex");
+        SaveGuard.Backup(g, before, "before-sync");
+        string active = Gen1Slot(g, "active " + g.Gen1);
+        var last = TryImportProved(g, source, out why);
+        // One more way in: the same save rewritten by PKHeX, which can get past a strict reader.
+        if (last == null && repaired == null) {
+            repaired = Path.Combine(Config.State, "save-sync", g.Id + "-repaired.sav");
+            int rc; SaveGuard.Bridge("repair \"" + master + "\" \"" + repaired + "\"", out rc);
+            string again; if (rc == 0) last = TryImportProved(g, repaired, out again);
+        }
+        if (last == null) {
+            if (active != null && active != "nil") Gen1Slot(g, "activate " + g.Gen1 + " " + active);
+            return Kept(r, why);
+        }
+        // The slot this sync made last time isn't needed now; the player's own slots are never removed.
+        if (!string.IsNullOrEmpty(slot) && slot == active) Gen1Slot(g, "delete " + g.Gen1 + " " + slot);
+        string after = Gen1Export(g, out why);
+        WriteSync(g, SaveGuard.Hash(master), SaveGuard.Hash(after), last);
+        if (repaired != null) try { File.Delete(repaired); } catch { }
+        r.Changed = true;
+        if (problem != null) r.Note = "Fulldex's save had a wrong checksum. It was repaired for Gen1Recomp, and the original is in your backups.";
+        return r;
+    }
+    // Imports into a new slot and proves it matches. A slot that doesn't match is removed. Returns the slot, or null.
+    static string TryImportProved(GameEntry g, string source, out string why) {
+        var psi = Gen1Start("");
+        int code; string slot;
+        using (var plain = new PlainPath(source)) {
+            psi.EnvironmentVariables["NATIVEMONS_CLI"] = "import " + g.Gen1 + " " + plain.Path_;
+            slot = RunCapture(psi, 90, out code).Trim().Split('\n').Last().Trim();
+        }
+        if (code != 0) { why = "Gen1Recomp couldn't read it: " + slot; return null; }
+        string exported = Gen1Export(g, out why);
+        if (exported == null) { Gen1Slot(g, "delete " + g.Gen1 + " " + slot); why = why ?? "It couldn't be read back."; return null; }
+        string o = SaveGuard.Bridge("compare \"" + source + "\" \"" + exported + "\"", out code);
+        if (code != 0) { Gen1Slot(g, "delete " + g.Gen1 + " " + slot); why = "The result didn't match, so it wasn't used: " + o.Trim().Replace("\n", "; "); return null; }
+        why = null;
+        return slot;
+    }
+    // Runs the sync behind a card, asks if both engines' saves changed, then carries on whatever the outcome.
+    void SyncThen(GameEntry g, Action then) {
+        if (!Shares(g) || !g.Imported) { then(); return; }
+        SyncResult result = null;
+        Busy("Sharing your " + g.Title + " save", delegate { result = SyncSave(g, null); return null; }, delegate(string e) {
+            if (result != null && result.Conflict) { pages.Push(ConflictPage(g, then)); Invalidate(); return; }
+            string note = e ?? (result != null ? result.Note : null);
+            if (note != null) { Config.Write("last-session.txt", g.Title + ": " + note); noticeAfter = note; }
+            then();
+        });
+    }
+    string noticeAfter;
+    Page ConflictPage(GameEntry g, Action then) {
+        var p = new Page { Title = "Which " + g.Title + " save?", Theme = g.Theme, Body = "Both engines' saves changed since they last matched, so they can't simply be merged. Choose the one to keep playing. The other is kept in your backups." };
+        Action<string> use = delegate(string side) {
+            pages.Pop();
+            SyncResult result = null;
+            Busy("Sharing your " + g.Title + " save", delegate { result = SyncSave(g, side); return null; }, delegate(string e) { string note = e ?? result.Note; if (note != null) noticeAfter = note; then(); });
+        };
+        p.Items.Add(new Item("Use the Fulldex save", "", true, delegate { use("fulldex"); }) { Icon = '\uE7FC' });
+        p.Items.Add(new Item("Use the Gen1Recomp save", "", true, delegate { use("gen1"); }) { Icon = '\uE7FC' });
+        p.Items.Add(new Item("Not now", "Starts the game without sharing. You'll be asked again.", true, delegate { pages.Pop(); then(); }) { Icon = '\uE711' });
+        return p;
+    }
+    // The save a game is using right now, as a cartridge file.
+    string CurrentSave(GameEntry g) { string why; return SaveOf(g, out why); }
+    // After a game: back up, check for damage, share. The player hears only when there's something to decide.
+    void AfterGame(GameEntry g, int code, Action done) {
+        string damaged = null;
+        SyncResult result = null;
+        Busy("Checking your save", delegate {
+            string file = CurrentSave(g);
+            if (file != null) {
+                try { SaveGuard.Backup(g, file, "played"); } catch { }
+                damaged = SaveGuard.Problem(file);
+            }
+            if (damaged == null) result = SyncSave(g, null);
+            return null;
+        }, delegate(string e) {
+            if (damaged != null) { pages.Push(DamagedPage(g, damaged, done)); Invalidate(); return; }
+            if (result != null && result.Conflict) { pages.Push(ConflictPage(g, done)); Invalidate(); return; }
+            string note = e ?? (result != null ? result.Note : null);
+            if (note != null) noticeAfter = note;
+            done();
+        });
+    }
+    Page DamagedPage(GameEntry g, string why, Action done) {
+        var good = SaveGuard.Backups(g).FirstOrDefault(x => !x.Contains("-damaged"));
+        var p = new Page { Title = "Your " + g.Title + " save looks damaged", Theme = g.Theme, Body = why + (good != null ? "\n\nA healthy backup from " + BackupWhen(good) + " is available." : "\n\nThere's no healthy backup to go back to yet.") };
+        if (good != null) p.Items.Add(new Item("Restore that backup", "", true, delegate { pages.Pop(); RestoreBackup(g, good, done); }) { Icon = '\uE72C' });
+        p.Items.Add(new Item("Leave it for now", "Nothing is changed. The damaged save is in your backups.", true, delegate { pages.Pop(); done(); }) { Icon = '\uE711' });
+        return p;
+    }
+    static string BackupWhen(string file) {
+        DateTime when;
+        string n = Path.GetFileName(file);
+        return n.Length >= 15 && DateTime.TryParseExact(n.Substring(0, 15), "yyyyMMdd-HHmmss", null, System.Globalization.DateTimeStyles.None, out when) ? when.ToString("d MMM yyyy, HH:mm") : n;
+    }
+    Page BackupsPage(GameEntry g) {
+        var p = new Page { Title = g.Title + " backups", Theme = g.Theme };
+        foreach (var file in SaveGuard.Backups(g)) {
+            string f = file; bool bad = f.Contains("-damaged");
+            p.Items.Add(new Item(BackupWhen(f), "", !bad, delegate { RestoreBackup(g, f, delegate { }); }) { Icon = '\uE81C', Info = bad ? "This one failed its check, and is kept in case it's ever needed." : "Select to go back to this save. Your current save is backed up first.", Records = new[] { "File: " + Path.GetFileName(f) } });
+        }
+        if (p.Items.Count == 0) p.Items.Add(new Item("No backups yet", "", false, null) { Icon = '\uE81C', Info = "A backup is made whenever a save is about to change." });
+        return p;
+    }
+    void RestoreBackup(GameEntry g, string file, Action done) {
+        string problem = null;
+        Busy("Restoring your save", delegate {
+            try {
+                problem = SaveGuard.Problem(file);
+                if (problem != null) { problem = "That backup failed its check: " + problem; return null; }
+                string current = CurrentSave(g);
+                SaveGuard.Backup(g, current, "before-restore");
+                if (g.Engine() == "fulldex" || Shares(g)) SaveGuard.WriteInPlace(file, MasterOf(g));
+                if (g.Engine() != "fulldex") problem = ImportBack(g, file);
+                if (problem == null && Shares(g)) { var r = SyncSave(g, "fulldex"); problem = r.Failed ? r.Note : null; }
+            } catch (Exception x) { problem = x.Message; }
+            return null;
+        }, delegate(string e) { ShowText(e == null && problem == null ? "Restored" : "Not restored", e ?? problem ?? "Your " + g.Title + " save is back to that backup.", null); done(); });
+    }
+
     // ---------- exporting saves ----------
     // Everything needed to put a save back on a device. Copies byte for byte: the file is already in cartridge format.
     public static string ExportSave(GameEntry g, bool checkpoint, string outFolder, string backup, out bool ok) {
@@ -792,7 +1057,7 @@ class LauncherForm : Form {
     }
     void ImportSave(FoundSave one) {
         var g = one.Game;
-        if (g.Engine() != "fulldex") {
+        if (g.Engine() != "fulldex" && !Shares(g)) {
             // A new save slot: anything already there is kept.
             Action run = delegate {
                 string problem = null;
@@ -890,11 +1155,12 @@ class LauncherForm : Form {
         p.Items.Add(play);
         if (g.HasBoth) {
             string other = engine == "fulldex" ? "gen1" : "fulldex";
-            p.Items.Add(new Item("Engine: " + (engine == "fulldex" ? "Fulldex" : "Gen1Recomp"), "Switch to " + GameEntry.EngineName(other) + ". Each engine keeps its own save.", true, delegate {
+            p.Items.Add(new Item("Engine: " + (engine == "fulldex" ? "Fulldex" : "Gen1Recomp"), "Switch to " + GameEntry.EngineName(other) + (Shares(g) ? ". Both share one save." : "."), true, delegate {
                 Config.Write("engine-" + g.Id + ".txt", other); pages.Pop(); pages.Push(GamePage(g)); ReplaceMain();
             }) { Icon = '' });
         }
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
+        p.Items.Add(new Item("Save backups", "Checked copies you can go back to.", true, delegate { pages.Push(BackupsPage(g)); }) { Icon = '\uE81C' });
         p.Items.Add(new Item("Export save", "Send it to a 3DS, flash cart or emulator.", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898' });
         p.Items.Add(new Item("Open in PKHeX", "View or edit this game's save in PKHeX.", true, delegate { OpenInPkhex(g); }) { Icon = '\uE70F' });
         if (engine != "fulldex") p.Items.Add(new Item("Bring back the edited save", "Takes the save you edited in PKHeX. Your older save slots stay.", true, delegate { BringBack(g); }) { Icon = '\uE896' });
@@ -1036,7 +1302,10 @@ class LauncherForm : Form {
             var o = p.StandardOutput.ReadToEndAsync();
             if (!p.WaitForExit(seconds * 1000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
             code = p.ExitCode;
-            return code == 0 || o.Result.Trim() != "" ? o.Result : err.Result;
+            // The audio library always prints this when a run ends; it isn't a message about anything.
+            string shown = code == 0 || o.Result.Trim() != "" ? o.Result : err.Result;
+            string plain = string.Join("\n", shown.Split('\n').Where(l => !l.StartsWith("AL lib:") && !l.StartsWith("[")).ToArray());
+            return code != 0 && plain.Trim() == "" ? err.Result + o.Result : plain;
         }
     }
     static string BridgeFamilies() {
@@ -1064,8 +1333,11 @@ class LauncherForm : Form {
     static string ImportBack(GameEntry g, string file) {
         if (g.Engine() == "fulldex") return null;
         var psi = Gen1Start("");
-        psi.EnvironmentVariables["NATIVEMONS_CLI"] = "import " + g.Gen1 + " " + file;
-        int code; string o = RunCapture(psi, 60, out code);
+        int code; string o;
+        using (var plain = new PlainPath(file)) {
+            psi.EnvironmentVariables["NATIVEMONS_CLI"] = "import " + g.Gen1 + " " + plain.Path_;
+            o = RunCapture(psi, 60, out code);
+        }
         return code == 0 ? null : (o.Trim() != "" ? o.Trim() : "Gen1Recomp could not take the save back.");
     }
     Page MoveFromPage() {
@@ -1231,17 +1503,26 @@ class LauncherForm : Form {
         current = g; Config.Write("last-game.txt", g.Id);
         if (g.Engine() == "fulldex") {
             if (Library.NeedsPatch(g.FulldexRom)) { pages.Push(PatchPage(g, true)); return; }
-            PlayFulldex(g);
+            BeforeGame(g, delegate { PlayFulldex(g); });
         }
-        else if (!g.Imported) Import(g, delegate { PlayGen1(g); });
-        else PlayGen1(g);
+        else if (!g.Imported) Import(g, delegate { BeforeGame(g, delegate { PlayGen1(g); }); });
+        else BeforeGame(g, delegate { PlayGen1(g); });
+    }
+    void BeforeGame(GameEntry g, Action start) {
+        Busy("Backing up your save", delegate {
+            string file = g.Imported || g.Engine() == "fulldex" ? CurrentSave(g) : null;
+            try { SaveGuard.Backup(g, file, "before-play"); } catch { }
+            return null;
+        }, delegate(string e) { SyncThen(g, start); });
     }
     void Import(GameEntry g, Action then) {
         var psi = Gen1Start("");
         psi.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
         psi.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
-        psi.EnvironmentVariables["POKEPORT_IMPORT_ROM"] = g.Gen1Rom;
+        var rom = new PlainPath(g.Gen1Rom);
+        psi.EnvironmentVariables["POKEPORT_IMPORT_ROM"] = rom.Path_;
         RunJob("Preparing " + g.Title, psi, false, delegate(int code) {
+            rom.Dispose();
             if (code != 0) { ShowLog("Could not prepare " + g.Title, "Your ROM was not changed."); return; }
             g.Imported = true;
             if (then != null) then(); else ShowText("Ready", g.Title + " is prepared.", null);
@@ -1275,9 +1556,15 @@ class LauncherForm : Form {
         if (code != 0) text += " It ended with code " + code + ".";
         string detail = code != 0 ? "\n\n" + string.Join("\n", log.Skip(Math.Max(0, log.Count - 12)).ToArray()) : "";
         Config.Write("last-session.txt", text + detail);
-        if (code != 0) ShowLog("Finished, check this", text, delegate { if (playDirect != null) Close(); else pages.Pop(); });
-        else if (playDirect != null) { Close(); return; }
-        ReplaceMain();
+        var kept = log.ToArray();
+        AfterGame(g, code, delegate {
+            log.Clear(); log.AddRange(kept);
+            if (code != 0) ShowLog("Finished, check this", text, delegate { if (playDirect != null) Close(); else pages.Pop(); });
+            else if (noticeAfter != null) { ShowText("About your save", noticeAfter, delegate { if (playDirect != null) Close(); else pages.Pop(); }); }
+            else if (playDirect != null) { Close(); return; }
+            noticeAfter = null;
+            ReplaceMain();
+        });
     }
     void RunTool(string title, string exe, string args, string dir, Action<int> done) {
         RunJob(title, new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true }, false, done);
@@ -1298,6 +1585,19 @@ class LauncherForm : Form {
         job = p;
         p.BeginOutputReadLine(); p.BeginErrorReadLine();
         Invalidate();
+    }
+    // Gen1Recomp reads paths from the environment in the system's code page, which garbles accented names such as
+    // "Pokémon". Such a file goes in through a plain-named temporary copy. Dispose removes it.
+    sealed class PlainPath : IDisposable {
+        public readonly string Path_; readonly string temp;
+        public PlainPath(string file) {
+            if (file.All(c => c < 128)) { Path_ = file; return; }
+            temp = Path.Combine(Path.GetTempPath(), "nativemons-" + Guid.NewGuid().ToString("N") + Path.GetExtension(file));
+            File.Copy(file, temp, true);
+            var shortName = new StringBuilder(600);
+            Path_ = !temp.All(c => c < 128) && Native.GetShortPathName(temp, shortName, 600) > 0 ? shortName.ToString() : temp;
+        }
+        public void Dispose() { if (temp != null) try { File.Delete(temp); } catch { } }
     }
     // Gen1Recomp's import reports "nativemons: <percent> <text>".
     void AddLine(string raw) {
@@ -1404,7 +1704,7 @@ class LauncherForm : Form {
     // No window frame, so dragging the shell moves the device.
     protected override void OnMouseDown(MouseEventArgs e) {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseRunCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
+        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
     }
     readonly List<KeyValuePair<RectangleF, string>> promptHits = new List<KeyValuePair<RectangleF, string>>();
     string hoverPrompt;
@@ -2354,6 +2654,14 @@ static class NativeMonsLauncher {
         Application.EnableVisualStyles();
         Config.Load();
         // --export <game id> <plain|checkpoint> <folder> [checkpoint backup]: exports without opening the window; the result goes in <folder>\export-result.txt.
+        // --sync <game id> <result file> [fulldex|gen1]: shares one game's save without opening the window.
+        if (argv.Length >= 3 && argv[0] == "--sync") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var shared = Library.Games.Find(x => x.Id == argv[1]);
+            var outcome = LauncherForm.SyncSave(shared, argv.Length > 3 ? argv[3] : null);
+            File.WriteAllText(argv[2], (outcome.Conflict ? "conflict" : outcome.Failed ? "kept" : outcome.Changed ? "changed" : "level") + "\n" + outcome.Note);
+            return;
+        }
         if (argv.Length >= 4 && argv[0] == "--export") {
             Library.Scan(LauncherForm.Gen1Cli);
             var game = Library.Games.Find(x => x.Id == argv[1]);

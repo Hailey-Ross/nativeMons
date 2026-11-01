@@ -31,6 +31,15 @@ Tallies every installed game: the different Pokémon you've caught across all yo
 ## Bringing your saves
 **Settings > Import saves** finds `.sav` files in your ROM folders and any others you add, and works out their game by reading them. The originals aren't changed, and a save that gets replaced is backed up first.
 
+## One save for both engines
+FireRed, LeafGreen and Emerald can run on either engine, and share one save when your ROM works with both. Before and after each game the launcher brings them level:
+- A verified backup comes first. Every save that's about to change is copied, and the copy is checked byte for byte.
+- The result has to prove itself: its trainer, party, boxes, Pokédex and bag must match the source, or it's thrown away.
+- If that fails, both saves stay as they were, the game still starts, and it tries again next time.
+- If both saves changed, you choose which to keep. The other goes to your backups.
+
+A game's page lists its **Save backups** to go back to. After each game the save is checked for corruption, and you're offered a healthy backup if it fails.
+
 ## Sending saves back
 **Settings > Export saves**, or a game's page, gives you:
 - **A plain `.sav`** for emulators, flash carts and PKHeX.

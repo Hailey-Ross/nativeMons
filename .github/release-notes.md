@@ -14,7 +14,7 @@ The first time you play a Game Boy or GBA game with Gen1Recomp, the launcher pre
 | **Gen1Recomp** (native, with mods) | Red, Blue, Yellow, Gold, Silver, Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald |
 | **Fulldex** (widescreen, 60 fps) | FireRed, LeafGreen, Emerald, HeartGold, SoulSilver, Platinum, Black, White, Black 2, White 2 |
 
-Where both engines have a game, it starts in Fulldex. Switch on that game's page. Each engine keeps its own save.
+Where both engines have a game, it starts in Fulldex. Switch on that game's page. Both engines share one save, if your ROM works with both.
 
 ## Controls
 
@@ -27,6 +27,8 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **One launcher** for every game, shaped like a handheld device, taking on each version's colours. Gold, Silver, Crystal, Red, Blue and Yellow each have their own scene.
 - **My Collection:** the different Pokémon you've caught across all your saves, against the Pokédex entries your games cover.
 - **Move Pokémon** between games from their PC boxes, using PKHeX.Core, with both saves backed up first. If attacks or a held item stand in the way, you choose what to delete or change, then retry.
+- **One save for both engines** on FireRed, LeafGreen and Emerald, with every conversion checked against the original before it's used.
+- **Save backups:** checked copies before anything changes, a corruption check after each game, and restore from a game's page.
 - **Import and export saves:** plain `.sav` files for emulators and flash carts, and Checkpoint folders for the 3DS.
 - **Open in PKHeX:** a game's page opens its save in your own copy of PKHeX.
 - **Settings** for both engines in one place, including **Download all sprites** for offline play.
@@ -43,6 +45,7 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 ## Known issues
 
 - **GBA games in Fulldex:** quitting one shows Fulldex's own game list. Close that to return to the launcher.
+- **Shared saves:** a save with Gen1Recomp mod content may not pass the conversion check, in which case the two stay separate and the launcher tells you. Quicksaves and save states aren't shared, only in-game saves. Not yet played back and forth by hand.
 - **Hand-copied Pokémon:** moves with no real transfer between the games, such as Gen 5 to Gen 3, copy the Pokémon across by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal. Try one in battle before relying on it.
 - **3DS export:** only part of this has been tried on a real 3DS. Game Boy saves from another emulator can't be exported for Virtual Console, because they carry that emulator's clock.
 - **Gen1Recomp launcher features** with no replacement yet: carts, box tools, skins and mod asset-pack import. Online play is removed.

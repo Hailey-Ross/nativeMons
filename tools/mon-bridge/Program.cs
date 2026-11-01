@@ -6,12 +6,16 @@
 //   mon-bridge info <save>                                  save type, game, generation, trainer
 //   mon-bridge plan <from save> <box> <slot> <to save>      what stands in the way: forced, conflict/ok <n> <move>, item <name>
 //   mon-bridge caught <save>                                dex numbers marked caught, comma separated
+//   mon-bridge check <save>                                 corruption check: ok or bad, with why
+//   mon-bridge compare <a> <b>                              same trainer, Pokemon, Pokedex and items?
+//   mon-bridge repair <save> <new file>                     rewrites a copy with correct checksums
 //   mon-bridge families                                     evolution families: comma-separated dex numbers
 //   mon-bridge moves <save>                                 the moves that game has: id, name
 //   mon-bridge move <from save> <box> <slot> <to save> <backup folder> [move:<1-4>:<id, 0 deletes>]... [dropitem]
 //
 // Exit codes: 0 done, 1 usage or unreadable save, 2 the move is not possible (saves untouched).
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -30,6 +34,9 @@ static class Program
             if (args.Length == 5 && args[0] == "plan") return Plan(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4]);
             if (args.Length == 2 && args[0] == "moves") return Moves(args[1]);
             if (args.Length == 1 && args[0] == "families") return Families();
+            if (args.Length == 2 && args[0] == "check") return Check(args[1]);
+            if (args.Length == 3 && args[0] == "compare") return Compare(args[1], args[2]);
+            if (args.Length == 3 && args[0] == "repair") return Repair(args[1], args[2]);
             if (args.Length == 2 && args[0] == "caught") return Caught(args[1]);
         }
         catch (Exception e)
@@ -120,6 +127,56 @@ static class Program
         return 0;
     }
 
+    // Corruption check: readable, and every checksum in it right.
+    static int Check(string path)
+    {
+        var sav = SaveUtil.GetSaveFile(path);
+        if (sav is null) { Console.WriteLine("bad\tThis isn't a save that can be read: it may be damaged."); return 3; }
+        if (!sav.ChecksumsValid) { Console.WriteLine("bad\tIts checksums are wrong: " + Clean(sav.ChecksumInfo)); return 3; }
+        Console.WriteLine(string.Join('\t', "ok", sav.Version, Clean(sav.OT), Facts(sav).Count));
+        return 0;
+    }
+
+    // What must survive a conversion, one fact per line.
+    static List<string> Facts(SaveFile sav)
+    {
+        var facts = new List<string> { "trainer " + sav.OT + " " + sav.TID16 + " money " + sav.Money };
+        string Mon(PKM p) => string.Join(' ', p.Species, p.CurrentLevel, p.EXP, p.Nickname, p.OriginalTrainerName, p.TID16, p.HeldItem, p.Move1, p.Move2, p.Move3, p.Move4, p.IV_HP, p.IV_ATK, p.IV_DEF, p.IV_SPA, p.IV_SPD, p.IV_SPE, p.EV_HP, p.EV_ATK, p.EV_DEF, p.EV_SPA, p.EV_SPD, p.EV_SPE, p.IsShiny);
+        for (int i = 0; i < sav.PartyCount; i++) facts.Add("party " + (i + 1) + ": " + Mon(sav.GetPartySlotAtIndex(i)));
+        for (int box = 0; box < sav.BoxCount; box++)
+            for (int slot = 0; slot < sav.BoxSlotCount; slot++)
+            {
+                var p = sav.GetBoxSlotAtIndex(box, slot);
+                if (p.Species != 0) facts.Add("box " + (box + 1) + " slot " + (slot + 1) + ": " + Mon(p));
+            }
+        if (sav.HasPokeDex)
+            facts.Add("caught " + string.Join(',', Enumerable.Range(1, sav.MaxSpeciesID).Where(i => sav.GetCaught((ushort)i))));
+        foreach (var pouch in sav.Inventory.Pouches)
+            foreach (var item in pouch.Items.Where(x => x.Index != 0).OrderBy(x => x.Index))
+                facts.Add("item " + pouch.Type + " " + item.Index + " x" + item.Count);
+        return facts;
+    }
+
+    // Exit 0 when two saves hold the same trainer, Pokemon, Pokedex and items; otherwise prints what differs.
+    static int Compare(string a, string b)
+    {
+        var x = Facts(Open(a)); var y = Facts(Open(b));
+        var gone = x.Except(y).ToList(); var added = y.Except(x).ToList();
+        if (gone.Count == 0 && added.Count == 0) { Console.WriteLine("same\t" + x.Count); return 0; }
+        Console.WriteLine("different\t" + gone.Count + " lost, " + added.Count + " new");
+        foreach (var f in gone.Take(8)) Console.WriteLine("lost\t" + Clean(f));
+        foreach (var f in added.Take(8)) Console.WriteLine("new\t" + Clean(f));
+        return 4;
+    }
+
+    // Rewrites a save through PKHeX, which recalculates its checksums. Only ever writes the new file.
+    static int Repair(string from, string to)
+    {
+        var sav = Open(from);
+        File.WriteAllBytes(to, sav.Write().ToArray());
+        return Check(to);
+    }
+
     static int Moves(string path)
     {
         var sav = Open(path);
@@ -195,7 +252,7 @@ static class Program
             else
             {
                 converted = EntityConverter.ConvertToType(pk, to.PKMType, out var result);
-                if (converted is null || result != EntityConverterResult.Success) return ((PKM?)null, false);
+                if (converted is null || result is not (EntityConverterResult.Success or EntityConverterResult.None)) return ((PKM?)null, false);
             }
             converted.Move1 = known.Length > 0 ? known[0] : (ushort)0;
             converted.Move2 = known.Length > 1 ? known[1] : (ushort)0;
