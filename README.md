@@ -28,6 +28,17 @@ Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patch
 ## My Collection
 Tallies every installed game: the different Pokémon you've caught across all your saves, against the National Dex entries your games cover. A new game adds any entries you didn't have yet.
 
+## Bringing your saves
+**Settings > Import saves** finds `.sav` files in your ROM folders and any others you add, and works out their game by reading them. The originals aren't changed, and a save that gets replaced is backed up first.
+
+## Sending saves back
+**Settings > Export saves**, or a game's page, gives you:
+- **A plain `.sav`** for emulators, flash carts and PKHeX.
+- **3DS Virtual Console** (Game Boy and Game Boy Color): a Checkpoint folder holding `sav.dat`, copied byte for byte. Matching it to a Checkpoint backup of the game checks the size and copies its `SecureValue`.
+- **3DS DS games:** needs a Checkpoint backup of the game, for the exact file name and size.
+
+Only some of this has been tried on a real 3DS, so back up your 3DS save first.
+
 ## Settings
 One place for both engines: fullscreen and volume for every game, plus each engine's own options. They're stored where each engine's menus keep them, so changes show up on both sides.
 
