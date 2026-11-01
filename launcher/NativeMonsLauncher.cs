@@ -108,6 +108,7 @@ class Theme {
 }
 class GameEntry {
     public Theme Theme = Theme.Default;
+    public int Dex;   // how many National Dex entries this game has
     public string Id, Title, Console, Gen1, FulldexCode, Header, Save;
     public string Gen1Rom, FulldexRom, FoundUnsupported;
     public bool Imported;
@@ -134,7 +135,8 @@ static class Library {
         Func<Dictionary<string, object>, string, string> str = delegate(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; };
         foreach (var d in json) {
             var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save") };
-            object c;
+            object c, dx;
+            if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             if (d.TryGetValue("colors", out c)) {
                 var hex = ((System.Collections.IEnumerable)c).Cast<object>().Select(x => (string)x).ToArray();
                 if (hex.Length == 3) e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish"));
@@ -226,9 +228,20 @@ static class Sprites {
         lock (gate) {
             Bitmap b;
             if (loaded.TryGetValue(key, out b)) return b;
-            if (asked.Add(key)) { queue.Enqueue(key); if (workers < 3) { workers++; Task.Run((Action)Work); } }
+            if (!asked.Contains(key)) {
+                // The whole evolution line comes together, this one first.
+                string prefix = key.StartsWith("shiny/") ? "shiny/" : "", id = key.Substring(prefix.Length);
+                string[] line;
+                Enqueue(key);
+                if (families.TryGetValue(id, out line)) foreach (var other in line) Enqueue(prefix + other);
+            }
         }
         return null;
+    }
+    static void Enqueue(string key) {
+        if (!asked.Add(key)) return;
+        queue.Enqueue(key);
+        if (workers < 3) { workers++; Task.Run((Action)Work); }
     }
     static void Work() {
         for (;;) {
@@ -238,28 +251,69 @@ static class Sprites {
         }
     }
     static void Fetch(string key) {
+        Download(key);
         string file = FileOf(key);
-        bool have = File.Exists(file);
-        if (!have || (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalDays > 30) {
-            try {
-                Directory.CreateDirectory(Folder);
-                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
-                using (var web = new System.Net.WebClient()) {
-                    web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
-                    var data = web.DownloadData(Site + key + ".png");
-                    using (var check = new MemoryStream(data)) using (var image = Image.FromStream(check)) { }   // only keep real pictures
-                    string temp = file + ".part";
-                    File.WriteAllBytes(temp, data);
-                    if (File.Exists(file)) File.Delete(file);
-                    File.Move(temp, file);
-                }
-            } catch { if (!have) return; }
-        }
+        if (!File.Exists(file)) return;
         // A copy, so the file isn't kept open.
         Bitmap bmp;
         using (var fs = new MemoryStream(File.ReadAllBytes(file))) using (var image = Image.FromStream(fs)) bmp = new Bitmap(image);
         lock (gate) loaded[key] = bmp;
         Arrived++;
+    }
+    // True when a new copy was downloaded; a recent copy on disk is left alone.
+    static bool Download(string key) {
+        string file = FileOf(key);
+        bool have = File.Exists(file);
+        if (have && (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalDays <= 30) return false;
+        try {
+            Directory.CreateDirectory(Folder);
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            using (var web = new System.Net.WebClient()) {
+                web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+                var data = web.DownloadData(Site + key + ".png");
+                using (var check = new MemoryStream(data)) using (var image = Image.FromStream(check)) { }   // only keep real pictures
+                string temp = file + "." + Guid.NewGuid().ToString("N") + ".part";
+                File.WriteAllBytes(temp, data);
+                File.Copy(temp, file, true);
+                File.Delete(temp);
+            }
+            return true;
+        } catch { return false; }
+    }
+    // Evolution families, so asking for one picture brings its whole line. Kept on disk after the first run.
+    static readonly Dictionary<string, string[]> families = new Dictionary<string, string[]>();
+    public static void LoadFamilies(Func<string> ask) {
+        try {
+            string f = Path.Combine(Config.State, "sprite-families.txt");
+            string text = File.Exists(f) ? File.ReadAllText(f) : ask();
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (!File.Exists(f)) File.WriteAllText(f, text);
+            lock (gate) foreach (var row in text.Split('\n')) {
+                var ids = row.Trim().Split(',');
+                foreach (var id in ids) if (id != "") families[id] = ids;
+            }
+        } catch { }
+    }
+    // Every picture for Generations 1 to 5, normal and shiny, for offline play. Safe to run again: it only fetches what's missing.
+    public const int MaxDex = 649;
+    public static void GetAll(Action<int, int, int, int> report) {
+        var keys = new Queue<string>();
+        for (int i = 1; i <= MaxDex; i++) { keys.Enqueue(i.ToString()); keys.Enqueue("shiny/" + i); }
+        int total = keys.Count, done = 0, fresh = 0, failed = 0;
+        var crew = new List<Task>();
+        for (int w = 0; w < 4; w++) crew.Add(Task.Run((Action)delegate {
+            for (;;) {
+                string key;
+                lock (keys) { if (keys.Count == 0) return; key = keys.Dequeue(); }
+                bool got = Download(key);
+                lock (keys) {
+                    done++;
+                    if (got) fresh++; else if (!File.Exists(FileOf(key))) failed++;
+                    report(done, total, fresh, failed);
+                }
+            }
+        }));
+        Task.WaitAll(crew.ToArray());
     }
     public static void Wait(int seconds) {
         var until = DateTime.Now.AddSeconds(seconds);
@@ -364,6 +418,7 @@ class LauncherForm : Form {
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
         if (screen == "mods") { var m = Library.Games.Find(g => g.OnGen1); if (m != null) pages.Push(ModsPage(m)); }
         if (screen == "sprites") {
+            Sprites.LoadFamilies(BridgeFamilies);
             var sp = new Page { Title = "Pokemon FireRed: boxes", Theme = current != null ? current.Theme : null };
             foreach (var key in new[] { "25", "shiny/6", "150", "245", "384", "635" })
                 sp.Items.Add(new Item("Dex " + key, "", true, null) { Icon = '\uE8AB', Sprite = key, Info = "A sample row." });
@@ -418,6 +473,7 @@ class LauncherForm : Form {
         Task.Run(() => {
             string err = null;
             try { Library.Scan(Gen1Cli); } catch (Exception e) { err = e.Message; }
+            Sprites.LoadFamilies(BridgeFamilies);
             int left = (int)((1.1 - (DateTime.Now - startSince).TotalSeconds) * 1000);
             if (left > 0) Task.Delay(left).Wait();
             return err;
@@ -466,15 +522,60 @@ class LauncherForm : Form {
         p.Items.Add(new Item(current != null ? "Play " + current.Title : "Play", current != null ? "Start " + current.Title + " with " + GameEntry.EngineName(current.Engine()) + "." : "Add a ROM folder first.", current != null, delegate { Play(current); }) { Icon = '' });
         int have = Library.Games.Count(g => g.Playable);
         p.Items.Add(new Item("Games", have + " of " + Library.Games.Count + " found in your ROM folders.", true, delegate { pages.Push(GamesPage()); }) { Icon = '' });
+        p.Items.Add(new Item("My Collection", "Caught across your games.", have > 0 && File.Exists(Config.MonBridge), delegate { OpenCollection(); }) { Icon = '\uE8F1' });
         bool mods = Library.Games.Exists(g => g.OnGen1);
         p.Items.Add(new Item("Mods", mods ? "Mods for the Gen1Recomp games." : "Needs a Gen1Recomp game.", mods, delegate { pages.Push(ModGamesPage()); }) { Icon = '' });
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
-        p.Items.Add(new Item("Move Pokemon", "Send a Pokemon from one game to another, using PKHeX.", File.Exists(Config.MonBridge) && have > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
-        p.Items.Add(new Item("Credits", "The projects this is built from.", true, delegate { pages.Push(CreditsPage()); }) { Icon = '' });
-        p.Items.Add(new Item("Last session", "How the last game ended.", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '' });
+        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && have > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
+        p.Items.Add(new Item("More", "Sprites, credits, last session.", true, delegate { pages.Push(MorePage()); }) { Icon = '\uE712' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
         return p;
+    }
+    Page MorePage() {
+        var p = new Page { Title = "More" };
+        p.Items.Add(new Item("Get all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Downloads every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
+        p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
+        p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
+        return p;
+    }
+    // Every installed game adds the entries it has, counted once however many games share them, and every save adds what it has caught.
+    void OpenCollection() {
+        var caughtBy = new Dictionary<GameEntry, HashSet<int>>();
+        var noSave = new HashSet<GameEntry>();
+        Busy("Counting your collection", delegate {
+            foreach (var g in Library.Games.Where(x => x.Playable)) {
+                string why, file = SaveOf(g, out why);
+                if (file == null) { noSave.Add(g); continue; }
+                int code; string o = Bridge("caught \"" + file + "\"", out code);
+                if (code != 0) { noSave.Add(g); continue; }
+                var set = new HashSet<int>();
+                foreach (var id in o.Trim().Split(',')) { int n; if (int.TryParse(id, out n)) set.Add(n); }
+                caughtBy[g] = set;
+            }
+            return null;
+        }, delegate(string e) {
+            if (e != null) { ShowText("My Collection", e, null); return; }
+            var games = Library.Games.Where(x => x.Playable).ToList();
+            int entries = games.Count == 0 ? 0 : Enumerable.Range(1, games.Max(x => x.Dex)).Count(n => games.Exists(x => n <= x.Dex));
+            var all = new HashSet<int>();
+            foreach (var set in caughtBy.Values) all.UnionWith(set);
+            int percent = entries == 0 ? 0 : all.Count * 100 / entries;
+            var p = new Page { Title = "My Collection" };
+            var total = new Item("All games: " + all.Count + " of " + entries, "", true, null) { Icon = '\uE8F1', Info = "You've caught " + all.Count + " different Pokemon out of the " + entries + " Pokedex entries in your " + games.Count + " games (" + percent + "%)." };
+            p.Items.Add(total);
+            foreach (var g in games) {
+                bool has = caughtBy.ContainsKey(g);
+                var it = new Item(g.Title + ": " + (has ? caughtBy[g].Count + " of " + g.Dex : "no save"), "", has, null) { Icon = '\uE7FC', Theme = g.Theme };
+                it.Info = has ? "Caught in this save, out of the " + g.Dex + " entries in this game." : "Not started: it counts towards the total entries, but has nothing caught yet.";
+                if (has) {
+                    int only = caughtBy[g].Count(n => !caughtBy.Where(o => o.Key != g).Any(o => o.Value.Contains(n)));
+                    it.Records = new[] { "Only here: " + only };
+                }
+                p.Items.Add(it);
+            }
+            pages.Push(p);
+        });
     }
     Page GamesPage() {
         var p = new Page { Title = "Games" };
@@ -627,6 +728,19 @@ class LauncherForm : Form {
         ShowText(title, body, back, last.Length > 0 ? string.Join("\n", last) : null);
     }
 
+    void GetAllSprites() {
+        string summary = null;
+        Busy("Getting all sprites", delegate {
+            Sprites.GetAll(delegate(int done, int total, int fresh, int failed) {
+                progress = done / (float)total;
+                if (done % 25 == 0 || done == total) BeginInvoke((Action)delegate { log.Add(done + " of " + total + " checked"); });
+                dirty = true;
+                if (done == total) summary = fresh + " downloaded, " + (total - fresh - failed) + " already here." + (failed > 0 ? "\n\n" + failed + " couldn't be fetched. Run this again when you're online: it only fetches what's missing." : "\n\nEvery picture is ready for offline play.");
+            });
+            return null;
+        }, delegate(string e) { ShowText("All sprites", e ?? summary, null); });
+    }
+
     // ---------- moving Pokemon (tools\mon-bridge, built on PKHeX.Core) ----------
     static string RunCapture(ProcessStartInfo psi, int seconds, out int code) {
         psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
@@ -638,6 +752,11 @@ class LauncherForm : Form {
             code = p.ExitCode;
             return code == 0 || o.Result.Trim() != "" ? o.Result : err.Result;
         }
+    }
+    static string BridgeFamilies() {
+        if (!File.Exists(Config.MonBridge)) return null;
+        int code; string o = Bridge("families", out code);
+        return code == 0 ? o : null;
     }
     static string Bridge(string args, out int code) { return RunCapture(new ProcessStartInfo(Config.MonBridge, args), 60, out code); }
     // Gen1Recomp keeps its own save format, so a cartridge .sav is exported for the move. Fulldex's are ready as they are.
