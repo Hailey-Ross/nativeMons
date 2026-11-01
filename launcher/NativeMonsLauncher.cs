@@ -130,6 +130,7 @@ class GameEntry {
 static class Library {
     public static List<GameEntry> Games = new List<GameEntry>();
     public static string Note = "";
+    public static bool Gen1Found;
     public static void Scan(Func<string, string> gen1Cli) {
         var list = new List<GameEntry>();
         var json = new JavaScriptSerializer().Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(Config.GamesFile));
@@ -149,6 +150,7 @@ static class Library {
         // version -> accepted hashes and whether it is imported, from the engine itself.
         var accepted = new Dictionary<string, string>();
         string games = gen1Cli("games");
+        Gen1Found = games != null;
         if (games == null) Note = "Gen1Recomp was not found, so its games are unavailable.";
         else foreach (var row in games.Split('\n')) {
             var f = row.TrimEnd('\r').Split('\t');
@@ -161,15 +163,33 @@ static class Library {
         folders.Add(Path.Combine(Config.FulldexDir ?? Config.Here, "roms"));
         foreach (var folder in folders) {
             if (!Directory.Exists(folder)) continue;
-            IEnumerable<string> files;
-            try { files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories); } catch { continue; }
-            foreach (var file in files) {
+            foreach (var file in FilesUnder(folder)) {
                 string ext = Path.GetExtension(file).ToLowerInvariant();
                 if (ext != ".nds" && ext != ".gb" && ext != ".gbc" && ext != ".gba") continue;
                 try { Sort(list, file, ext, accepted); } catch { }
             }
         }
         Games = list;
+    }
+    // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
+    static List<string> FilesUnder(string root) {
+        var found = new List<string>();
+        var left = new Stack<string>();
+        left.Push(root);
+        while (left.Count > 0) {
+            string folder = left.Pop();
+            try { found.AddRange(Directory.GetFiles(folder)); } catch { }
+            try { foreach (var sub in Directory.GetDirectories(folder)) left.Push(sub); } catch { }
+        }
+        return found;
+    }
+    // Why a game can't start: a ROM with no engine to run it is a different problem from a missing or wrong ROM.
+    public static string WhyNotPlayable(GameEntry g) {
+        string rom = g.FulldexRom ?? g.FoundUnsupported;
+        bool canRun = (g.Gen1 != null && Gen1Found) || (g.FulldexCode != null && File.Exists(Config.Fulldex));
+        if (rom != null && !canRun) return "Found " + Path.GetFileName(rom) + ", but this copy of nativeMons doesn't have the engine to run it. Use the full download from the Releases page.";
+        if (g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is not a version these games accept.";
+        return "No ROM found. Add its folder under ROM folders.";
     }
     static string HeaderOf(string file, string ext) {
         using (var f = File.OpenRead(file)) {
@@ -472,6 +492,7 @@ class LauncherForm : Form {
         else pages.Push(MainPage());
         if (screen == "games") pages.Push(GamesPage());
         if (screen == "folders") pages.Push(FoldersPage());
+        if (screen == "folder-added") { firstSetup = true; pages.Push(FoldersPage()); pages.Push(FolderAddedPage(Config.RomFolders().FirstOrDefault() ?? "")); }
         if (screen == "credits") pages.Push(CreditsPage());
         var sample = Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
@@ -554,7 +575,7 @@ class LauncherForm : Form {
             return;
         }
         if (err != null) ShowText("Something went wrong", err, null);
-        else if (Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) pages.Push(FoldersPage());
+        else if (Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) { firstSetup = true; pages.Push(FoldersPage()); }
         Invalidate();
     }
     void PickCurrent() {
@@ -1131,7 +1152,7 @@ class LauncherForm : Form {
         var p = new Page { Title = "Games" };
         foreach (var game in Library.Games.OrderBy(g => g.Playable ? 0 : 1)) {
             var g = game;
-            string why = g.FoundUnsupported != null && !g.Playable ? "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is not a version these games accept." : "No ROM found. Add its folder under ROM folders.";
+            string why = Library.WhyNotPlayable(g);
             var it = new Item(g.Title, g.Playable ? "" : why, g.Playable, delegate { pages.Push(GamePage(g)); }) { Icon = '', Theme = g.Theme };
             it.Info = g.Playable ? g.Console + ". Runs with " + GameEntry.EngineName(g.Engine()) + "." : g.Console + ". " + why;
             it.Records = GameRecords(g);
@@ -1241,14 +1262,43 @@ class LauncherForm : Form {
             p.Items.Add(new Item(Path.GetFileName(f.TrimEnd('\\')), "", true, delegate { pages.Push(RemoveFolderPage(f)); }) { Icon = '', Info = f + "\n\nSelect to stop searching this folder. Your ROMs stay where they are." });
         }
         p.Items.Add(new Item("Add a folder", "", true, delegate {
-            using (var d = new FolderBrowserDialog { Description = "Choose a folder with your ROMs (.gb, .gbc, .gba, .nds)" }) {
-                if (d.ShowDialog(this) != DialogResult.OK) return;
-                var l = Config.RomFolders();
-                if (!l.Contains(d.SelectedPath)) { l.Add(d.SelectedPath); Config.SaveRomFolders(l); }
-                pages.Pop();
-                Rescan(delegate { pages.Push(FoldersPage()); });
-            }
+            AddFolder();
         }) { Icon = '', Info = "nativeMons finds games by reading each ROM, so file names don't matter. No games are included: you need your own ROMs." });
+        if (Config.RomFolders().Count > 0) p.Items.Add(new Item(FinishFoldersLabel, "", true, FinishFolders) { Icon = '', Info = "Go back to the main screen. Your folders are saved." });
+        return p;
+    }
+    bool firstSetup;   // the ROM folders page opened by itself because nothing is set up yet
+    string FinishFoldersLabel { get { return firstSetup ? "Complete setup" : "Done"; } }
+    void FinishFolders() {
+        firstSetup = false;
+        while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+    }
+    void AddFolder() {
+        using (var d = new FolderBrowserDialog { Description = "Choose a folder with your ROMs (.gb, .gbc, .gba, .nds)" }) {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            string chosen = d.SelectedPath;
+            var l = Config.RomFolders();
+            if (!l.Contains(chosen)) { l.Add(chosen); Config.SaveRomFolders(l); }
+            while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+            Rescan(delegate { pages.Push(FoldersPage()); pages.Push(FolderAddedPage(chosen)); });
+        }
+    }
+    // Says what the search found and how to carry on, with the likely next step selected.
+    Page FolderAddedPage(string folder) {
+        int have = Library.Games.Count(g => g.Playable);
+        int roms = Library.Games.Count(g => g.FulldexRom != null || g.FoundUnsupported != null);
+        var p = new Page { Title = "Folder added" };
+        var finish = new Item(FinishFoldersLabel, "Go to the main screen.", true, FinishFolders) { Icon = '' };
+        var another = new Item(have > 0 ? "Add another folder" : "Try another folder", "Choose a folder.", true, delegate { AddFolder(); }) { Icon = '' };
+        if (have > 0) {
+            p.Body = folder + "\n\nFound " + have + " of " + Library.Games.Count + " games.\n\nYou're ready to play. If you keep some games in another folder, add that one too.";
+            p.Items.Add(finish); p.Items.Add(another);
+        } else {
+            p.Body = folder + (roms > 0
+                ? "\n\nFound ROMs for " + roms + (roms == 1 ? " game" : " games") + ", but none can start. Games shows the reason for each one."
+                : "\n\nNo games found. nativeMons looks through this folder and every folder inside it for .gb, .gbc, .gba and .nds ROMs.");
+            p.Items.Add(another); p.Items.Add(finish);
+        }
         return p;
     }
     Page RemoveFolderPage(string folder) {

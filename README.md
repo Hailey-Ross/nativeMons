@@ -59,7 +59,9 @@ on a game's page opens its save in your own copy of PKHeX.
 Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher fetches a Pokémon along with its whole evolution line, and works without them. **Settings > Download all sprites** downloads every picture for Generations 1 to 5, normal and shiny, for offline play.
 
 ## Build and set up
-`launcher\build.bat <output folder>` needs only Windows. Beside the exe, `state\nativemons.cfg` can set the paths `love`,
+Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE and Fulldex's published Windows build. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings and saves.
+
+`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`,
 `gen1recomp`, `fulldex`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
 
 GPL-3.0-or-later (see `LICENSE`). Each engine keeps its own licence and credits, including the additional terms in
