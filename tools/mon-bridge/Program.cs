@@ -5,6 +5,8 @@
 //                                                           box, slot, species, nickname, level, trainer, dex number, shiny/normal
 //   mon-bridge info <save>                                  save type, game, generation, trainer
 //   mon-bridge plan <from save> <box> <slot> <to save>      what stands in the way: forced, conflict/ok <n> <move>, item <name>
+//   mon-bridge caught <save>                                dex numbers marked caught, comma separated
+//   mon-bridge families                                     evolution families: comma-separated dex numbers
 //   mon-bridge moves <save>                                 the moves that game has: id, name
 //   mon-bridge move <from save> <box> <slot> <to save> <backup folder> [move:<1-4>:<id, 0 deletes>]... [dropitem]
 //
@@ -27,6 +29,8 @@ static class Program
             if (args.Length >= 6 && args[0] == "move") return Move(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4], args[5], args.Skip(6).ToArray());
             if (args.Length == 5 && args[0] == "plan") return Plan(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4]);
             if (args.Length == 2 && args[0] == "moves") return Moves(args[1]);
+            if (args.Length == 1 && args[0] == "families") return Families();
+            if (args.Length == 2 && args[0] == "caught") return Caught(args[1]);
         }
         catch (Exception e)
         {
@@ -89,6 +93,30 @@ static class Program
             if (moves[i] != 0)
                 Console.WriteLine((moves[i] > to.MaxMoveID ? "conflict" : "ok") + "\t" + (i + 1) + "\t" + GameInfo.Strings.Move[moves[i]]);
         if (force && pk.HeldItem != 0) Console.WriteLine("item\t" + GameInfo.Strings.Item[pk.HeldItem]);
+        return 0;
+    }
+
+    // Every evolution family up to Generation 5, the newest games here: one comma-separated row each, lowest dex number first.
+    static int Families()
+    {
+        const int max = 649;
+        var parent = Enumerable.Range(0, max + 1).ToArray();
+        int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
+        var forward = EvolutionTree.Evolves5.Forward;
+        for (ushort species = 1; species <= max; species++)
+            foreach (var (next, _) in forward.GetEvolutions(species, 0))
+                if (next is > 0 and <= max) parent[Find(next)] = Find(species);
+        foreach (var family in Enumerable.Range(1, max).GroupBy(Find))
+            Console.WriteLine(string.Join(',', family.OrderBy(x => x)));
+        return 0;
+    }
+
+    // The dex numbers this save's Pokedex marks as caught, comma separated.
+    static int Caught(string path)
+    {
+        var sav = Open(path);
+        var caught = sav.HasPokeDex ? Enumerable.Range(1, sav.MaxSpeciesID).Where(i => sav.GetCaught((ushort)i)) : Enumerable.Empty<int>();
+        Console.WriteLine(string.Join(',', caught));
         return 0;
     }
 

@@ -24,12 +24,15 @@ GAME FREAK inc. or The Pokémon Company.
 
 Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patching `.nds` ROMs needs Python 3.
 
+## My Collection
+Tallies every installed game: the different Pokémon you've caught across all your saves, against the National Dex entries your games cover. A new game adds any entries you didn't have yet.
+
 ## Moving Pokémon
 **Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are
 backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there, and moves with no real transfer between those games may come out flagged as not legal. **Open in PKHeX**
 on a game's page opens its save in your own copy of PKHeX.
 
-Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher only asks for the ones it shows, and works without them.
+Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher fetches a Pokémon along with its whole evolution line, and works without them. **Get all sprites** downloads every picture for Generations 1 to 5, normal and shiny, for offline play.
 
 ## Build and set up
 `launcher\build.bat <output folder>` needs only Windows. Beside the exe, `state\nativemons.cfg` can set the paths `love`,
