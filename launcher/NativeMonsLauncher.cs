@@ -8,7 +8,7 @@
 // Licensed under the GNU GPL v3 or later (see LICENSE).
 // Build (build.bat): the C# compiler that ships with Windows, C# 5, so no string interpolation or ?.
 //   NativeMonsLauncher.exe --play <game id> starts one game and closes afterwards (shortcuts, Steam).
-//   NativeMonsLauncher.exe --snapshot <out.png> [main[:<game id>]|games|game|mods|folders|credits|job|splash] [<w>x<h>]
+//   NativeMonsLauncher.exe --snapshot <out.png> [main[:<game id>]|games|game|mods|folders|credits|job|splash|sprites] [<w>x<h>]
 //   draws one screen and exits.
 using System;
 using System.Collections.Generic;
@@ -209,12 +209,71 @@ static class Library {
     }
 }
 
+// Pokemon pictures from pogo.hails.app, kept on disk because they rarely change. A picture is fetched only when it is
+// missing or over 30 days old, and an old copy keeps working if the site can't be reached.
+static class Sprites {
+    const string Site = "https://pogo.hails.app/api/pokemon-sprite/";
+    static readonly object gate = new object();
+    static readonly Dictionary<string, Bitmap> loaded = new Dictionary<string, Bitmap>();
+    static readonly HashSet<string> asked = new HashSet<string>();
+    static readonly Queue<string> queue = new Queue<string>();
+    static int workers;
+    public static volatile int Arrived;   // goes up when a picture arrives, so the window can redraw
+    static string Folder { get { return Path.Combine(Config.State, "sprite-cache"); } }
+    static string FileOf(string key) { return Path.Combine(Folder, key.Replace('/', '-') + ".png"); }
+    // key: "25" or "shiny/25". Null until it is ready; the first ask starts the fetch.
+    public static Bitmap Get(string key) {
+        lock (gate) {
+            Bitmap b;
+            if (loaded.TryGetValue(key, out b)) return b;
+            if (asked.Add(key)) { queue.Enqueue(key); if (workers < 3) { workers++; Task.Run((Action)Work); } }
+        }
+        return null;
+    }
+    static void Work() {
+        for (;;) {
+            string key;
+            lock (gate) { if (queue.Count == 0) { workers--; return; } key = queue.Dequeue(); }
+            try { Fetch(key); } catch { }
+        }
+    }
+    static void Fetch(string key) {
+        string file = FileOf(key);
+        bool have = File.Exists(file);
+        if (!have || (DateTime.UtcNow - File.GetLastWriteTimeUtc(file)).TotalDays > 30) {
+            try {
+                Directory.CreateDirectory(Folder);
+                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+                using (var web = new System.Net.WebClient()) {
+                    web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+                    var data = web.DownloadData(Site + key + ".png");
+                    using (var check = new MemoryStream(data)) using (var image = Image.FromStream(check)) { }   // only keep real pictures
+                    string temp = file + ".part";
+                    File.WriteAllBytes(temp, data);
+                    if (File.Exists(file)) File.Delete(file);
+                    File.Move(temp, file);
+                }
+            } catch { if (!have) return; }
+        }
+        // A copy, so the file isn't kept open.
+        Bitmap bmp;
+        using (var fs = new MemoryStream(File.ReadAllBytes(file))) using (var image = Image.FromStream(fs)) bmp = new Bitmap(image);
+        lock (gate) loaded[key] = bmp;
+        Arrived++;
+    }
+    public static void Wait(int seconds) {
+        var until = DateTime.Now.AddSeconds(seconds);
+        while (DateTime.Now < until) { lock (gate) { if (queue.Count == 0 && workers == 0) return; } System.Threading.Thread.Sleep(50); }
+    }
+}
+
 // One menu row: greyed rows (On = false) can be selected to read why, but do nothing.
 class Item {
     public string Text, Hint; public bool On = true; public Action Run;
     public string Info = ""; public string[] Records = new string[0];   // the detail panel
     public char Icon = '';
     public Theme Theme;   // a game's row: its colours
+    public string Sprite; // a Pokemon's row: its picture (see Sprites)
     public Item(string text, string hint, bool on, Action run) { Text = text; Hint = hint ?? ""; On = on; Run = run; }
 }
 class Page {
@@ -304,6 +363,14 @@ class LauncherForm : Form {
         var sample = Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
         if (screen == "mods") { var m = Library.Games.Find(g => g.OnGen1); if (m != null) pages.Push(ModsPage(m)); }
+        if (screen == "sprites") {
+            var sp = new Page { Title = "Pokemon FireRed: boxes", Theme = current != null ? current.Theme : null };
+            foreach (var key in new[] { "25", "shiny/6", "150", "245", "384", "635" })
+                sp.Items.Add(new Item("Dex " + key, "", true, null) { Icon = '\uE8AB', Sprite = key, Info = "A sample row." });
+            pages.Push(sp);
+            foreach (var it in sp.Items) Sprites.Get(it.Sprite);
+            Sprites.Wait(30);
+        }
         if (screen == "job") {
             job = new Process(); jobTitle = "Preparing Pokemon LeafGreen"; jobStart = DateTime.Now.AddSeconds(-14); progress = 0.62f;
             foreach (var l in new[] { "Reading the ROM", "Decoding maps", "Decoding Pokemon graphics" }) log.Add(l);
@@ -544,6 +611,7 @@ class LauncherForm : Form {
     Page CreditsPage() {
         return new Page { Title = "Credits", Body = Gen1Credit
             + "\n\nPokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
+            + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
@@ -617,9 +685,9 @@ class LauncherForm : Form {
             var p = new Page { Title = g.Title + ": boxes", Theme = g.Theme };
             foreach (var row in rows.Split('\n')) {
                 var f = row.TrimEnd('\r').Split('\t');
-                if (f.Length < 6) continue;
+                if (f.Length < 8) continue;
                 string box = f[0], slot = f[1], name = f[2] + " Lv " + f[4];
-                p.Items.Add(new Item(name, "", true, delegate { pages.Push(MoveToPage(g, file, box, slot, name)); }) { Icon = '', Info = f[3] + ", from trainer " + f[5] + ".", Records = new[] { "Box: " + (int.Parse(box) + 1), "Slot: " + (int.Parse(slot) + 1) } });
+                p.Items.Add(new Item(name, "", true, delegate { pages.Push(MoveToPage(g, file, box, slot, name)); }) { Icon = '', Sprite = (f[7] == "shiny" ? "shiny/" : "") + f[6], Info = f[3] + ", from trainer " + f[5] + (f[7] == "shiny" ? ". Shiny!" : "."), Records = new[] { "Box: " + (int.Parse(box) + 1), "Slot: " + (int.Parse(slot) + 1) } });
             }
             if (p.Items.Count == 0) p.Items.Add(new Item("Boxes are empty", "Only Pokemon in the PC boxes can be moved, not your party.", false, null));
             pages.Push(p);
@@ -882,7 +950,7 @@ class LauncherForm : Form {
         }
         return 0;
     }
-    DateTime scannedAt;
+    DateTime scannedAt; int spritesSeen;
     void Poll() {
         if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
             scannedAt = DateTime.Now;
@@ -892,6 +960,7 @@ class LauncherForm : Form {
             }
             WatchGame();
         }
+        if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         if (Visible && ++frame % 2 == 0 && (job != null || starting || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
@@ -1435,6 +1504,14 @@ class LauncherForm : Form {
         var line = new RectangleF(inner.X + o, inner.Y + o, inner.Width - 2 * o, inner.Height - 2 * o);
         using (var path = Round(line, Math.Max(1, rad - 2 * o))) using (var pen = new Pen(Fade(on ? th.Main : Text3, selected ? 255 : 95), 1)) g.DrawPath(pen, path);
     }
+    // Pixel art stays crisp when it's enlarged.
+    static void DrawSprite(Graphics g, Bitmap b, RectangleF r) {
+        var mode = g.InterpolationMode; var offset = g.PixelOffsetMode;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+        g.DrawImage(b, r);
+        g.InterpolationMode = mode; g.PixelOffsetMode = offset;
+    }
     // The menu cursor.
     static void Cursor3(Graphics g, float x, float cy, float s, Color c) {
         using (var b = new SolidBrush(c)) g.FillPolygon(b, new[] { new PointF(x, cy - s), new PointF(x + s * 1.2f, cy), new PointF(x, cy + s) });
@@ -1650,7 +1727,9 @@ class LauncherForm : Form {
         if (sel) Cursor3(g, r.X + pad * 0.42f, r.Y + r.Height / 2, r.Height * 0.09f, own.OnCream);
         if (icon) {
             var ib = new RectangleF(r.X + pad * 1.05f, r.Y + r.Height * 0.25f, r.Height * 0.5f, r.Height * 0.5f);
-            if (it.Theme != null) Cart(g, ib.X, ib.Y - ib.Height * 0.02f, ib.Height, it.Theme);
+            var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
+            if (pic != null) { float grow = ib.Height * 0.35f; DrawSprite(g, pic, new RectangleF(ib.X - grow, ib.Y - grow, ib.Width + grow * 2, ib.Height + grow * 2)); }
+            else if (it.Theme != null) Cart(g, ib.X, ib.Y - ib.Height * 0.02f, ib.Height, it.Theme);
             else {
                 Card(g, ib, ib.Height * 0.2f, it.On ? th.Main : Text3, it.On ? th.Deep : Text3, Line, 1);
                 Write(g, it.Icon.ToString(), iconSmall, it.On ? th.Ink : CreamDim, ib, StringAlignment.Center, StringAlignment.Center, false);
@@ -1725,7 +1804,7 @@ class LauncherForm : Form {
             for (int i = firstRow * cols; i < p.Items.Count && i < (firstRow + fitRows) * cols; i++) {
                 int k = i - firstRow * cols;
                 var r = new RectangleF(m + (k % cols) * (tw + tgap), y + (k / cols) * (tileH + tgap), tw, tileH);
-                var shown = new Item(p.Items[i].Text.Replace("Pokemon ", ""), "", p.Items[i].On, null) { Icon = p.Items[i].Icon, Theme = p.Items[i].Theme };
+                var shown = new Item(p.Items[i].Text.Replace("Pokemon ", ""), "", p.Items[i].On, null) { Icon = p.Items[i].Icon, Theme = p.Items[i].Theme, Sprite = p.Items[i].Sprite };
                 Tile(g, shown, i == p.Sel, r, true, smallFont, th);
                 hits.Add(new KeyValuePair<RectangleF, int>(r, i));
             }
@@ -1755,6 +1834,8 @@ class LauncherForm : Form {
         using (var path = Round(banner, rad * 0.75f)) using (var pen = new Pen(Line, 2)) g.DrawPath(pen, path);
         float x = r.X + pad, cw = r.Width - 2 * pad;
         Write(g, it.Text, titleFont, th.Ink, new RectangleF(x, banner.Y, cw, bannerH), StringAlignment.Near, StringAlignment.Center, false);
+        var big = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
+        if (big != null) { float bs = bannerH * 1.3f; DrawSprite(g, big, new RectangleF(banner.Right - bs - pad * 0.3f, banner.Y + (bannerH - bs) / 2, bs, bs)); }
         float y = banner.Bottom + h * 0.024f;
         string pill = it.On ? "READY" : "NOT AVAILABLE";
         var ps = g.MeasureString(pill, smallBold);

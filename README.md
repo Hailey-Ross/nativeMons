@@ -29,6 +29,8 @@ Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patch
 backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there, and moves with no real transfer between those games may come out flagged as not legal. **Open in PKHeX**
 on a game's page opens its save in your own copy of PKHeX.
 
+Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher only asks for the ones it shows, and works without them.
+
 ## Build and set up
 `launcher\build.bat <output folder>` needs only Windows. Beside the exe, `state\nativemons.cfg` can set the paths `love`,
 `gen1recomp`, `fulldex`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
