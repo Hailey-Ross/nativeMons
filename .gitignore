@@ -11,3 +11,4 @@ bin/
 obj/
 *.exe
 *.log
+build-output.txt
