@@ -51,6 +51,12 @@ Only some of this has been tried on a real 3DS, so back up your 3DS save first.
 ## Settings
 One place for both engines: fullscreen and volume for every game, plus each engine's own options. They're stored where each engine's menus keep them, so changes show up on both sides.
 
+## Several saves per game
+**Saves** on a game's page lets you keep as many saves as you like, each with a name of your choice. Switch between them, start a new one, copy or delete them. A switch keeps your current save exactly as it is, and both engines follow it. **My Collection** counts each Pokémon once across all of a game's saves.
+
+## Pokémon Platinum PC port
+Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, from the pret decompilation and [libntr](https://github.com/cybervisi0n/libntr). Choose it with **Engine** on the game's page. The download has only the program: the first start unpacks the game's files from your own ROM, on your PC. It shares one save with Fulldex, checked each time it comes back. nativeMons isn't affiliated with that project, so please report problems here first.
+
 ## Moving Pokémon
 **Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are
 backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there, and moves with no real transfer between those games may come out flagged as not legal. **Open in PKHeX**

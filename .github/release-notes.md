@@ -13,8 +13,9 @@ The first time you play a Game Boy or GBA game with Gen1Recomp, the launcher pre
 |---|---|
 | **Gen1Recomp** (native, with mods) | Red, Blue, Yellow, Gold, Silver, Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald |
 | **Fulldex** (widescreen, 60 fps) | FireRed, LeafGreen, Emerald, HeartGold, SoulSilver, Platinum, Black, White, Black 2, White 2 |
+| **Platinum PC port** (native, optional) | Platinum |
 
-Where both engines have a game, it starts in Fulldex. Switch on that game's page. Both engines share one save, if your ROM works with both.
+Where both engines have a game, it starts in Fulldex. Switch on that game's page. The engines share one save, if your ROM works with both. The Platinum PC port's download has only the program: its game files are unpacked from your own ROM, on your PC.
 
 ## Controls
 
@@ -24,13 +25,14 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 
 ## What's in it
 
-- **One launcher** for every game, shaped like a handheld device, taking on each version's colours. Gold, Silver, Crystal, Red, Blue and Yellow each have their own scene.
-- **My Collection:** the different Pokémon you've caught across all your saves, against the Pokédex entries your games cover.
-- **Move Pokémon** between games from their PC boxes, using PKHeX.Core, with both saves backed up first. If attacks or a held item stand in the way, you choose what to delete or change, then retry.
-- **One save for both engines** on FireRed, LeafGreen and Emerald, with every conversion checked against the original before it's used.
+- **One launcher** for every game, shaped like a handheld device, taking on each version's colours. DS games show their own animated title screen, captured from your ROM on your PC, and others have a scene of their own.
+- **Several saves per game**, each with a name you choose. Switch, copy, rename or delete them from a game's page, and import saves with their trainer, play time, badges and party shown first.
+- **My Collection:** the different Pokémon you've caught across all your saves, counting each once, against the Pokédex entries your games cover.
+- **Move Pokémon** between games from their PC boxes, using PKHeX.Core, with both saves backed up first. If attacks or a held item stand in the way, you choose what to delete or change, then retry. A Pokémon copied by hand keeps its original data, which comes back when it returns to its own generation.
+- **One save across engines** on FireRed, LeafGreen, Emerald and Platinum, with every conversion checked before it's used.
 - **Save backups:** checked copies before anything changes, a corruption check after each game, and restore from a game's page.
 - **Import and export saves:** plain `.sav` files for emulators and flash carts, and Checkpoint folders for the 3DS.
-- **Open in PKHeX:** a game's page opens its save in your own copy of PKHeX.
+- **Open in PKHeX or OpenHome:** a game's page opens your own copy of either, ready for that game's save.
 - **Settings** for both engines in one place, including **Download all sprites** for offline play.
 - **Mods** for Gen1Recomp games, and **hails.nds-Patcher** for `.nds` ROMs that won't load.
 
@@ -44,9 +46,10 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 
 ## Known issues
 
-- **GBA games in Fulldex:** quitting one shows Fulldex's own game list. Close that to return to the launcher.
 - **Shared saves:** a save with Gen1Recomp mod content may not pass the conversion check, in which case the two stay separate and the launcher tells you. Quicksaves and save states aren't shared, only in-game saves. Not yet played back and forth by hand.
 - **Hand-copied Pokémon:** moves with no real transfer between the games, such as Gen 5 to Gen 3, copy the Pokémon across by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal. Try one in battle before relying on it.
+- **Platinum PC port:** experimental, from its own project. Sharing a save with Fulldex has only been tried on early saves, so keep a backup. Report problems here first.
+- **Title screens:** only for DS games so far, and not for encrypted ROMs until they're patched.
 - **3DS export:** only part of this has been tried on a real 3DS. Game Boy saves from another emulator can't be exported for Virtual Console, because they carry that emulator's clock.
 - **Gen1Recomp launcher features** with no replacement yet: carts, box tools, skins and mod asset-pack import. Online play is removed.
 - **My Collection** counts National Dex entries, so the total is the largest Pokédex among your games.
@@ -55,6 +58,6 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 
 Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
 
-[Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp), using [melonDS](https://melonds.kuribo64.net) and [mGBA](https://mgba.io). [PKHeX](https://github.com/kwsch/PKHeX) by Kaphotics and contributors. Sprites served by [hailsDotGO](https://pogo.hails.app). Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
+[Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp), using [melonDS](https://melonds.kuribo64.net) and [mGBA](https://mgba.io). [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr), from the [pret](https://github.com/pret/pokeplatinum) decompilation; they aren't affiliated with nativeMons. [PKHeX](https://github.com/kwsch/PKHeX) by Kaphotics and contributors. [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington. Sprites served by [hailsDotGO](https://pogo.hails.app). Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
 
 Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company.

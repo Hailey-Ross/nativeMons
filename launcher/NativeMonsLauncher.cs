@@ -73,6 +73,7 @@ static class Config {
     public static string Love { get { return Get("love", @"love\lovec.exe"); } }
     public static string Gen1 { get { return Get("gen1recomp", @"engines\gen1recomp"); } }
     public static string Fulldex { get { return Get("fulldex", @"engines\fulldex\Pokemon Fulldex.exe"); } }
+    public static string PlatinumPort { get { return Get("pokeplatinum", @"engines\pokeplatinum\main.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string GamesFile { get { return Get("games", "games.json"); } }
@@ -93,6 +94,7 @@ static class Config {
 // A version's colours, from games.json: main, deep, light, and a finish (plain or a scene: crystal, gold, silver, flame, tide, bolt).
 class Theme {
     public Color Main, Deep, Light, Ink; public string Finish = "plain";
+    public string GameId;   // whose title screen to show, once it has been captured (see GameArt)
     // Gold, silver and crystal surfaces have no single colour to use for text on cream.
     public bool Plain { get { return Finish != "gold" && Finish != "silver" && Finish != "crystal"; } }
     // Text in the version's colour on a cream box, unless that colour is too light to read there.
@@ -110,20 +112,408 @@ class Theme {
 class GameEntry {
     public Theme Theme = Theme.Default;
     public int Dex;   // how many National Dex entries this game has
-    public string Id, Title, Console, Gen1, FulldexCode, Header, Save;
+    public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port;
+    public int ArtFrame;   // when this game's title screen is up, in frames from power-on
     public string Gen1Rom, FulldexRom, FoundUnsupported;
     public bool Imported;
     public bool OnGen1 { get { return Gen1 != null && (Imported || Gen1Rom != null); } }
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
-    public bool Playable { get { return OnGen1 || OnFulldex; } }
+    public bool OnPort { get { return Port != null && FulldexRom != null && File.Exists(Config.PlatinumPort); } }
+    public bool Playable { get { return OnGen1 || OnFulldex || OnPort; } }
     public bool IsDs { get { return Console == "Nintendo DS"; } }
     public bool HasBoth { get { return OnGen1 && OnFulldex; } }
     // The player's choice where both engines can run it; Fulldex by default (widescreen).
-    public string Engine() {
-        if (OnFulldex && OnGen1) return Config.Read("engine-" + Id + ".txt", "fulldex");
-        return OnFulldex ? "fulldex" : "gen1";
+    public List<string> Engines() {
+        var l = new List<string>();
+        if (OnFulldex) l.Add("fulldex");
+        if (OnGen1) l.Add("gen1");
+        if (OnPort) l.Add("port");
+        return l;
     }
-    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : "Gen1Recomp (native, with mods)"; }
+    public string Engine() {
+        var l = Engines();
+        if (l.Count == 0) return "gen1";
+        string chosen = Config.Read("engine-" + Id + ".txt", l[0]);
+        return l.Contains(chosen) ? chosen : l[0];
+    }
+    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : "Gen1Recomp (native, with mods)"; }
+    public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : "Gen1Recomp"; }
+}
+
+// Unpacks a DS ROM the way the Platinum PC port does on first launch, so its file picker never shows.
+// Files already there stay. What it writes comes from the player's own ROM, and stays on their PC.
+static class NdsExtract {
+    static void Put(string file, byte[] rom, uint offset, uint size) {
+        if (File.Exists(file)) return;
+        if (offset + (ulong)size > (ulong)rom.Length) throw new InvalidDataException("That ROM looks cut short.");
+        Directory.CreateDirectory(Path.GetDirectoryName(file));
+        using (var f = new FileStream(file, FileMode.CreateNew, FileAccess.Write)) f.Write(rom, (int)offset, (int)size);
+    }
+    static uint U32(byte[] b, uint at) { return BitConverter.ToUInt32(b, (int)at); }
+    static ushort U16(byte[] b, uint at) { return BitConverter.ToUInt16(b, (int)at); }
+    public static void Run(string romFile, string dir) {
+        var rom = File.ReadAllBytes(romFile);
+        uint arm9 = U32(rom, 0x20), arm9Size = U32(rom, 0x2C), arm7 = U32(rom, 0x30), arm7Size = U32(rom, 0x3C);
+        uint fnt = U32(rom, 0x40), fntSize = U32(rom, 0x44), fat = U32(rom, 0x48), fatSize = U32(rom, 0x4C);
+        uint ovt9 = U32(rom, 0x50), ovt9Size = U32(rom, 0x54), ovt7 = U32(rom, 0x58), ovt7Size = U32(rom, 0x5C);
+        uint icon = U32(rom, 0x68), rsa = U32(rom, 0x80);
+        Put(Path.Combine(dir, "header.bin"), rom, 0, 0x4000);
+        Put(Path.Combine(dir, "arm9.bin"), rom, arm9, arm9Size);
+        Put(Path.Combine(dir, "arm7.bin"), rom, arm7, arm7Size);
+        Put(Path.Combine(dir, "arm9ovt.bin"), rom, ovt9, ovt9Size);
+        Put(Path.Combine(dir, "arm7ovt.bin"), rom, ovt7, ovt7Size);
+        if (icon != 0) {
+            ushort kind = U16(rom, icon);
+            Put(Path.Combine(dir, "banner.bin"), rom, icon, kind == 2 ? 0x940u : kind == 3 ? 0xA40u : kind == 0x103 ? 0x23C0u : 0x840u);
+        }
+        Put(Path.Combine(dir, "fnt.bin"), rom, fnt, fntSize);
+        Put(Path.Combine(dir, "fat.bin"), rom, fat, fatSize);
+        Put(Path.Combine(dir, "rsasig.bin"), rom, rsa, 136);
+        for (uint i = 0; i < ovt9Size / 32; i++) Overlay(rom, Path.Combine(dir, "overlay9", "overlay9_" + U32(rom, ovt9 + i * 32) + ".bin"), U16(rom, ovt9 + i * 32 + 24), fat);
+        for (uint i = 0; i < ovt7Size / 32; i++) Overlay(rom, Path.Combine(dir, "overlay7", "overlay7_" + U32(rom, ovt7 + i * 32) + ".bin"), U16(rom, ovt7 + i * 32 + 24), fat);
+        Tree(rom, fnt, fat, 0xF000, dir);
+    }
+    static void Overlay(byte[] rom, string file, ushort id, uint fat) {
+        uint start = U32(rom, fat + id * 8u);
+        Put(file, rom, start, U32(rom, fat + id * 8u + 4) - start);
+    }
+    static void Tree(byte[] rom, uint fnt, uint fat, int dirId, string path) {
+        Directory.CreateDirectory(path);
+        uint entry = fnt + (uint)(dirId & 0xFFF) * 8;
+        uint at = fnt + U32(rom, entry);
+        ushort fileId = U16(rom, entry + 4);
+        while (true) {
+            int head = rom[at++];
+            if (head == 0) break;
+            int length = head & 0x7F;
+            string name = Encoding.ASCII.GetString(rom, (int)at, length);
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name == "..") throw new InvalidDataException("That ROM has a bad file name in it.");
+            at += (uint)length;
+            if ((head & 0x80) != 0) {
+                int child = U16(rom, at); at += 2;
+                Tree(rom, fnt, fat, child, Path.Combine(path, name));
+            } else {
+                uint start = U32(rom, fat + fileId * 8u);
+                Put(Path.Combine(path, name), rom, start, U32(rom, fat + fileId * 8u + 4) - start);
+                fileId++;
+            }
+        }
+    }
+}
+
+// The Platinum PC port's save.bin holds the same data as a DS save, but its 64-bit build pads some structures to 8-byte
+// boundaries: the s64 times in GameTime and SystemData, the BoxPokemon (u64 ribbons) in each Daycare slot, and PCBoxes.
+// Nothing else differs, so a save converts both ways by adding or removing that padding and redoing each block's footer.
+static class PlatinumSave {
+    const int MainDs = 0xCF2C, BoxesDs = 0x121E4, FooterSize = 20, HalfSize = 0x40000, Size = 0x80000;
+    const uint Signature = 0x20060623;
+    static readonly int[] MainPads = { 0x34, 0x48, 0x64, 0x1740, 0x182C };   // where, in DS offsets, 4 bytes are added
+    static readonly int[] BoxesPads = { 0x4, BoxesDs - FooterSize };
+    static int MainPort { get { return MainDs + MainPads.Length * 4; } }
+    static int BoxesPort { get { return BoxesDs + BoxesPads.Length * 4; } }
+    static ushort Crc(byte[] d, int at, int n) {
+        ushort c = 0xFFFF;
+        for (int i = 0; i < n; i++) {
+            c ^= (ushort)(d[at + i] << 8);
+            for (int b = 0; b < 8; b++) c = (ushort)((c & 0x8000) != 0 ? (c << 1) ^ 0x1021 : c << 1);
+        }
+        return c;
+    }
+    static bool Valid(byte[] d, int at, int size, int id) {
+        int f = at + size - FooterSize;
+        return f + FooterSize <= d.Length && BitConverter.ToUInt32(d, f + 8) == size && BitConverter.ToUInt32(d, f + 12) == Signature
+            && d[f + 16] == id && BitConverter.ToUInt16(d, f + 18) == Crc(d, at, size - FooterSize);
+    }
+    // One block's body, with padding added or removed. Removed padding has to be zero, or it wasn't padding.
+    static void Body(byte[] src, int from, byte[] dst, int to, int dsBody, int[] pads, bool toPort) {
+        int ds = 0, port = 0;
+        foreach (int pad in pads) {
+            int run = pad - ds;
+            if (toPort) { Array.Copy(src, from + ds, dst, to + port, run); Array.Clear(dst, to + port + run, 4); }
+            else {
+                Array.Copy(src, from + port, dst, to + ds, run);
+                for (int k = 0; k < 4; k++) if (src[from + port + run + k] != 0) throw new InvalidDataException("The port's save has data where padding was expected, so it wasn't converted.");
+            }
+            ds += run; port += run + 4;
+        }
+        int rest = dsBody - ds;
+        if (toPort) Array.Copy(src, from + ds, dst, to + port, rest); else Array.Copy(src, from + port, dst, to + ds, rest);
+    }
+    static void Footer(byte[] src, int srcFooter, byte[] dst, int at, int size) {
+        int f = at + size - FooterSize;
+        Array.Copy(src, srcFooter, dst, f, FooterSize);
+        BitConverter.GetBytes((uint)size).CopyTo(dst, f + 8);
+        BitConverter.GetBytes(Crc(dst, at, size - FooterSize)).CopyTo(dst, f + 18);
+    }
+    static byte[] Convert(byte[] input, bool toPort) {
+        var src = new byte[Size];
+        for (int i = 0; i < Size; i++) src[i] = i < input.Length ? input[i] : (byte)0xFF;
+        var dst = (byte[])src.Clone();
+        int mainFrom = toPort ? MainDs : MainPort, boxesFrom = toPort ? BoxesDs : BoxesPort, mainTo = toPort ? MainPort : MainDs, boxesTo = toPort ? BoxesPort : BoxesDs;
+        int converted = 0;
+        foreach (int half in new[] { 0, HalfSize }) {
+            // Both blocks are always rewritten together, and blank them first so nothing old shows past a shorter block.
+            bool main = Valid(src, half, mainFrom, 0), boxes = Valid(src, half + mainFrom, boxesFrom, 1);
+            int area = Math.Max(MainDs + BoxesDs, MainPort + BoxesPort);
+            for (int i = 0; i < area; i++) dst[half + i] = 0xFF;
+            if (main) { Body(src, half, dst, half, MainDs - FooterSize, MainPads, toPort); Footer(src, half + mainFrom - FooterSize, dst, half, mainTo); converted++; }
+            if (boxes) { Body(src, half + mainFrom, dst, half + mainTo, BoxesDs - FooterSize, BoxesPads, toPort); Footer(src, half + mainFrom + boxesFrom - FooterSize, dst, half + mainTo, boxesTo); converted++; }
+        }
+        if (converted == 0) throw new InvalidDataException("No valid save data was found to convert.");
+        // The port fills space it hasn't used with zeros. On a cartridge unused space reads as erased.
+        if (!toPort) for (int sector = 0; sector < Size; sector += 0x1000) {
+            bool empty = true;
+            for (int i = 0; i < 0x1000 && empty; i++) empty = dst[sector + i] == 0;
+            if (empty) for (int i = 0; i < 0x1000; i++) dst[sector + i] = 0xFF;
+        }
+        return dst;
+    }
+    public static byte[] ToPort(byte[] ds) { return Convert(ds, true); }
+    public static byte[] ToDs(byte[] port) { return Convert(port, false); }
+}
+
+// Each game's own title screen, captured from the player's ROM on their PC by running it without a window. None of it
+// ships: it lives in state\game-art, and a game without any keeps its drawn scene.
+static class GameArt {
+    const int Count = 48, Step = 6;   // ten pictures a second, for just under five seconds
+    static readonly object gate = new object();
+    static string loadedId; static Bitmap[] loaded; static Bitmap loadedLogo;
+    static string Folder(string id) { return Path.Combine(Config.State, "game-art", id); }
+    static string FrameFile(string id, int i) { return Path.Combine(Folder(id), "frame-" + i.ToString("00") + ".jpg"); }
+    static string LogoFile(string id) { return Path.Combine(Folder(id), "logo.png"); }
+    public static bool Has(string id) { return id != null && File.Exists(FrameFile(id, Count - 1)); }
+    // Text goes on the picture, so it's always light, whatever the game's colours.
+    public static void Dress(Theme th) { if (Has(th.GameId)) th.Ink = Color.FromArgb(252, 250, 244); }
+    static void Load(string id) {
+        if (loadedId == id) return;
+        var old = loaded; var oldLogo = loadedLogo;
+        var next = new Bitmap[Count];
+        for (int i = 0; i < Count; i++) using (var f = new Bitmap(FrameFile(id, i))) next[i] = new Bitmap(f);
+        Bitmap logo = null;
+        if (File.Exists(LogoFile(id))) using (var f = new Bitmap(LogoFile(id))) logo = new Bitmap(f);
+        loaded = next; loadedLogo = logo; loadedId = id;
+        if (old != null) foreach (var b in old) b.Dispose();
+        if (oldLogo != null) oldLogo.Dispose();
+    }
+    // There and back, so the end meets the beginning without a jump.
+    public static Bitmap Frame(string id, float t) {
+        if (!Has(id)) return null;
+        lock (gate) {
+            try { Load(id); } catch { return null; }
+            int n = (int)(t * 10) % (Count * 2 - 2);
+            return loaded[n < Count ? n : Count * 2 - 2 - n];
+        }
+    }
+    public static Bitmap Logo(string id) {
+        if (!Has(id)) return null;
+        lock (gate) { try { Load(id); return loadedLogo; } catch { return null; } }
+    }
+    public static void Draw(Graphics g, Bitmap pic, RectangleF r) {
+        float scale = Math.Max(r.Width / pic.Width, r.Height / pic.Height), w = pic.Width * scale, h = pic.Height * scale;
+        var st = g.Save();
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+        g.DrawImage(pic, r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h);
+        g.Restore(st);
+    }
+    static long Distance(Bitmap a, Bitmap b) {
+        long sum = 0;
+        for (int y = 0; y < a.Height; y++) for (int x = 0; x < a.Width; x++) {
+            Color p = a.GetPixel(x, y), q = b.GetPixel(x, y);
+            sum += Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B);
+        }
+        return sum;
+    }
+    // The widescreen view shows the game's two screens side by side, and some titles swap them. The logo is the half that looks
+    // the same in every picture, which leaves the other as the moving art.
+    static void Sort(string[] shots, string id) {
+        const int thumbW = 32, thumbH = 24;
+        var thumbs = new List<Bitmap>(); var sides = new List<bool>(); var sources = new List<int>();
+        int bandTop = int.MaxValue, bandBottom = 0, width = 0, height = 0;
+        foreach (var file in shots) using (var pic = new Bitmap(file)) {
+            width = pic.Width; height = pic.Height;
+            for (int y = 0; y < pic.Height; y += 4) {
+                bool lit = false;
+                for (int x = 0; x < pic.Width && !lit; x += 8) { var c = pic.GetPixel(x, y); lit = c.R + c.G + c.B > 24; }
+                if (lit) { if (y < bandTop) bandTop = y; if (y > bandBottom) bandBottom = y; }
+            }
+        }
+        if (bandTop >= bandBottom) throw new InvalidDataException("The title screen came out blank.");
+        var band = new Rectangle(0, bandTop, width, Math.Min(height - bandTop, bandBottom - bandTop + 4));
+        for (int i = 0; i < shots.Length; i++) using (var pic = new Bitmap(shots[i])) foreach (bool right in new[] { false, true }) {
+            var half = new Rectangle(right ? width / 2 : 0, band.Y, width / 2, band.Height);
+            var thumb = new Bitmap(thumbW, thumbH);
+            using (var g = Graphics.FromImage(thumb)) g.DrawImage(pic, new Rectangle(0, 0, thumbW, thumbH), half, GraphicsUnit.Pixel);
+            thumbs.Add(thumb); sides.Add(right); sources.Add(i);
+        }
+        int logo = 0; long best = long.MaxValue;
+        for (int i = 0; i < thumbs.Count; i++) {
+            long total = 0;
+            var near = new List<long>();
+            for (int j = 0; j < thumbs.Count; j += 3) near.Add(Distance(thumbs[i], thumbs[j]));
+            near.Sort();
+            for (int k = 0; k < near.Count / 2; k++) total += near[k];
+            if (total < best) { best = total; logo = i; }
+        }
+        Directory.CreateDirectory(Folder(id));
+        var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+        var quality = new System.Drawing.Imaging.EncoderParameters(1);
+        quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
+        for (int i = 0; i < shots.Length; i++) {
+            bool leftIsLogo = Distance(thumbs[i * 2], thumbs[logo]) < Distance(thumbs[i * 2 + 1], thumbs[logo]);
+            using (var pic = new Bitmap(shots[i])) {
+                // Without the small print along the bottom, which would be huge once it fills the window.
+                var art = new Rectangle(leftIsLogo ? width / 2 : 0, band.Y, width / 2, band.Height * 88 / 100);
+                using (var cut = pic.Clone(art, pic.PixelFormat)) cut.Save(FrameFile(id, i), jpeg, quality);
+            }
+        }
+        using (var pic = new Bitmap(shots[sources[logo]])) {
+            var area = new Rectangle(sides[logo] ? width / 2 : 0, band.Y, width / 2, band.Height);
+            using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(LogoFile(id), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        foreach (var t in thumbs) t.Dispose();
+    }
+    public static bool CanCapture(GameEntry g) { return g.ArtFrame > 0 && g.IsDs && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom); }
+    // Null when done, or why not. It uses no save, at low priority, and the ROM is only read.
+    public static string Capture(GameEntry g) {
+        string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
+        try {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            Directory.CreateDirectory(temp);
+            string dir = Config.FulldexDir;
+            var at = Enumerable.Range(0, Count).Select(i => (g.ArtFrame + i * Step).ToString()).ToArray();
+            string args = "\"" + g.FulldexRom + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --shot-dir \"" + temp + "\" --shot-at " + string.Join(",", at) + " --frames " + (g.ArtFrame + Count * Step + 10);
+            if (g.FulldexCode != "IPGE" && g.FulldexCode != "IPKE") args += " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
+            var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            using (var p = Process.Start(psi)) {
+                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                p.BeginOutputReadLine(); p.BeginErrorReadLine();
+                if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
+            }
+            var shots = Directory.GetFiles(temp, "*.bmp").OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            if (shots.Length != Count) return "Only " + shots.Length + " pictures came out.";
+            Sort(shots, g.Id);
+            if (g.Theme != null) Dress(g.Theme);
+            return null;
+        } catch (Exception x) { return x.Message; }
+        finally { try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+    }
+    // One game at a time, behind everything else. Anything the player starts simply waits or goes first.
+    public static void CaptureMissing(Func<bool> busy) {
+        foreach (var g in Library.Games.Where(x => CanCapture(x) && !Has(x.Id)).ToList()) {
+            if (busy()) return;
+            Capture(g);
+        }
+    }
+}
+
+// What tells one save from another. From PKHeX for a cartridge save, or read as text from a Gen1Recomp slot file.
+class SaveInfo {
+    public string Trainer = "", Party = "";
+    public int Hours, Minutes, Badges = -1, Caught = -1;
+    public string Played { get { return Hours + "h " + Minutes + "m"; } }
+    public string TileLine { get { return (Trainer != "" ? Trainer + ", " : "") + Played; } }
+    public string Details(DateTime saved) {
+        var first = new List<string>();
+        if (Trainer != "") first.Add("Trainer " + Trainer);
+        first.Add(Played + " played");
+        if (Badges >= 0) first.Add(Badges + (Badges == 1 ? " badge" : " badges"));
+        if (Caught >= 0) first.Add(Caught + " caught");
+        return string.Join(", ", first.ToArray()) + "\nParty: " + (Party != "" ? Party : "empty") + "\nLast saved " + saved.ToString("d MMM yyyy, HH:mm");
+    }
+    static string Title(string name) {
+        var parts = name.Replace('_', ' ').ToLowerInvariant().Split(' ');
+        for (int i = 0; i < parts.Length; i++) if (parts[i] != "") parts[i] = char.ToUpperInvariant(parts[i][0]) + parts[i].Substring(1);
+        return string.Join(" ", parts);
+    }
+    // Slot files are plain nested tables, written with two spaces per level, so a line's indent says where it belongs.
+    public static SaveInfo FromSlot(string file) {
+        var info = new SaveInfo();
+        string block = null, inner = null;
+        int kanto = 0, johto = 0; bool sawBadges = false;
+        string level = null; var party = new List<string>();
+        foreach (var raw in File.ReadLines(file)) {
+            string line = raw.TrimEnd();
+            int indent = line.Length - line.TrimStart().Length;
+            string text = line.Trim();
+            if (indent == 2) {
+                inner = null;
+                block = text.EndsWith("= {") ? text.Substring(0, text.Length - 3).Trim() : null;
+                int cut = text.IndexOf(" = ");
+                if (cut > 0 && text.Substring(0, cut) == "playTime" && block == null) {
+                    double seconds;
+                    if (double.TryParse(text.Substring(cut + 3).TrimEnd(','), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out seconds)) { info.Hours = (int)(seconds / 3600); info.Minutes = (int)(seconds / 60) % 60; }
+                }
+                continue;
+            }
+            if (block == null) continue;
+            if (indent == 4) {
+                inner = text.EndsWith("= {") ? text.Substring(0, text.Length - 3).Trim() : null;
+                if (block == "player" && text.StartsWith("name = ")) info.Trainer = Unquote(text.Substring(7));
+                if (block == "player" && (text.StartsWith("badges = {") || text.StartsWith("kantoBadges = {"))) sawBadges = true;
+                if (block == "playTime" && text.StartsWith("hours = ")) int.TryParse(text.Substring(8).TrimEnd(','), out info.Hours);
+                if (block == "playTime" && text.StartsWith("minutes = ")) int.TryParse(text.Substring(10).TrimEnd(','), out info.Minutes);
+                continue;
+            }
+            if (indent != 6) continue;
+            if (block == "player" && inner == "badges" && text.Contains("= true")) johto++;
+            if (block == "player" && inner == "kantoBadges" && text.Contains("= true")) kanto++;
+            if (block == "pokedex" && (inner == "caught" || inner == "owned") && text.Contains("= true")) info.Caught = Math.Max(info.Caught, 0) + 1;
+            if (block == "party") {
+                if (text.StartsWith("level = ")) level = text.Substring(8).TrimEnd(',');
+                if (text.StartsWith("species = ")) party.Add(Title(Unquote(text.Substring(10))) + (level != null ? " " + level : ""));
+            }
+        }
+        if (sawBadges) info.Badges = johto + kanto;
+        if (info.Caught < 0) info.Caught = 0;
+        info.Party = string.Join(", ", party.ToArray());
+        return info;
+    }
+    static string Unquote(string s) { return s.TrimEnd(',').Trim().Trim('"'); }
+}
+
+// A game's saves. One is in use, at the paths the engines expect; the rest are parked in state\save-sets\<game>\<number>.
+static class SaveSets {
+    public static string Root(GameEntry g) { return Path.Combine(Config.State, "save-sets", g.Id); }
+    public static string Dir(GameEntry g, string set) { return Path.Combine(Root(g), set); }
+    public static string Journal(GameEntry g) { return Path.Combine(Root(g), "switching.txt"); }
+    public static string Active(GameEntry g) {
+        try { string f = Path.Combine(Root(g), "active.txt"); if (File.Exists(f)) { string v = File.ReadAllText(f).Trim(); if (v != "") return v; } } catch { }
+        return "1";
+    }
+    public static void SetActive(GameEntry g, string set) {
+        Directory.CreateDirectory(Root(g));
+        string f = Path.Combine(Root(g), "active.txt");
+        File.WriteAllText(f + ".part", set);
+        File.Copy(f + ".part", f, true); File.Delete(f + ".part");
+    }
+    public static List<string> All(GameEntry g) {
+        var l = Directory.Exists(Root(g)) ? Directory.GetDirectories(Root(g)).Select(Path.GetFileName).ToList() : new List<string>();
+        if (!l.Contains(Active(g))) l.Add(Active(g));
+        int a, b;
+        l.Sort((x, y) => int.TryParse(x, out a) && int.TryParse(y, out b) ? a.CompareTo(b) : string.CompareOrdinal(x, y));
+        return l;
+    }
+    public static string Name(GameEntry g, string set) {
+        try { string f = Path.Combine(Dir(g, set), "name.txt"); if (File.Exists(f)) { string v = File.ReadAllText(f).Trim(); if (v != "") return v; } } catch { }
+        return "Save " + set;
+    }
+    public static void SetName(GameEntry g, string set, string name) {
+        Directory.CreateDirectory(Dir(g, set));
+        File.WriteAllText(Path.Combine(Dir(g, set), "name.txt"), name);
+    }
+    // Numbers are never reused, so a new save can't inherit a deleted one's backups.
+    public static string Next(GameEntry g) {
+        Directory.CreateDirectory(Root(g));
+        string f = Path.Combine(Root(g), "next.txt");
+        int n = 1, v;
+        foreach (var s in All(g)) if (int.TryParse(s, out v) && v > n) n = v;
+        try { if (File.Exists(f) && int.TryParse(File.ReadAllText(f).Trim(), out v) && v > n) n = v; } catch { }
+        n++;
+        File.WriteAllText(f, n.ToString());
+        Directory.CreateDirectory(Dir(g, n.ToString()));
+        return n.ToString();
+    }
 }
 
 // The ROM folders and game list. Reads the game code from each ROM, and hashes only what Gen1Recomp needs.
@@ -136,12 +526,13 @@ static class Library {
         var json = new JavaScriptSerializer().Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(Config.GamesFile));
         Func<Dictionary<string, object>, string, string> str = delegate(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; };
         foreach (var d in json) {
-            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save") };
+            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port") };
             object c, dx;
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
+            object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
             if (d.TryGetValue("colors", out c)) {
                 var hex = ((System.Collections.IEnumerable)c).Cast<object>().Select(x => (string)x).ToArray();
-                if (hex.Length == 3) e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish"));
+                if (hex.Length == 3) { e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish")); e.Theme.GameId = e.Id; GameArt.Dress(e.Theme); }
             }
             list.Add(e);
         }
@@ -172,7 +563,7 @@ static class Library {
         Games = list;
     }
     // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
-    static List<string> FilesUnder(string root) {
+    public static List<string> FilesUnder(string root) {
         var found = new List<string>();
         var left = new Stack<string>();
         left.Push(root);
@@ -349,9 +740,15 @@ static class SaveGuard {
         if (file == null || !File.Exists(file)) return "";
         using (var f = File.OpenRead(file)) using (var s = SHA256.Create()) return BitConverter.ToString(s.ComputeHash(f)).Replace("-", "");
     }
-    public static string BackupFolder(GameEntry g) { return Path.Combine(Config.State, "save-backups", g.Id); }
+    // Each save has its own backups, so one can't push out another's. The first keeps the original folder.
+    public static string BackupFolder(GameEntry g) { return BackupFolder(g, SaveSets.Active(g)); }
+    public static string BackupFolder(GameEntry g, string set) {
+        string folder = Path.Combine(Config.State, "save-backups", g.Id);
+        return set == "1" ? folder : Path.Combine(folder, "save-" + set);
+    }
     public static string Bridge(string args, out int code) {
         var psi = new ProcessStartInfo(Config.MonBridge, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
+        psi.EnvironmentVariables["NATIVEMONS_ORIGINALS"] = Path.Combine(Config.State, "pokemon-originals");
         using (var p = Process.Start(psi)) {
             var e = p.StandardError.ReadToEndAsync(); var o = p.StandardOutput.ReadToEndAsync();
             if (!p.WaitForExit(60000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
@@ -359,9 +756,16 @@ static class SaveGuard {
             return o.Result.Trim() != "" ? o.Result : e.Result;
         }
     }
+    // Fulldex makes an empty file when a game first starts. Nothing has been saved in it yet, so it isn't damage.
+    public static bool IsBlank(string file) {
+        try {
+            var data = File.ReadAllBytes(file);
+            return data.Length > 0 && data.All(b => b == data[0]);
+        } catch { return false; }
+    }
     // Null when the save is healthy, otherwise what's wrong with it. Without the tool, nothing can be checked.
     public static string Problem(string file) {
-        if (!File.Exists(Config.MonBridge)) return null;
+        if (!File.Exists(Config.MonBridge) || IsBlank(file)) return null;
         int code; string o = Bridge("check \"" + file + "\"", out code);
         if (code == 0) return null;
         var f = o.Trim().Split('\t');
@@ -407,10 +811,12 @@ class Item {
     public char Icon = '';
     public Theme Theme;   // a game's row: its colours
     public string Sprite; // a Pokemon's row: its picture (see Sprites)
+    public string TileHint = "";   // a short second line on its grid tile, to tell similar rows apart
     public Item(string text, string hint, bool on, Action run) { Text = text; Hint = hint ?? ""; On = on; Run = run; }
 }
 class Page {
     public string Title; public List<Item> Items = new List<Item>(); public int Sel;
+    public int TopRow; public float ScrollRow = -1;   // grid scrolling: where it's heading, and where it is now
     public string Body;          // a text page (notes, results) instead of a list
     public Action OnBack;        // null = pop the page
     public string Mono;          // a fixed-width block under the body
@@ -492,6 +898,17 @@ class LauncherForm : Form {
         else pages.Push(MainPage());
         if (screen == "games") pages.Push(GamesPage());
         if (screen == "folders") pages.Push(FoldersPage());
+        if (screen == "import") {
+            var row = new List<FoundSave>();
+            foreach (var folder in SaveFolders()) foreach (var path in Library.FilesUnder(folder)) {
+                var one = IdentifySlot(path);
+                if (one != null) { one.Info = ReadSaveInfo(path); row.Add(one); }
+            }
+            var page = new Page { Title = "Import saves" };
+            foreach (var one in row) page.Items.Add(SaveRow(one));
+            pages.Push(page);
+        }
+        if (screen == "saves" && current != null) pages.Push(SavesPage(current));
         if (screen == "folder-added") { firstSetup = true; pages.Push(FoldersPage()); pages.Push(FolderAddedPage(Config.RomFolders().FirstOrDefault() ?? "")); }
         if (screen == "credits") pages.Push(CreditsPage());
         var sample = Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
@@ -536,8 +953,18 @@ class LauncherForm : Form {
             return o;
         }
     }
+    // The port's program is called main, like plenty of others, so only one started from its own folder counts.
+    static bool PortRunning() {
+        bool found = false;
+        foreach (var p in Process.GetProcessesByName("main")) {
+            try { if (string.Equals(p.MainModule.FileName, Config.PlatinumPort, StringComparison.OrdinalIgnoreCase)) found = true; } catch { }
+            p.Dispose();
+        }
+        return found;
+    }
     static string RunningGames() {
         var names = new List<string>();
+        if (PortRunning()) names.Add("the Platinum PC port");
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
             if (found.Length > 0) names.Add(n);
@@ -552,7 +979,9 @@ class LauncherForm : Form {
         starting = true; startSince = DateTime.Now; startStage = "Looking for your games"; Invalidate();
         Task.Run(() => {
             string err = null;
-            try { Library.Scan(Gen1Cli); } catch (Exception e) { err = e.Message; }
+            try { Library.Scan(Gen1Cli); RecoverSwitches(); } catch (Exception e) { err = e.Message; }
+            // Title screens are gathered afterwards, without holding up the menu.
+            Task.Run(() => { System.Threading.Thread.Sleep(3000); try { GameArt.CaptureMissing(() => job != null || RunningGames() != ""); } catch { } });
             Sprites.LoadFamilies(BridgeFamilies);
             int left = (int)((1.1 - (DateTime.Now - startSince).TotalSeconds) * 1000);
             if (left > 0) Task.Delay(left).Wait();
@@ -748,7 +1177,7 @@ class LauncherForm : Form {
             string why, gen1 = Gen1Export(g, out why);
             if (why != null) return Kept(r, why);
             string master = MasterOf(g);
-            bool hasMaster = File.Exists(master);
+            bool hasMaster = File.Exists(master) && !SaveGuard.IsBlank(master);
             string hm = SaveGuard.Hash(master), hg = SaveGuard.Hash(gen1);
             var st = ReadSync(g);
             string lastM, lastG, slot;
@@ -799,8 +1228,10 @@ class LauncherForm : Form {
         // One more way in: the same save rewritten by PKHeX, which can get past a strict reader.
         if (last == null && repaired == null) {
             repaired = Path.Combine(Config.State, "save-sync", g.Id + "-repaired.sav");
+            Directory.CreateDirectory(Path.GetDirectoryName(repaired));
             int rc; SaveGuard.Bridge("repair \"" + master + "\" \"" + repaired + "\"", out rc);
-            string again; if (rc == 0) last = TryImportProved(g, repaired, out again);
+            string again = null; if (rc == 0) last = TryImportProved(g, repaired, out again);
+            if (last == null && again != null) why = again;
         }
         if (last == null) {
             if (active != null && active != "nil") Gen1Slot(g, "activate " + g.Gen1 + " " + active);
@@ -906,12 +1337,207 @@ class LauncherForm : Form {
                 if (problem != null) { problem = "That backup failed its check: " + problem; return null; }
                 string current = CurrentSave(g);
                 SaveGuard.Backup(g, current, "before-restore");
-                if (g.Engine() == "fulldex" || Shares(g)) SaveGuard.WriteInPlace(file, MasterOf(g));
-                if (g.Engine() != "fulldex") problem = ImportBack(g, file);
+                if (g.Engine() != "gen1" || Shares(g)) SaveGuard.WriteInPlace(file, MasterOf(g));
+                if (g.Engine() == "gen1") problem = ImportBack(g, file);
                 if (problem == null && Shares(g)) { var r = SyncSave(g, "fulldex"); problem = r.Failed ? r.Note : null; }
             } catch (Exception x) { problem = x.Message; }
             return null;
         }, delegate(string e) { ShowText(e == null && problem == null ? "Restored" : "Not restored", e ?? problem ?? "Your " + g.Title + " save is back to that backup.", null); done(); });
+    }
+
+    // ---------- several saves per game ----------
+    static bool HasMaster(GameEntry g) { return g.FulldexCode != null && g.Save != null; }
+    static bool HasGen1Slots(GameEntry g) { return g.Gen1 != null && g.Imported; }
+    static string ParkedSave(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "fulldex.sav"); }
+    static string ParkedSync(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "sync.txt"); }
+    static string ParkedSlot(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "gen1.txt"); }
+    static void CopyOrRemove(string source, string target) {
+        if (File.Exists(source)) SaveGuard.WriteInPlace(source, target);
+        else if (File.Exists(target)) File.Delete(target);
+    }
+    static string ReadSlot(GameEntry g, string set) {
+        try { string f = ParkedSlot(g, set); if (File.Exists(f)) { string v = File.ReadAllText(f).Trim(); if (v != "" && v != "nil") return v; } } catch { }
+        return null;
+    }
+    static void Park(GameEntry g, string set) {
+        Directory.CreateDirectory(SaveSets.Dir(g, set));
+        if (HasMaster(g)) CopyOrRemove(MasterOf(g), ParkedSave(g, set));
+        CopyOrRemove(SyncFile(g), ParkedSync(g, set));
+        if (HasGen1Slots(g)) {
+            string slot = Gen1Slot(g, "active " + g.Gen1);
+            if (slot == null) throw new IOException("Gen1Recomp couldn't say which of its save slots is in use.");
+            File.WriteAllText(ParkedSlot(g, set), slot);
+        }
+    }
+    // Puts a parked save in use. A save with nothing in it yet starts a new game in each engine.
+    static void BringIn(GameEntry g, string set) {
+        if (HasMaster(g)) CopyOrRemove(ParkedSave(g, set), MasterOf(g));
+        Directory.CreateDirectory(Path.GetDirectoryName(SyncFile(g)));
+        CopyOrRemove(ParkedSync(g, set), SyncFile(g));
+        if (HasGen1Slots(g)) {
+            string slot = ReadSlot(g, set);
+            if (slot != null) { if (Gen1Slot(g, "activate " + g.Gen1 + " " + slot) == null) throw new IOException("Gen1Recomp couldn't switch to that save's slot."); }
+            else {
+                slot = Gen1Slot(g, "new " + g.Gen1);
+                if (string.IsNullOrEmpty(slot)) throw new IOException("Gen1Recomp couldn't make a new save slot.");
+                File.WriteAllText(ParkedSlot(g, set), slot);
+            }
+        }
+        SaveSets.SetActive(g, set);
+    }
+    // Nothing is shared during a switch: each save is parked exactly as it stands, even mid-conflict, and meets it again later.
+    // The save being left is parked and proven first, so a failure from then on can put everything back.
+    public static string SwitchSave(GameEntry g, string target) {
+        string from = SaveSets.Active(g);
+        if (target == from) return null;
+        string running = RunningGames();
+        if (running != "") return "Close " + running + " first, so nothing is writing to the save.";
+        try {
+            if (HasMaster(g)) SaveGuard.Backup(g, MasterOf(g), "before-switch");
+            Park(g, from);
+        } catch (Exception x) { return "Nothing was changed. " + x.Message; }
+        try {
+            File.WriteAllText(SaveSets.Journal(g), from);
+            BringIn(g, target);
+            File.Delete(SaveSets.Journal(g));
+            return null;
+        } catch (Exception x) {
+            try { RollBack(g, from); return "You're still on your previous save. " + x.Message; }
+            catch (Exception y) { return "The switch failed and couldn't be undone yet. It'll try again next time the launcher starts. " + x.Message + " " + y.Message; }
+        }
+    }
+    static void RollBack(GameEntry g, string from) {
+        BringIn(g, from);
+        File.Delete(SaveSets.Journal(g));
+    }
+    // A switch cut short, by a crash or a power cut, is undone at the next start.
+    public static void RecoverSwitches() {
+        foreach (var g in Library.Games) {
+            try {
+                if (!File.Exists(SaveSets.Journal(g))) continue;
+                RollBack(g, File.ReadAllText(SaveSets.Journal(g)).Trim());
+            } catch { }
+        }
+    }
+    public static string NewSave(GameEntry g, string name) {
+        string set = SaveSets.Next(g);
+        if (!string.IsNullOrWhiteSpace(name)) SaveSets.SetName(g, set, name);
+        string problem = SwitchSave(g, set);
+        if (problem != null) { try { Directory.Delete(SaveSets.Dir(g, set), true); } catch { } }
+        return problem;
+    }
+    // A separate copy, which starts its own story from here. The save in use stays in use.
+    public static string DuplicateSave(GameEntry g, string source) {
+        string set = null;
+        try {
+            bool active = source == SaveSets.Active(g);
+            set = SaveSets.Next(g);
+            SaveSets.SetName(g, set, SaveSets.Name(g, source) + " copy");
+            if (HasMaster(g)) CopyOrRemove(active ? MasterOf(g) : ParkedSave(g, source), ParkedSave(g, set));
+            CopyOrRemove(active ? SyncFile(g) : ParkedSync(g, source), ParkedSync(g, set));
+            if (HasGen1Slots(g)) {
+                string slot = active ? Gen1Slot(g, "active " + g.Gen1) : ReadSlot(g, source);
+                // A slot with nothing saved in it has nothing to copy, and the copy gets a new one when first used.
+                if (!string.IsNullOrEmpty(slot) && slot != "nil") {
+                    string copy = Gen1Slot(g, "duplicate " + g.Gen1 + " " + slot);
+                    if (!string.IsNullOrEmpty(copy)) File.WriteAllText(ParkedSlot(g, set), copy);
+                }
+            }
+            return null;
+        } catch (Exception x) {
+            if (set != null) try { Directory.Delete(SaveSets.Dir(g, set), true); } catch { }
+            return x.Message;
+        }
+    }
+    // Only a save not in use. Its Fulldex file goes to its backups, and Gen1Recomp's slot stays, as the player's slots always do.
+    public static string DeleteSave(GameEntry g, string set) {
+        if (set == SaveSets.Active(g)) return "That save is in use. Switch to another one first.";
+        try {
+            string parked = ParkedSave(g, set);
+            if (File.Exists(parked)) {
+                string folder = SaveGuard.BackupFolder(g, set);
+                Directory.CreateDirectory(folder);
+                string kept = Path.Combine(folder, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-deleted.sav");
+                SaveGuard.WriteInPlace(parked, kept);
+            }
+            Directory.Delete(SaveSets.Dir(g, set), true);
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
+    // Where Gen1Recomp keeps a slot, for reading what's in it.
+    static string Gen1SlotFile(GameEntry g, string slot) {
+        try {
+            if (string.IsNullOrEmpty(slot) || slot == "nil" || !HasGen1Slots(g)) return null;
+            string paths = Gen1Cli("paths");
+            var row = paths == null ? null : paths.Split('\n').Select(x => x.TrimEnd('\r').Split('\t')).FirstOrDefault(x => x.Length == 2 && x[0] == "save");
+            return row == null ? null : Path.Combine(row[1].Replace('/', '\\'), "saves", g.Gen1, slot + ".lua");
+        } catch { return null; }
+    }
+    Page SavesPage(GameEntry g) {
+        var p = new Page { Title = g.Title + " saves", Theme = g.Theme };
+        string active = SaveSets.Active(g);
+        foreach (var one in SaveSets.All(g)) {
+            string set = one; bool inUse = set == active;
+            string file = !HasMaster(g) ? Gen1SlotFile(g, inUse ? Gen1Slot(g, "active " + g.Gen1) : ReadSlot(g, set)) : inUse ? MasterOf(g) : ParkedSave(g, set);
+            var saved = ReadSaveInfo(file);
+            string what = saved != null ? saved.Details(File.GetLastWriteTime(file)) : "Nothing saved here yet, or it's only in Gen1Recomp.";
+            if (inUse) p.Sel = p.Items.Count;
+            p.Items.Add(new Item(SaveSets.Name(g, set), "", true, delegate { pages.Push(SavePage(g, set)); }) { Icon = '\uE896', Theme = g.Theme, Info = (inUse ? "In use now.\n" : "") + what, TileHint = saved != null ? saved.TileLine : "" });
+        }
+        p.Items.Add(new Item("New save", "", true, delegate {
+            string name = AskText("New save", "Name for the new save:", "");
+            if (name == null) return;
+            SaveAction(g, "Making a new save", delegate { return NewSave(g, name); }, 1);
+        }) { Icon = '', Info = "Starts this game from the beginning. Your other saves stay as they are." });
+        return p;
+    }
+    Page SavePage(GameEntry g, string set) {
+        bool inUse = set == SaveSets.Active(g);
+        var p = new Page { Title = SaveSets.Name(g, set), Theme = g.Theme, Body = inUse ? "This save is in use." : "Switching keeps your current save exactly as it is, ready to come back to." };
+        if (!inUse) p.Items.Add(new Item("Use this save", "Play will use it from now on.", true, delegate { SaveAction(g, "Switching saves", delegate { return SwitchSave(g, set); }, 2); }) { Icon = '' });
+        p.Items.Add(new Item("Rename", "", true, delegate {
+            string name = AskText("Rename", "New name:", SaveSets.Name(g, set));
+            if (name != null) SaveAction(g, "Renaming", delegate { SaveSets.SetName(g, set, name); return null; }, 2);
+        }) { Icon = '' });
+        p.Items.Add(new Item("Copy", "A separate save that starts from this point.", true, delegate { SaveAction(g, "Copying the save", delegate { return DuplicateSave(g, set); }, 2); }) { Icon = '' });
+        if (!inUse) p.Items.Add(new Item("Delete", "Removes it from this list.", true, delegate {
+            var sure = new Page { Title = "Delete " + SaveSets.Name(g, set) + "?", Theme = g.Theme, Body = "It leaves this list. A last copy stays in the game's backups folder, and Gen1Recomp keeps its slot." };
+            sure.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '' });
+            sure.Items.Add(new Item("Delete it", "", true, delegate { SaveAction(g, "Deleting the save", delegate { return DeleteSave(g, set); }, 3); }) { Icon = '' });
+            pages.Push(sure);
+        }) { Icon = '' });
+        return p;
+    }
+    // Runs a change behind a card, then returns to a fresh list of the game's saves, or says what went wrong.
+    void SaveAction(GameEntry g, string title, Func<string> work, int popCount) {
+        string problem = null; Page fresh = null;
+        Busy(title, delegate { problem = work(); fresh = SavesPage(g); return null; }, delegate(string e) {
+            for (int i = 0; i < popCount && pages.Count > 1; i++) pages.Pop();
+            if (fresh != null) pages.Push(fresh);
+            ReplaceMain();
+            if (e != null || problem != null) ShowText("That didn't work", e ?? problem, null);
+            Invalidate();
+        });
+    }
+    void OpenSaves(GameEntry g) {
+        Page saves = null;
+        Busy("Reading your saves", delegate { saves = SavesPage(g); return null; }, delegate(string e) {
+            if (e != null) { ShowText("Saves", e, null); return; }
+            pages.Push(saves); Invalidate();
+        });
+    }
+    string AskText(string title, string prompt, string start) {
+        using (var f = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ClientSize = new Size(340, 110) })
+        using (var label = new Label { Text = prompt, Left = 12, Top = 12, Width = 316 })
+        using (var box = new TextBox { Text = start, Left = 12, Top = 36, Width = 316, MaxLength = 40 })
+        using (var ok = new Button { Text = "OK", Left = 172, Top = 72, Width = 75, DialogResult = DialogResult.OK })
+        using (var cancel = new Button { Text = "Cancel", Left = 253, Top = 72, Width = 75, DialogResult = DialogResult.Cancel }) {
+            f.Controls.AddRange(new Control[] { label, box, ok, cancel });
+            f.AcceptButton = ok; f.CancelButton = cancel;
+            if (f.ShowDialog(this) != DialogResult.OK) return null;
+            string v = box.Text.Replace("\r", " ").Replace("\n", " ").Trim();
+            return v;
+        }
     }
 
     // ---------- exporting saves ----------
@@ -987,7 +1613,64 @@ class LauncherForm : Form {
     }
 
     // ---------- importing saves ----------
-    class FoundSave { public string File, Note; public GameEntry Game; }
+    class FoundSave { public string File, Note; public GameEntry Game; public bool Slot; public SaveInfo Info; }
+    // Null when it can't be read, or nothing has been saved in it yet. Never changes the file.
+    public static SaveInfo ReadSaveInfo(string file) {
+        try {
+            if (file == null || !File.Exists(file)) return null;
+            if (file.EndsWith(".lua", StringComparison.OrdinalIgnoreCase)) return SaveInfo.FromSlot(file);
+            if (SaveGuard.IsBlank(file)) return null;
+            int code; var f = Bridge("summary \"" + file + "\"", out code).TrimEnd('\r', '\n').Split('\t');
+            if (code != 0 || f.Length < 6) return null;
+            return new SaveInfo { Trainer = f[0], Hours = int.Parse(f[1]), Minutes = int.Parse(f[2]), Badges = int.Parse(f[3]), Caught = int.Parse(f[4]), Party = f[5] };
+        } catch { return null; }
+    }
+    // Gen1Recomp's own slot files, as another install keeps them: saves\<version>\slot<n>.lua.
+    static FoundSave IdentifySlot(string file) {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(file), @"^slot\d+\.lua$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return null;
+        string version = Path.GetFileName(Path.GetDirectoryName(file));
+        var game = Library.Games.Find(g => g.Gen1 != null && string.Equals(g.Gen1, version, StringComparison.OrdinalIgnoreCase));
+        return game == null ? null : new FoundSave { File = file, Game = game, Slot = true };
+    }
+    // The file itself is only read. If the save in use has nothing in it yet this fills that one, otherwise it's a new save.
+    public static string AdoptSlot(GameEntry g, string file, string name) {
+        try {
+            string running = RunningGames();
+            if (running != "") return "Close " + running + " first, so nothing is writing to the save.";
+            if (!g.Imported) return "Prepare " + g.Title + " first.";
+            string why, current = Gen1Export(g, out why);
+            bool empty = current == null && why == null && !(HasMaster(g) && File.Exists(MasterOf(g)) && !SaveGuard.IsBlank(MasterOf(g)));
+            string madeEmpty = null, cameFrom = SaveSets.Active(g);
+            if (!empty) {
+                string problem = NewSave(g, name);
+                if (problem != null) return problem;
+                madeEmpty = Gen1Slot(g, "active " + g.Gen1);
+            } else if (!string.IsNullOrWhiteSpace(name)) SaveSets.SetName(g, SaveSets.Active(g), name);
+            else madeEmpty = null;
+            var psi = Gen1Start("");
+            int code; string slot;
+            using (var plain = new PlainPath(file)) {
+                psi.EnvironmentVariables["NATIVEMONS_CLI"] = "adopt " + g.Gen1 + " " + plain.Path_;
+                slot = RunCapture(psi, 60, out code).Trim().Split('\n').Last().Trim();
+            }
+            if (code != 0) {
+                // Back to the save the player was on, without the empty one made for this.
+                if (!empty) {
+                    string made = SaveSets.Active(g);
+                    if (SwitchSave(g, cameFrom) == null) {
+                        if (!string.IsNullOrEmpty(madeEmpty) && madeEmpty != "nil") Gen1Slot(g, "delete " + g.Gen1 + " " + madeEmpty);
+                        DeleteSave(g, made);
+                    }
+                }
+                return "Gen1Recomp couldn't take that save: " + slot;
+            }
+            File.WriteAllText(ParkedSlot(g, SaveSets.Active(g)), slot);
+            // Only the empty slot made a moment ago goes. Slots holding a save are never removed.
+            if (!string.IsNullOrEmpty(madeEmpty) && madeEmpty != "nil" && madeEmpty != slot) Gen1Slot(g, "delete " + g.Gen1 + " " + madeEmpty);
+            if (Shares(g)) { var r = SyncSave(g, "gen1"); if (r.Failed) return r.Note; }
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
     // What PKHeX calls each kind of save, and the games it can belong to.
     static readonly Dictionary<string, string[]> SaveKinds = new Dictionary<string, string[]> {
         { "RD", new[] { "red" } }, { "GN", new[] { "blue" } }, { "BU", new[] { "blue" } }, { "YW", new[] { "yellow" } }, { "RB", new[] { "red", "blue" } }, { "RBY", new[] { "red", "blue", "yellow" } },
@@ -1035,7 +1718,11 @@ class LauncherForm : Form {
                 foreach (var file in files) {
                     if (file.IndexOf("backup", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                     var save = Identify(file);
-                    if (save != null) found.Add(save);
+                    if (save != null) { save.Info = ReadSaveInfo(file); found.Add(save); }
+                }
+                foreach (var file in Library.FilesUnder(folder)) {
+                    var slot = IdentifySlot(file);
+                    if (slot != null) { slot.Info = ReadSaveInfo(file); found.Add(slot); }
                 }
             }
             return null;
@@ -1052,7 +1739,10 @@ class LauncherForm : Form {
         bool ready = one.Game != null && one.Game.Playable;
         string title = one.Game != null ? one.Game.Title : "Unknown game";
         string info = !ready ? (one.Game == null ? "" : "Its ROM isn't in your ROM folders, so there's nowhere to put it yet. ") : "Copies it to " + GameEntry.EngineName(one.Game.Engine()) + ". The file here isn't changed. ";
-        var it = new Item(title, "", ready, delegate { ImportSave(one); }) { Icon = '\uE896', Info = info + (one.Note ?? ""), Records = new[] { "File: " + Path.GetFileName(one.File), "Folder: " + Path.GetDirectoryName(one.File) } };
+        // What's in the save comes first, as that's how the player tells two of the same game apart.
+        if (one.Info != null) info = one.Info.Details(File.GetLastWriteTime(one.File)) + (one.Note != null ? "\n" + one.Note : "") + (ready ? "" : "\n" + info.Trim());
+        else info += one.Note ?? "";
+        var it = new Item(title, "", ready, delegate { ImportSave(one); }) { Icon = '\uE896', Info = info, TileHint = one.Info != null ? one.Info.TileLine : "", Records = new[] { "File: " + Path.GetFileName(one.File), "Folder: " + Path.GetDirectoryName(one.File) } };
         if (one.Game != null) it.Theme = one.Game.Theme;
         return it;
     }
@@ -1078,7 +1768,17 @@ class LauncherForm : Form {
     }
     void ImportSave(FoundSave one) {
         var g = one.Game;
-        if (g.Engine() != "fulldex" && !Shares(g)) {
+        if (one.Slot) {
+            string name = AskText("Name this save", "Name for this save:", g.Title.Replace("Pokemon ", "") + " " + File.GetLastWriteTime(one.File).ToString("d MMM"));
+            if (name == null) return;
+            Action adopt = delegate {
+                string problem = null;
+                Busy("Importing " + g.Title, delegate { problem = AdoptSlot(g, one.File, name); return null; }, delegate(string e) { ReplaceMain(); ImportDone(g, e ?? problem); });
+            };
+            if (!g.Imported) Import(g, adopt); else adopt();
+            return;
+        }
+        if (g.Engine() == "gen1" && !Shares(g)) {
             // A new save slot: anything already there is kept.
             Action run = delegate {
                 string problem = null;
@@ -1111,18 +1811,38 @@ class LauncherForm : Form {
     }
 
     // Every installed game adds the entries it has, counted once however many games share them, and every save adds what it has caught.
+    static bool AddCaught(HashSet<int> into, string file) {
+        if (file == null || !File.Exists(file) || SaveGuard.IsBlank(file)) return false;
+        int code; string o = Bridge("caught \"" + file + "\"", out code);
+        if (code != 0) return false;
+        foreach (var id in o.Trim().Split(',')) { int n; if (int.TryParse(id, out n)) into.Add(n); }
+        return true;
+    }
+    // Each Pokemon once, however many of a game's saves have it. Null when none of them could be read.
+    public static HashSet<int> CaughtInAllSaves(GameEntry g) {
+        var all = new HashSet<int>();
+        bool any = false;
+        string active = SaveSets.Active(g);
+        foreach (var set in SaveSets.All(g)) {
+            if (set == active) { string why; any |= AddCaught(all, SaveOf(g, out why)); continue; }
+            if (HasMaster(g) && File.Exists(ParkedSave(g, set))) { any |= AddCaught(all, ParkedSave(g, set)); continue; }
+            // A Gen1Recomp slot can only be exported while it's in use, so it's briefly made so, unless a game is running.
+            string slot = ReadSlot(g, set);
+            if (slot == null || !HasGen1Slots(g) || RunningGames() != "") continue;
+            string current = Gen1Slot(g, "active " + g.Gen1);
+            if (current == null || Gen1Slot(g, "activate " + g.Gen1 + " " + slot) == null) continue;
+            try { string why; any |= AddCaught(all, Gen1Export(g, out why)); }
+            finally { Gen1Slot(g, "activate " + g.Gen1 + " " + current); }
+        }
+        return any ? all : null;
+    }
     void OpenCollection() {
         var caughtBy = new Dictionary<GameEntry, HashSet<int>>();
         var noSave = new HashSet<GameEntry>();
         Busy("Counting your collection", delegate {
             foreach (var g in Library.Games.Where(x => x.Playable)) {
-                string why, file = SaveOf(g, out why);
-                if (file == null) { noSave.Add(g); continue; }
-                int code; string o = Bridge("caught \"" + file + "\"", out code);
-                if (code != 0) { noSave.Add(g); continue; }
-                var set = new HashSet<int>();
-                foreach (var id in o.Trim().Split(',')) { int n; if (int.TryParse(id, out n)) set.Add(n); }
-                caughtBy[g] = set;
+                var set = CaughtInAllSaves(g);
+                if (set == null) noSave.Add(g); else caughtBy[g] = set;
             }
             return null;
         }, delegate(string e) {
@@ -1138,7 +1858,8 @@ class LauncherForm : Form {
             foreach (var g in games) {
                 bool has = caughtBy.ContainsKey(g);
                 var it = new Item(g.Title + ": " + (has ? caughtBy[g].Count + " of " + g.Dex : "no save"), "", has, null) { Icon = '\uE7FC', Theme = g.Theme };
-                it.Info = has ? "Caught in this save, out of the " + g.Dex + " entries in this game." : "No save here yet. It still adds its entries to the total. Bring one in with Settings > Import saves.";
+                int saveCount = SaveSets.All(g).Count;
+                it.Info = has ? (saveCount > 1 ? "Different Pokemon caught across your " + saveCount + " saves" : "Caught in this save") + ", out of the " + g.Dex + " entries in this game." :"No save here yet. It still adds its entries to the total. Bring one in with Settings > Import saves.";
                 if (has) {
                     int only = caughtBy[g].Count(n => !caughtBy.Where(o => o.Key != g).Any(o => o.Value.Contains(n)));
                     it.Records = new[] { "Only here: " + only };
@@ -1166,6 +1887,7 @@ class LauncherForm : Form {
         if (g.Gen1Rom != null) r.Add("Gen1Recomp: " + Path.GetFileName(g.Gen1Rom) + (g.Imported ? " (prepared)" : ""));
         else if (g.Imported) r.Add("Gen1Recomp: prepared");
         if (g.FulldexRom != null) r.Add("Fulldex: " + Path.GetFileName(g.FulldexRom));
+        if (SaveSets.All(g).Count > 1) r.Add("Save: " + SaveSets.Name(g, SaveSets.Active(g)));
         return r.ToArray();
     }
     Page GamePage(GameEntry g) {
@@ -1174,17 +1896,20 @@ class LauncherForm : Form {
         var play = new Item("Play", "Start with " + GameEntry.EngineName(engine) + ".", g.Playable, delegate { Play(g); }) { Icon = '' };
         play.Records = GameRecords(g);
         p.Items.Add(play);
-        if (g.HasBoth) {
-            string other = engine == "fulldex" ? "gen1" : "fulldex";
-            p.Items.Add(new Item("Engine: " + (engine == "fulldex" ? "Fulldex" : "Gen1Recomp"), "Switch to " + GameEntry.EngineName(other) + (Shares(g) ? ". Both share one save." : "."), true, delegate {
+        var engines = g.Engines();
+        if (engines.Count > 1) {
+            string other = engines[(engines.IndexOf(engine) + 1) % engines.Count];
+            p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine), "Switch to " + GameEntry.EngineName(other) + (Shares(g) || g.Port != null ? ". They share one save." : "."), true, delegate {
                 Config.Write("engine-" + g.Id + ".txt", other); pages.Pop(); pages.Push(GamePage(g)); ReplaceMain();
             }) { Icon = '' });
         }
+        p.Items.Add(new Item("Saves", "In use: " + SaveSets.Name(g, SaveSets.Active(g)) + ".", true, delegate { OpenSaves(g); }) { Icon = '\uE896' });
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
         p.Items.Add(new Item("Save backups", "Checked copies you can go back to.", true, delegate { pages.Push(BackupsPage(g)); }) { Icon = '\uE81C' });
         p.Items.Add(new Item("Export save", "Send it to a 3DS, flash cart or emulator.", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898' });
         p.Items.Add(new Item("Open in PKHeX", "View or edit this game's save in PKHeX.", true, delegate { OpenInPkhex(g); }) { Icon = '\uE70F' });
-        if (engine != "fulldex") p.Items.Add(new Item("Bring back the edited save", "Takes the save you edited in PKHeX. Your older save slots stay.", true, delegate { BringBack(g); }) { Icon = '\uE896' });
+        p.Items.Add(new Item("Open in OpenHome", "Move Pokemon across games and generations in OpenHome.", true, delegate { OpenInOpenHome(g); }) { Icon = '' });
+        if (engine == "gen1") p.Items.Add(new Item("Bring back the edited save", "Takes the save you edited in PKHeX. Your older save slots stay.", true, delegate { BringBack(g); }) { Icon = '\uE896' });
         if (g.Imported && g.Gen1Rom != null) p.Items.Add(new Item("Prepare again", "Rebuilds the game data from your ROM. Saves are kept.", true, delegate { Import(g, null); }) { Icon = '' });
         if (engine == "fulldex" && Library.NeedsPatch(g.FulldexRom)) p.Items.Add(new Item("Patch this ROM", "It won't load until its secure area is decrypted.", true, delegate { pages.Push(PatchPage(g, false)); }) { Icon = '' });
         return p;
@@ -1226,7 +1951,7 @@ class LauncherForm : Form {
             item.Records = new[] { "Version: " + f[2] };
             p.Items.Add(item);
         }
-        p.Items.Add(new Item("Install a mod (.zip)", "", true, delegate { InstallMod(g); }) { Icon = '', Info = "Copies a mod into the game's mods folder. Only install mods you trust: they run code in the game." });
+        p.Items.Add(new Item("Install a mod (.zip)", "", true, delegate { InstallMod(g); }) { Icon = '\uE896', Info = "Copies a mod into the game's mods folder. Only install mods you trust: they run code in the game." });
         return p;
     }
     void InstallMod(GameEntry g) {
@@ -1314,6 +2039,8 @@ class LauncherForm : Form {
     Page CreditsPage() {
         return new Page { Title = "Credits", Body = Gen1Credit
             + "\n\nPokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
+            + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
+            + "\n\nOpen in OpenHome uses your own copy of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome)."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
@@ -1367,10 +2094,10 @@ class LauncherForm : Form {
     // Gen1Recomp keeps its own save format, so a cartridge .sav is exported for the move. Fulldex's are ready as they are.
     static string SaveOf(GameEntry g, out string why) {
         why = null;
-        if (g.Engine() == "fulldex") {
+        if (g.Engine() != "gen1") {
             string f = Path.Combine(Config.FulldexDir, "saves", g.Save ?? "");
             if (File.Exists(f)) return f;
-            why = "No Fulldex save yet for " + g.Title + ". Play and save once first.";
+            why = "No save yet for " + g.Title + ". Play and save once first.";
             return null;
         }
         var psi = Gen1Start("");
@@ -1381,7 +2108,7 @@ class LauncherForm : Form {
         return null;
     }
     static string ImportBack(GameEntry g, string file) {
-        if (g.Engine() == "fulldex") return null;
+        if (g.Engine() != "gen1") return null;
         var psi = Gen1Start("");
         int code; string o;
         using (var plain = new PlainPath(file)) {
@@ -1485,7 +2212,7 @@ class LauncherForm : Form {
             RunMove(from, file, box, slot, name, to, target, opts);
         }) { Icon = '\uE72C' };
         p.Items.Add(retry);
-        if (forced) p.Items.Add(new Item("About this move", "", false, null) { Icon = '\uE946', Info = "No real transfer exists here, so it is copied by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal." });
+        if (forced) p.Items.Add(new Item("About this move", "", false, null) { Icon = '\uE946', Info = "No real transfer exists here, so it is copied by hand. Its form, ball and origin may change, and PKHeX may flag it as not legal. Its original data is kept, and comes back when it returns to its own generation." });
         refresh();
         return p;
     }
@@ -1509,7 +2236,7 @@ class LauncherForm : Form {
             // Destination first: any failure after this duplicates the Pokemon, it never loses it.
             string back = ImportBack(to, target) ?? ImportBack(from, file);
             ok = back == null;
-            message = ok ? name + " is now in " + to.Title + "'s PC boxes." + (f.Length > 2 && f[2] == "not-legal" ? "\n\nPKHeX's legality check flags it as not legal, which matters only for online play." : "") : back;
+            message = ok ? name + " is now in " + to.Title + "'s PC boxes." + (f.Length > 3 && f[3] == "restored" ? "\n\nIts original data is back: its origin, ball and moves, as they were before it left." : "") + (f.Length > 2 && f[2] == "not-legal" ? "\n\nPKHeX's legality check flags it as not legal, which matters only for online play." + (f.Length > 3 ? "" : " Its original data is kept, and comes back if it returns to its own generation.") : "") : back;
             return null;
         }, delegate(string e) {
             while (pages.Count > 1) pages.Pop();
@@ -1537,7 +2264,32 @@ class LauncherForm : Form {
             if (e != null || file == null) { ShowText("Can't open that save", e ?? why, null); return; }
             try { Process.Start(new ProcessStartInfo(exe, "\"" + file + "\"") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }); }
             catch (Exception x) { ShowText("Can't start PKHeX", x.Message, null); return; }
-            if (g.Engine() != "fulldex") ShowText("Editing an exported copy", "Gen1Recomp keeps its own save format, so PKHeX has an exported copy:\n" + file + "\n\nSave your changes there in PKHeX, then choose Bring back the edited save on this game's page.", null);
+            if (g.Engine() == "gen1") ShowText("Editing an exported copy", "Gen1Recomp keeps its own save format, so PKHeX has an exported copy:\n" + file + "\n\nSave your changes there in PKHeX, then choose Bring back the edited save on this game's page.", null);
+        });
+    }
+
+    // OpenHome takes no file on its command line, as far as its source shows, so the player picks the save inside it.
+    void OpenInOpenHome(GameEntry g) {
+        string exe = Config.Read("openhome-path.txt", "");
+        if (!File.Exists(exe)) {
+            using (var d = new OpenFileDialog { Filter = "OpenHome|OpenHome*.exe|Programs (*.exe)|*.exe", Title = "Where is OpenHome? (github.com/andrewbenington/OpenHome/releases)" }) {
+                string likely = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenHome");
+                if (Directory.Exists(likely)) d.InitialDirectory = likely;
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                exe = d.FileName; Config.Write("openhome-path.txt", exe);
+            }
+        }
+        string why = null, file = null;
+        Busy("Opening OpenHome", delegate { file = SaveOf(g, out why); return null; }, delegate(string e) {
+            if (e != null || file == null) { ShowText("Can't open that save", e ?? why, null); return; }
+            file = file.Replace('/', '\\');
+            try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }); }
+            catch (Exception x) { ShowText("Can't start OpenHome", x.Message, null); return; }
+            try { Clipboard.SetText(file); } catch { }
+            string after = g.Engine() == "gen1"
+                ? "\n\nGen1Recomp keeps its own save format, so this is an exported copy. Save your changes there, then choose Bring back the edited save on this game's page."
+                : "\n\nThe launcher picks up what OpenHome saves here. A backup is made before each game.";
+            ShowText("OpenHome is starting", "Open this save in OpenHome. Its path is on your clipboard:\n\n" + file + after + "\n\nOpenHome's moved Pokemon aren't guaranteed legal.", null);
         });
     }
 
@@ -1555,12 +2307,13 @@ class LauncherForm : Form {
             if (Library.NeedsPatch(g.FulldexRom)) { pages.Push(PatchPage(g, true)); return; }
             BeforeGame(g, delegate { PlayFulldex(g); });
         }
+        else if (g.Engine() == "port") BeforeGame(g, delegate { PlayPort(g); });
         else if (!g.Imported) Import(g, delegate { BeforeGame(g, delegate { PlayGen1(g); }); });
         else BeforeGame(g, delegate { PlayGen1(g); });
     }
     void BeforeGame(GameEntry g, Action start) {
         Busy("Backing up your save", delegate {
-            string file = g.Imported || g.Engine() == "fulldex" ? CurrentSave(g) : null;
+            string file = g.Imported || g.Engine() != "gen1" ? CurrentSave(g) : null;
             try { SaveGuard.Backup(g, file, "before-play"); } catch { }
             return null;
         }, delegate(string e) { SyncThen(g, start); });
@@ -1596,9 +2349,97 @@ class LauncherForm : Form {
             Directory.CreateDirectory(roms);
             if (!string.Equals(Path.GetFullPath(g.FulldexRom), Path.GetFullPath(copy), StringComparison.OrdinalIgnoreCase) && !File.Exists(copy)) File.Copy(g.FulldexRom, copy);
             args = "--game " + g.FulldexCode;
+            watchGba = true; gbaPlaying = false; gbaClosed = false;
         }
         var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+    }
+    // After a GBA game ends, Fulldex's published build opens its own game list instead of exiting, and has no argument
+    // to change that. Its list has a window title of its own, and by then the game has finished and saved, so seeing the
+    // game's window give way to the list means it's safe to close the program and come straight back here.
+    bool watchGba, gbaPlaying, gbaClosed;
+    DateTime gbaWatchedAt;
+    void WatchGba() {
+        if (!watchGba || job == null || (DateTime.Now - gbaWatchedAt).TotalMilliseconds < 50) return;
+        gbaWatchedAt = DateTime.Now;
+        try {
+            job.Refresh();
+            string title = job.MainWindowTitle;
+            if (title == "") return;
+            bool list = title.IndexOf("Fulldex", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!list) gbaPlaying = true;
+            else if (gbaPlaying) { gbaClosed = true; watchGba = false; job.Kill(); }
+        } catch { }
+    }
+    // ---------- the Platinum PC port ----------
+    // It reads and writes save.bin beside its program, in its own padded layout (see PlatinumSave). Only one engine runs at a
+    // time, so the save goes in, converted, before it starts and comes back, converted and checked, when it ends.
+    static string PortDir { get { return Path.GetDirectoryName(Config.PlatinumPort); } }
+    static string PortSave { get { return Path.Combine(PortDir, "save.bin"); } }
+    static string PortRecord(GameEntry g) { return Path.Combine(Config.State, "save-sync", g.Id + "-port.txt"); }
+    static string ReadPortRecord(GameEntry g) { try { return File.Exists(PortRecord(g)) ? File.ReadAllText(PortRecord(g)).Trim() : null; } catch { return null; } }
+    static void WritePortRecord(GameEntry g, string hash) {
+        Directory.CreateDirectory(Path.GetDirectoryName(PortRecord(g)));
+        File.WriteAllText(PortRecord(g), hash ?? "");
+    }
+    // Null when all is well, or what the player should know. The shared save only changes once the port's has passed.
+    public static string SaveFromPort(GameEntry g) {
+        try {
+            string save = PortSave, master = MasterOf(g);
+            if (!File.Exists(save) || SaveGuard.IsBlank(save) || SaveGuard.Hash(save) == ReadPortRecord(g)) return null;
+            string incoming = Path.Combine(Config.State, "save-sync", g.Id + "-port-incoming.sav");
+            Directory.CreateDirectory(Path.GetDirectoryName(incoming));
+            byte[] data;
+            string problem = null;
+            // A file the converter can't read is still kept, whole, as it may be the only copy of what was played.
+            try { data = PlatinumSave.ToDs(File.ReadAllBytes(save)); }
+            catch (InvalidDataException x) { data = File.ReadAllBytes(save); problem = x.Message; }
+            File.WriteAllBytes(incoming, data);
+            problem = problem ?? SaveGuard.Problem(incoming);
+            if (problem != null) {
+                SaveGuard.Backup(g, incoming, "platinum-port");
+                try { File.Delete(incoming); } catch { }
+                return "The Platinum PC port's save didn't pass its check, so your shared save wasn't changed. A copy is in your backups.\n\nWhy: " + problem;
+            }
+            SaveGuard.Backup(g, master, "before-port");
+            SaveGuard.Backup(g, incoming, "platinum-port");
+            SaveGuard.WriteInPlace(incoming, master);
+            int code; string o = SaveGuard.Bridge("compare \"" + incoming + "\" \"" + master + "\"", out code);
+            try { File.Delete(incoming); } catch { }
+            if (code != 0) return "The Platinum PC port's save didn't copy correctly: " + o.Trim() + " Both are in your backups.";
+            WritePortRecord(g, SaveGuard.Hash(save));
+            return null;
+        } catch (Exception x) { return "The Platinum PC port's save wasn't brought back, and it'll try again next time. " + x.Message; }
+    }
+    // Everything the port needs before it starts. Throws if it can't be got ready, so a save is never put at risk.
+    public static void PreparePort(GameEntry g) {
+        if (!File.Exists(Path.Combine(PortDir, "arm9.bin"))) NdsExtract.Run(g.FulldexRom, PortDir);
+        // Anything left from a run that never came back goes home first, and a copy is kept if it can't.
+        string note = SaveFromPort(g);
+        if (note != null && File.Exists(PortSave)) SaveGuard.Backup(g, PortSave, "platinum-port-leftover");
+        string master = MasterOf(g);
+        if (File.Exists(master) && !SaveGuard.IsBlank(master)) {
+            string converted = PortSave + ".in";
+            File.WriteAllBytes(converted, PlatinumSave.ToPort(File.ReadAllBytes(master)));
+            SaveGuard.WriteInPlace(converted, PortSave);
+            File.Delete(converted);
+        }
+        else if (File.Exists(PortSave)) File.Delete(PortSave);
+        WritePortRecord(g, File.Exists(PortSave) ? SaveGuard.Hash(PortSave) : "");
+    }
+    void PlayPort(GameEntry g) {
+        string problem = null;
+        Busy("Getting " + g.Title + " ready", delegate { try { PreparePort(g); } catch (Exception x) { problem = x.Message; } return null; }, delegate(string e) {
+            if (e != null || problem != null) { ShowText("Could not start " + g.Title, "Nothing was changed.\n\n" + (e ?? problem), null); return; }
+            var psi = new ProcessStartInfo(Config.PlatinumPort) { UseShellExecute = false, WorkingDirectory = PortDir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            RunJob(g.Title, psi, true, delegate(int code) {
+                string note = null;
+                Busy("Saving " + g.Title, delegate { note = SaveFromPort(g); return null; }, delegate(string e2) {
+                    if (e2 != null || note != null) noticeAfter = e2 ?? note;
+                    Finished(g, code);
+                });
+            });
+        });
     }
     void Finished(GameEntry g, int code) {
         var t = DateTime.Now - jobStart;
@@ -1665,6 +2506,8 @@ class LauncherForm : Form {
     void JobEnded() {
         var p = job; job = null; int code = 0;
         try { p.WaitForExit(); code = p.ExitCode; p.Dispose(); } catch { }
+        if (gbaClosed) code = 0;
+        watchGba = false; gbaClosed = false;
         if (!Visible) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Activate(); Native.Front(Handle);
@@ -1707,6 +2550,7 @@ class LauncherForm : Form {
     }
     DateTime scannedAt; int spritesSeen;
     void Poll() {
+        WatchGba();
         if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
             scannedAt = DateTime.Now;
             if (waiting != null && job == null && RunningGames() == "") {
@@ -1717,7 +2561,7 @@ class LauncherForm : Form {
         }
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
-        if (Visible && ++frame % 2 == 0 && (job != null || starting || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
+        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || (pages.Count > 0 && pages.Peek().Main) || GameArt.Has(Cur().GameId))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
@@ -1745,6 +2589,11 @@ class LauncherForm : Form {
         return base.ProcessCmdKey(ref msg, key);
     }
     // Mouse: hovering selects, a left click runs it, a right click goes back. Rectangles come from the last paint.
+    bool scrolling;   // a grid is still gliding, so keep redrawing
+    protected override void OnMouseWheel(MouseEventArgs e) {
+        base.OnMouseWheel(e);
+        if (job == null && e.Delta != 0) Act(e.Delta > 0 ? "up" : "down", false);
+    }
     readonly List<KeyValuePair<RectangleF, int>> hits = new List<KeyValuePair<RectangleF, int>>();
     int HitAt(Point pt) {
         var inside = new PointF(pt.X - screenX, pt.Y - screenY);
@@ -1894,6 +2743,18 @@ class LauncherForm : Form {
         return f;
     }
     static void VersionFill(Graphics g, RectangleF r, float rad, Theme th, float t) {
+        // A game's own title screen, where it's been captured, with shade so what's on top stays readable.
+        var art = r.Height >= 40 ? GameArt.Frame(th.GameId, t) : null;
+        if (art != null) {
+            using (var path = Round(r, rad)) {
+                var st = g.Save();
+                g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+                GameArt.Draw(g, art, r);
+                using (var shade = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRectangle(shade, r);
+                g.Restore(st);
+            }
+            return;
+        }
         var layer = LayerFor((int)Math.Ceiling(r.Width), (int)Math.Ceiling(r.Height), th);
         using (var path = Round(r, rad)) {
             var st = g.Save();
@@ -2441,11 +3302,27 @@ class LauncherForm : Form {
         float pad = hero.Width * 0.05f;
         Write(g, "NOW SELECTED", smallBold, th.Ink, new RectangleF(hero.X + pad, hero.Y + pad * 0.7f, hero.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
         string name = current != null ? current.Title : "No games yet";
-        var vr = new RectangleF(hero.X + pad, hero.Y + pad * 0.7f + smallFont.Height * 1.2f, hero.Width - 2 * pad, heroFont.Height * 1.2f);
+        var titleLogo = current != null ? GameArt.Logo(current.Id) : null;
+        float logoW = 0;
+        if (titleLogo != null) {
+            // The game's logo, from its title screen, at the top of the panel beside its name.
+            float logoH = hero.Height * 0.46f;
+            logoW = logoH * titleLogo.Width / titleLogo.Height;
+            var lr = new RectangleF(hero.Right - logoW - pad * 0.6f, hero.Y + pad * 0.5f, logoW, logoH);
+            using (var clip = Round(lr, lr.Height * 0.08f)) {
+                var st = g.Save();
+                g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+                GameArt.Draw(g, titleLogo, lr);
+                g.Restore(st);
+                using (var pen = new Pen(Line, 2)) g.DrawPath(pen, clip);
+            }
+            logoW += pad * 0.8f;
+        }
+        var vr = new RectangleF(hero.X + pad, hero.Y + pad * 0.7f + smallFont.Height * 1.2f, hero.Width - 2 * pad - logoW, heroFont.Height * 1.2f);
         var vf = FitFont(g, name, vr.Size, heroFont, 0.6f, false);
         Write(g, name, vf, th.Ink, new RectangleF(vr.X, vr.Y + (heroFont.Height - vf.Height) / 2, vr.Width, vr.Height), StringAlignment.Near, StringAlignment.Near, false);
         string sub = current != null ? current.Console + " with " + GameEntry.EngineName(current.Engine()) : "Add a ROM folder to get started.";
-        Write(g, sub, smallBold, th.Ink, new RectangleF(hero.X + pad, vr.Bottom, hero.Width - 2 * pad, smallFont.Height * 2.5f), StringAlignment.Near, StringAlignment.Near, true);
+        Write(g, sub, smallBold, th.Ink, new RectangleF(hero.X + pad, vr.Bottom, hero.Width - 2 * pad - logoW, smallFont.Height * 2.5f), StringAlignment.Near, StringAlignment.Near, true);
         if (p.Items.Count > 0) {
             bool sel = p.Sel == 0, on = p.Items[0].On;
             float bh = hero.Height * 0.3f;
@@ -2554,13 +3431,33 @@ class LauncherForm : Form {
             y += detailH + tgap;
             int rows = (p.Items.Count + cols - 1) / cols;
             int fitRows = Math.Max(1, (int)((bottom - y + tgap) / (tileH + tgap)));
-            int firstRow = Math.Max(0, Math.Min(p.Sel / cols - fitRows / 2, rows - fitRows));
-            for (int i = firstRow * cols; i < p.Items.Count && i < (firstRow + fitRows) * cols; i++) {
-                int k = i - firstRow * cols;
-                var r = new RectangleF(m + (k % cols) * (tw + tgap), y + (k / cols) * (tileH + tgap), tw, tileH);
-                var shown = new Item(p.Items[i].Text.Replace("Pokemon ", ""), "", p.Items[i].On, null) { Icon = p.Items[i].Icon, Theme = p.Items[i].Theme, Sprite = p.Items[i].Sprite };
+            // The view moves only when the selection would leave it, and glides there.
+            int selRow = p.Sel / cols;
+            if (selRow < p.TopRow) p.TopRow = selRow;
+            else if (selRow >= p.TopRow + fitRows) p.TopRow = selRow - fitRows + 1;
+            p.TopRow = Math.Max(0, Math.Min(p.TopRow, rows - fitRows));
+            if (p.ScrollRow < 0) p.ScrollRow = p.TopRow;
+            p.ScrollRow += (p.TopRow - p.ScrollRow) * 0.3f;
+            if (Math.Abs(p.TopRow - p.ScrollRow) < 0.01f) p.ScrollRow = p.TopRow;
+            scrolling = p.ScrollRow != p.TopRow;
+            float rowH = tileH + tgap;
+            // Tiles are cut off at the edges, so a part-hidden row shows there's more to see.
+            var area = new RectangleF(m - 4, y - 4, w - 2 * m + 8, bottom - y + 4);
+            var kept = g.Save();
+            g.SetClip(area, System.Drawing.Drawing2D.CombineMode.Intersect);
+            for (int i = 0; i < p.Items.Count; i++) {
+                var r = new RectangleF(m + (i % cols) * (tw + tgap), y + (i / cols - p.ScrollRow) * rowH, tw, tileH);
+                if (!r.IntersectsWith(area)) continue;
+                var shown = new Item(p.Items[i].Text.Replace("Pokemon ", ""), p.Items[i].TileHint, p.Items[i].On, null) { Icon = p.Items[i].Icon, Theme = p.Items[i].Theme, Sprite = p.Items[i].Sprite };
                 Tile(g, shown, i == p.Sel, r, true, smallFont, th);
-                hits.Add(new KeyValuePair<RectangleF, int>(r, i));
+                hits.Add(new KeyValuePair<RectangleF, int>(RectangleF.Intersect(r, area), i));
+            }
+            g.Restore(kept);
+            if (rows > fitRows) {
+                float barW = Math.Max(3f, w * 0.008f), barX = w - m + (w * 0.012f), barH = bottom - y;
+                float thumbH = barH * fitRows / rows, thumbY = y + (barH - thumbH) * p.ScrollRow / (rows - fitRows);
+                using (var track = new SolidBrush(Fade(Cream, 45))) using (var path = Round(new RectangleF(barX, y, barW, barH), barW / 2)) g.FillPath(track, path);
+                using (var thumb = new SolidBrush(Cream)) using (var path = Round(new RectangleF(barX, thumbY, barW, thumbH), barW / 2)) g.FillPath(thumb, path);
             }
             if (rows > fitRows)
                 Write(g, (p.Sel + 1) + " / " + p.Items.Count, smallFont, FootInk, new RectangleF(m, top, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Far, StringAlignment.Center, false);
@@ -2710,6 +3607,34 @@ static class NativeMonsLauncher {
             var shared = Library.Games.Find(x => x.Id == argv[1]);
             var outcome = LauncherForm.SyncSave(shared, argv.Length > 3 ? argv[3] : null);
             File.WriteAllText(argv[2], (outcome.Conflict ? "conflict" : outcome.Failed ? "kept" : outcome.Changed ? "changed" : "level") + "\n" + outcome.Note);
+            return;
+        }
+        if (argv.Length == 4 && argv[0] == "--platinum-convert") {
+            try { File.WriteAllBytes(argv[3], argv[1] == "to-port" ? PlatinumSave.ToPort(File.ReadAllBytes(argv[2])) : PlatinumSave.ToDs(File.ReadAllBytes(argv[2]))); }
+            catch (Exception x) { File.WriteAllText(argv[3] + ".error.txt", x.Message); Environment.ExitCode = 2; }
+            return;
+        }
+        if (argv.Length == 3 && argv[0] == "--extract-nds") {
+            try { NdsExtract.Run(argv[1], argv[2]); } catch (Exception x) { File.WriteAllText(Path.Combine(argv[2], "extract-error.txt"), x.ToString()); Environment.ExitCode = 2; }
+            return;
+        }
+        // For tests: --saves <game> <result file> list | new [name] | use <n> | copy <n> | delete <n> | recover
+        if (argv.Length >= 4 && argv[0] == "--saves") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var saved = Library.Games.Find(x => x.Id == argv[1]);
+            string verb = argv[3], arg = argv.Length > 4 ? argv[4] : null, outcome = null;
+            if (verb == "new") outcome = LauncherForm.NewSave(saved, arg);
+            else if (verb == "use") outcome = LauncherForm.SwitchSave(saved, arg);
+            else if (verb == "copy") outcome = LauncherForm.DuplicateSave(saved, arg);
+            else if (verb == "delete") outcome = LauncherForm.DeleteSave(saved, arg);
+            else if (verb == "adopt") outcome = LauncherForm.AdoptSlot(saved, arg, argv.Length > 5 ? argv[5] : null);
+            else if (verb == "recover") LauncherForm.RecoverSwitches();
+            else if (verb == "art") outcome = GameArt.Capture(saved);
+            else if (verb == "port-in") LauncherForm.PreparePort(saved);
+            else if (verb == "port-out") outcome = LauncherForm.SaveFromPort(saved);
+            else if (verb == "caught") { var c = LauncherForm.CaughtInAllSaves(saved); outcome = null; File.WriteAllText(argv[2] + ".caught", c == null ? "none" : string.Join(",", c.OrderBy(x => x))); }
+            File.WriteAllText(argv[2], (outcome ?? "ok") + "\nactive=" + SaveSets.Active(saved) + "\nall=" + string.Join(",", SaveSets.All(saved)));
+            Environment.ExitCode = outcome == null ? 0 : 2;
             return;
         }
         if (argv.Length >= 4 && argv[0] == "--export") {
