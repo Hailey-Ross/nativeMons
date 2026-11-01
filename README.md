@@ -26,7 +26,7 @@ Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patch
 
 ## Moving Pokémon
 **Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are
-backed up to `state\save-backups` first. PKHeX decides what's possible, and some moves between generations can't be done. **Open in PKHeX**
+backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there, and moves with no real transfer between those games may come out flagged as not legal. **Open in PKHeX**
 on a game's page opens its save in your own copy of PKHeX.
 
 ## Build and set up
