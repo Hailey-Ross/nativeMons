@@ -24,6 +24,7 @@ runs:
         LOVE_VERSION: "11.5"
         FULLDEX_RELEASE: "pc-v1"
         PLATINUM_RELEASE: "v0.1.13"
+        NATIVEPLAT_RELEASE: "windows-5d5a59a6d"
       run: |
         $dist = "dist\nativeMons"
         Copy-Item LICENSE, README.md $dist
@@ -48,6 +49,11 @@ runs:
         gh release download $env:PLATINUM_RELEASE -R cybervisi0n/pokeplatinum -p "release_win64.zip" -O pokeplatinum.zip
         Expand-Archive pokeplatinum.zip "$dist\engines\pokeplatinum"
         Copy-Item launcher\LICENSE-libntr.txt "$dist\engines\pokeplatinum"
+        # nativeplat: the program only, built by our fork's public workflow. Its data goes in userdata beside it.
+        gh release download $env:NATIVEPLAT_RELEASE -R Hailey-Ross/gen4recomp -p "nativeplat-windows-x64.zip" -O nativeplat.zip
+        Expand-Archive nativeplat.zip nativeplat-unpacked
+        Move-Item nativeplat-unpacked\nativeplat-windows-x64 "$dist\engines\nativeplat"
+        Set-Content "$dist\engines\nativeplat\portable.txt" ''
 
         # hails.nds-Patcher.
         New-Item -ItemType Directory -Force "$dist\tools\nds-patcher" | Out-Null
@@ -73,6 +79,6 @@ runs:
         foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
           if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }
         }
-        foreach ($p in 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe') {
+        foreach ($p in 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe') {
           if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
         }

@@ -39,6 +39,7 @@ static class Program
             if (args.Length == 3 && args[0] == "compare") return Compare(args[1], args[2]);
             if (args.Length == 3 && args[0] == "repair") return Repair(args[1], args[2]);
             if (args.Length == 2 && args[0] == "caught") return Caught(args[1]);
+            if (args.Length >= 3 && args[0] == "options") return GameOptions(args[1], args.Skip(2).ToArray());
         }
         catch (Exception e)
         {
@@ -444,6 +445,140 @@ static class Program
         File.Delete(file);
         Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal") + "\trestored");
         return 0;
+    }
+
+    // Sets options stored in a save, given as text=slow|mid|fast scene=on|off style=shift|set sound=mono|stereo
+    // button=normal|alt|lequalsa frame=1..20. What a generation doesn't have is skipped. PKHeX has them for Gen 1 and 2. For
+    // Gen 3 and 4 the place comes from the decompilations, and a value that can't be real means the place is wrong, so nothing
+    // is written. Prints ok or same, or exits 2 with no change when this save can't be changed.
+    static int GameOptions(string path, string[] settings)
+    {
+        var want = settings.Select(x => x.Split('=')).ToDictionary(x => x[0], x => x[1]);
+        string? Get(string key) => want.TryGetValue(key, out var v) ? v : null;
+        int? text = Get("text") switch { "slow" => 0, "mid" => 1, "fast" => 2, null => null, _ => throw new ArgumentException("text") };
+        bool? sceneOn = Get("scene") switch { "on" => true, "off" => false, null => null, _ => throw new ArgumentException("scene") };
+        bool? styleSet = Get("style") switch { "set" => true, "shift" => false, null => null, _ => throw new ArgumentException("style") };
+        bool? stereo = Get("sound") switch { "stereo" => true, "mono" => false, null => null, _ => throw new ArgumentException("sound") };
+        int? button = Get("button") switch { "normal" => 0, "alt" => 1, "lequalsa" => 2, null => null, _ => throw new ArgumentException("button") };
+        int? frame = Get("frame") is { } f ? int.Parse(f) - 1 : null;
+        if (frame is < 0 or > 19) throw new ArgumentException("frame");
+
+        var sav = Open(path);
+        byte[] original = File.ReadAllBytes(path), result = (byte[])original.Clone();
+        switch (sav)
+        {
+            case SAV1 { Japanese: false }:
+            {
+                // Inside the block whose checksum is one byte, the inverted sum from the trainer name up to itself.
+                const int options = 0x2601, start = 0x2598, sum = 0x3523;
+                if (Rby(original, start, sum) != original[sum]) return NoOptions(sav);
+                result[options] = OptionByte(original[options], text, sceneOn, styleSet, null);
+                result[sum] = Rby(result, start, sum);
+                break;
+            }
+            case SAV2:
+                // 0x2000 in every Gen 2 save, and ahead of the area its checksums cover.
+                result[0x2000] = OptionByte(original[0x2000], text, sceneOn, styleSet, stereo);
+                break;
+            case SAV3 s:
+            {
+                // 0x13 button mode. 0x14: text 3 bits, frame 5, sound 1 (stereo = 1), style 1 (set = 1), scene 1 (off = 1).
+                int size = s is SAV3E ? 0xF2C : s is SAV3FRLG ? 0xF24 : 0x890;
+                int section = ActiveGen3Trainer(original);
+                if (section < 0 || Gen3Sum(original, section, size) != BitConverter.ToUInt16(original, section + 0xFF6)) return NoOptions(sav);
+                int word = original[section + 0x14] | original[section + 0x15] << 8, mode = original[section + 0x13];
+                if ((word & 7) > 2 || (word >> 3 & 31) > 19 || mode > 2) return NoOptions(sav);
+                int next = word;
+                if (text is { } t) next = next & ~7 | t;
+                if (frame is { } fr) next = next & ~(31 << 3) | fr << 3;
+                if (stereo is { } st) next = next & ~(1 << 8) | (st ? 1 << 8 : 0);
+                if (styleSet is { } set) next = next & ~(1 << 9) | (set ? 1 << 9 : 0);
+                if (sceneOn is { } on) next = next & ~(1 << 10) | (on ? 0 : 1 << 10);
+                result[section + 0x14] = (byte)next; result[section + 0x15] = (byte)(next >> 8);
+                result[section + 0x13] = (byte)(button ?? mode);
+                ushort total = Gen3Sum(result, section, size);
+                result[section + 0xFF6] = (byte)total; result[section + 0xFF7] = (byte)(total >> 8);
+                break;
+            }
+            case SAV4 s:
+            {
+                // Directly before the trainer block. Text 4 bits, sound 2 (stereo = 0), style 1 (set = 1), scene 1 (off = 1),
+                // button 2, frame 5. PKHeX's rewrite of these only touches this and the block's checksum: the 16 byte limit
+                // below holds it to that.
+                var block = s.General;
+                int at = s is SAV4Pt ? 0x64 : 0x60;
+                int word = block[at] | block[at + 1] << 8;
+                if ((word & 15) > 2 || (word >> 4 & 3) > 1 || (word >> 8 & 3) > 2 || (word >> 10 & 31) > 19) return NoOptions(sav);
+                int next = word;
+                if (text is { } t) next = next & ~15 | t;
+                if (stereo is { } st) next = next & ~(3 << 4) | (st ? 0 : 1 << 4);
+                if (styleSet is { } set) next = next & ~(1 << 6) | (set ? 1 << 6 : 0);
+                if (sceneOn is { } on) next = next & ~(1 << 7) | (on ? 0 : 1 << 7);
+                if (button is { } b) next = next & ~(3 << 8) | b << 8;
+                if (frame is { } fr) next = next & ~(31 << 10) | fr << 10;
+                if (next != word) { block[at] = (byte)next; block[at + 1] = (byte)(next >> 8); result = sav.Write().ToArray(); }
+                break;
+            }
+            default:
+                return NoOptions(sav);
+        }
+        if (result.SequenceEqual(original)) { Console.WriteLine("same"); return 0; }
+        // Only a handful of bytes should ever differ. Anything more isn't what was asked for, whatever caused it.
+        if (result.Length != original.Length || result.Zip(original, (a, b) => a != b).Count(x => x) > 16) return NoOptions(sav);
+        string temp = path + ".options";
+        File.WriteAllBytes(temp, result);
+        var check = Read(temp);
+        if (check == null || !check.ChecksumsValid || check.GetType() != sav.GetType()) { File.Delete(temp); return NoOptions(sav); }
+        File.Move(temp, path, true);
+        Console.WriteLine("ok");
+        return 0;
+    }
+
+    // Gen 1 and 2 share these bits: text 3, sound 2 (stereo = 2), style (set = 1), scene (off = 1). Bit 3 stays as it is.
+    static byte OptionByte(byte value, int? text, bool? sceneOn, bool? styleSet, bool? stereo)
+    {
+        int v = value;
+        if (text is { } t) v = v & ~7 | (t == 0 ? 5 : t == 1 ? 3 : 1);
+        if (stereo is { } st) v = v & ~0x30 | (st ? 0x20 : 0);
+        if (styleSet is { } set) v = v & ~0x40 | (set ? 0x40 : 0);
+        if (sceneOn is { } on) v = v & ~0x80 | (on ? 0 : 0x80);
+        return (byte)v;
+    }
+
+    static byte Rby(byte[] data, int start, int end)
+    {
+        byte total = 0;
+        for (int i = start; i < end; i++) total += data[i];
+        return (byte)~total;
+    }
+
+    // The trainer section (id 0) of whichever of the two save slots was written last, or -1.
+    static int ActiveGen3Trainer(byte[] data)
+    {
+        const int sectionSize = 0x1000, sections = 14, signature = 0x08012025;
+        int best = -1; uint newest = 0;
+        foreach (int slot in new[] { 0, 0xE000 })
+            for (int i = 0; i < sections; i++)
+            {
+                int at = slot + i * sectionSize;
+                if (at + sectionSize > data.Length || BitConverter.ToInt32(data, at + 0xFF8) != signature || BitConverter.ToUInt16(data, at + 0xFF4) != 0) continue;
+                uint counter = BitConverter.ToUInt32(data, at + 0xFFC);
+                if (best < 0 || counter > newest) { best = at; newest = counter; }
+            }
+        return best;
+    }
+
+    static ushort Gen3Sum(byte[] data, int section, int size)
+    {
+        uint total = 0;
+        for (int i = 0; i < size; i += 4) total += BitConverter.ToUInt32(data, section + i);
+        return (ushort)(total + (total >> 16));
+    }
+
+    static int NoOptions(SaveFile sav)
+    {
+        Console.Error.WriteLine("Options can't be set on this save: " + sav.GetType().Name);
+        return 2;
     }
 
     static void WriteSafely(string path, SaveFile sav)

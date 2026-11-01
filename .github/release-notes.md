@@ -14,6 +14,7 @@ The first time you play a Game Boy or GBA game with Gen1Recomp, the launcher pre
 | **Gen1Recomp** (native, with mods) | Red, Blue, Yellow, Gold, Silver, Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald |
 | **Fulldex** (widescreen, 60 fps) | FireRed, LeafGreen, Emerald, HeartGold, SoulSilver, Platinum, Black, White, Black 2, White 2 |
 | **Platinum PC port** (native, optional) | Platinum |
+| **nativeplat** (native) | Diamond, Pearl, Platinum (optional) |
 
 Where both engines have a game, it starts in Fulldex. Switch on that game's page. The engines share one save, if your ROM works with both. The Platinum PC port's download has only the program: its game files are unpacked from your own ROM, on your PC.
 
@@ -56,8 +57,8 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 
 ## Credits
 
-Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
+Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
 
-[Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp), using [melonDS](https://melonds.kuribo64.net) and [mGBA](https://mgba.io). [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr), from the [pret](https://github.com/pret/pokeplatinum) decompilation; they aren't affiliated with nativeMons. [PKHeX](https://github.com/kwsch/PKHeX) by Kaphotics and contributors. [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington. Sprites served by [hailsDotGO](https://pogo.hails.app). Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
+[Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp), using [melonDS](https://melonds.kuribo64.net) and [mGBA](https://mgba.io). [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr), from the [pret](https://github.com/pret/pokeplatinum) decompilation; they aren't affiliated with nativeMons. [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117; not affiliated with nativeMons. [PKHeX](https://github.com/kwsch/PKHeX) by Kaphotics and contributors. [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington. Sprites served by [hailsDotGO](https://pogo.hails.app). Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
 
 Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company.
