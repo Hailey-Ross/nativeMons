@@ -1,0 +1,57 @@
+name: Publish a rolling release
+description: Packages dist\nativeMons and replaces a rolling release, with its notes from .github/release-notes.md.
+
+inputs:
+  tag:
+    description: The rolling tag, which is also the channel name
+    required: true
+  banner:
+    description: The line under the download link
+    required: true
+  prerelease:
+    description: "true for a prerelease"
+    required: true
+  github-token:
+    description: Token for publishing
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        TAG: ${{ inputs.tag }}
+        BANNER: ${{ inputs.banner }}
+        PRE: ${{ inputs.prerelease }}
+        BUILD: ${{ github.run_number }}
+        REPO: ${{ github.repository }}
+      run: |
+        $sha = "${{ github.sha }}"
+        $zip = "nativeMons-windows-x64.zip"
+
+        Compress-Archive dist\nativeMons $zip
+        $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+        "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256" -NoNewline
+        @{ channel = $env:TAG; build = [int]$env:BUILD; revision = $sha; package = $zip; sha256 = $hash } | ConvertTo-Json | Out-File -Encoding ascii release.json
+
+        $commits = git log -15 --no-merges --format="- ``%h`` %s" $sha
+        $notes = @(
+          "Rolling build **$env:BUILD**, commit ``$($sha.Substring(0, 12))``."
+          ""
+          "[Download Windows ZIP](https://github.com/$env:REPO/releases/download/$env:TAG/$zip)"
+          ""
+          "> $env:BANNER"
+          ""
+          (Get-Content .github\release-notes.md -Raw -Encoding utf8).Trim()
+          ""
+          "## Recent commits"
+          ""
+          ($commits -join "`n")
+        ) -join "`n"
+        [IO.File]::WriteAllText("$PWD\release-body.md", $notes, (New-Object Text.UTF8Encoding($false)))
+
+        gh release delete $env:TAG --cleanup-tag --yes 2>$null
+        $global:LASTEXITCODE = 0
+        $flag = if ($env:PRE -eq "true") { "--prerelease" } else { "--latest" }
+        gh release create $env:TAG $zip "$zip.sha256" release.json --target $sha --title "nativeMons ($env:TAG)" --notes-file release-body.md $flag

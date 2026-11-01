@@ -19,20 +19,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 30
 
       - uses: ./.github/actions/build-package
         with:
           github-token: ${{ github.token }}
 
-      - name: Publish
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $short = "${{ github.sha }}".Substring(0, 7)
-          $zip = "nativeMons-bleeding-edge-windows-x64.zip"
-          $note = "**Bleeding edge:** built from every commit to the dev branch and may be broken. Back up your saves. Built from commit ${{ github.sha }}.`n`nNo games are included: you need your own ROMs. See the README for credits and licences."
-          Compress-Archive dist\nativeMons $zip
-          gh release delete bleeding-edge --cleanup-tag --yes 2>$null
-          $global:LASTEXITCODE = 0
-          gh release create bleeding-edge $zip --target "${{ github.sha }}" --title "Bleeding edge (dev, $short)" --notes $note --prerelease
+      - uses: ./.github/actions/publish-release
+        with:
+          tag: bleeding-edge
+          prerelease: "true"
+          banner: "**BLEEDING EDGE, rolling build.** Built from every commit to the `dev` branch, so it may be broken. Back up your saves, and please report bugs. For the latest working build, use [stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable)."
+          github-token: ${{ github.token }}
