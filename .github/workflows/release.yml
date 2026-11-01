@@ -19,20 +19,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 30
 
       - uses: ./.github/actions/build-package
         with:
           github-token: ${{ github.token }}
 
-      - name: Publish
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $short = "${{ github.sha }}".Substring(0, 7)
-          $zip = "nativeMons-stable-windows-x64.zip"
-          $note = "The latest working build, from the main branch. Built from commit ${{ github.sha }}.`n`nNo games are included: you need your own ROMs. See the README for credits and licences."
-          Compress-Archive dist\nativeMons $zip
-          gh release delete stable --cleanup-tag --yes 2>$null
-          $global:LASTEXITCODE = 0
-          gh release create stable $zip --target "${{ github.sha }}" --title "Stable (working build, $short)" --notes $note --latest
+      - uses: ./.github/actions/publish-release
+        with:
+          tag: stable
+          prerelease: "false"
+          banner: "**STABLE, rolling build.** The latest working build, from the `main` branch. Please report bugs. For the newest features, try [bleeding edge](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge)."
+          github-token: ${{ github.token }}
