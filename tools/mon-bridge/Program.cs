@@ -2,7 +2,7 @@
 // (https://github.com/kwsch/PKHeX, GPL-3.0-or-later). Licensed under the GNU GPL v3 or later.
 //
 //   mon-bridge list <save>                                  one tab-separated row per Pokemon in the boxes:
-//                                                           box, slot, species, nickname, level, trainer
+//                                                           box, slot, species, nickname, level, trainer, dex number, shiny/normal
 //   mon-bridge info <save>                                  save type, game, generation, trainer
 //   mon-bridge plan <from save> <box> <slot> <to save>      what stands in the way: forced, conflict/ok <n> <move>, item <name>
 //   mon-bridge moves <save>                                 the moves that game has: id, name
@@ -52,7 +52,7 @@ static class Program
             {
                 var pk = sav.GetBoxSlotAtIndex(box, slot);
                 if (pk.Species == 0) continue;
-                Console.WriteLine(string.Join('\t', box, slot, names[pk.Species], Clean(pk.Nickname), pk.CurrentLevel, Clean(pk.OriginalTrainerName)));
+                Console.WriteLine(string.Join('\t', box, slot, names[pk.Species], Clean(pk.Nickname), pk.CurrentLevel, Clean(pk.OriginalTrainerName), pk.Species, pk.IsShiny ? "shiny" : "normal"));
             }
         }
         return 0;
