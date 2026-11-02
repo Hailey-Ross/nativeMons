@@ -135,7 +135,7 @@ public static class StableWin {
 '@
 function RomList { Get-ChildItem -LiteralPath $RomFolder -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(gb|gbc|gba|nds)$' } | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object }
 
-$oldAppData = $env:APPDATA; $romsBefore = RomList; $saveHashes = @{}
+$script:played = @(); $oldAppData = $env:APPDATA; $romsBefore = RomList; $saveHashes = @{}
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | ForEach-Object { $saveHashes[$_.FullName] = Sha $_.FullName } }
 try {
 # ---------- repo: what's published is allowed to be ----------
@@ -330,7 +330,7 @@ if (On 'play') {
     $matrix = $pickRows
   }
   foreach ($row in $matrix) {
-    $id = $row[0]; $en = $row[1]; $name = "$id on $en"
+    $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
     if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
     ClearGames
     Set-Content "$st\engine-$id.txt" $en
@@ -373,8 +373,8 @@ if (On 'play') {
 if (On 'sync') {
   $g = @('firered','leafgreen','emerald') | Where-Object { (Test-Path (Join-Path $saves "$_.sav")) -and ($found -contains $_) } | Select-Object -First 1
   if (-not $g) { T sync 'shared save tests' 'skip' 'needs a FireRed, LeafGreen or Emerald save and ROM' } else {
-    $o = "$Work\sync.txt"; $m = Join-Path $saves "$g.sav"
-    if (-not (On 'play')) {
+    $o = "$Work\sync.txt"; $m = Join-Path $saves "$g.sav"; $record = "$st\save-sync\$g.txt"
+    if ($script:played -notcontains "$g on gen1") {
       Set-Content "$st\engine-$g.txt" 'gen1'
       $q = Start-Process $exe -ArgumentList "--play $g" -PassThru; $w = Get-Date; $shown = $null
       while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $shown = @(GameProcs | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle }) | Select-Object -First 1 }
@@ -383,6 +383,8 @@ if (On 'sync') {
     }
     [void](Launcher @('--sync',$g,$o) 180); $one = (Get-Content $o -Raw -ErrorAction SilentlyContinue) -split "`n" | Select-Object -First 1
     T sync "${g}: first sync completes" ($one -in 'level','changed') "$one"
+    # Without this, a game that isn't sharing at all would pass every check below.
+    T sync "${g}: its save really is shared between the engines" (Test-Path $record) $(if (-not (Test-Path $record)) { 'no sync record: the checks below would prove nothing' })
     [void](Launcher @('--sync',$g,$o) 180); $two = (Get-Content $o -Raw -ErrorAction SilentlyContinue) -split "`n" | Select-Object -First 1
     T sync "${g}: nothing changed, so a second sync does nothing" ($two -eq 'level') "$two"
     $goodCopy = "$Work\good.sav"; Copy-Item $m $goodCopy
