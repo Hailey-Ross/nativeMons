@@ -1073,6 +1073,111 @@ static class DexInfos {
     }
 }
 
+// Updates come whole from this project's releases, where every engine was built and tested together. What the player made is
+// never touched: the state folder isn't in a package, and the files below stay as they are even when a package has them.
+static class Updater {
+    const string Site = "https://github.com/Hailey-Ross/nativeMons/releases/download/";
+    public class Release { public string channel, revision, package, sha256; public int build; }
+    public static volatile Release Latest;
+    static string Base { get { return Environment.GetEnvironmentVariable("NATIVEMONS_UPDATE_URL") ?? Site; } }
+    static Dictionary<string, string> Version() {
+        var d = new Dictionary<string, string>();
+        try { foreach (var l in File.ReadAllLines(Path.Combine(Config.Here, "version.txt"))) { int e = l.IndexOf('='); if (e > 0) d[l.Substring(0, e)] = l.Substring(e + 1).Trim(); } } catch { }
+        return d;
+    }
+    public static int Build { get { string v; int n; return Version().TryGetValue("build", out v) && int.TryParse(v, out n) ? n : 0; } }
+    public static string Channel { get { string v; return Version().TryGetValue("channel", out v) ? v : "bleeding-edge"; } }
+    public static bool Ready { get { var r = Latest; return r != null && r.build > Build && !string.IsNullOrEmpty(r.sha256); } }
+    static System.Net.WebClient Web() {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        var web = new System.Net.WebClient();
+        web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+        return web;
+    }
+    // Null when all is well, or why it couldn't look.
+    public static string Check() {
+        try {
+            string text;
+            using (var web = Web()) { web.Encoding = Encoding.UTF8; text = web.DownloadString(Base + Channel + "/release.json"); }
+            Latest = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Release>(text.TrimStart('\uFEFF'));
+            Sprites.Touch();
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
+    static string[] Kept = {
+        @"engines\fulldex\saves\", @"engines\fulldex\roms\", @"engines\fulldex\states\", @"engines\fulldex\cheats\", @"engines\fulldex\settings.cfg",
+        @"engines\nativeplat\userdata\", @"engines\pokeplatinum\save.bin", @"engines\pokeplatinum\sim_config.ini", "state\\",
+    };
+    static bool IsKept(string relative) { return Kept.Any(k => relative.StartsWith(k, StringComparison.OrdinalIgnoreCase)); }
+    // Downloads, proves and applies the latest release. Returns null when done. Nothing changes until the download has proved good.
+    public static string Apply(Action<string, float> report) {
+        var release = Latest;
+        if (release == null || string.IsNullOrEmpty(release.sha256)) return "There's no release to update to.";
+        string work = Path.Combine(Config.State, "update"), zip = Path.Combine(work, "package.zip"), here = Config.Here;
+        try {
+            if (Directory.Exists(work)) Directory.Delete(work, true);
+            Directory.CreateDirectory(work);
+            using (var web = Web()) {
+                web.DownloadProgressChanged += (s, e) => report("Downloading build " + release.build, e.ProgressPercentage / 100f * 0.7f);
+                var wait = new System.Threading.ManualResetEventSlim();
+                Exception failed = null;
+                web.DownloadFileCompleted += (s, e) => { failed = e.Error; wait.Set(); };
+                web.DownloadFileAsync(new Uri(Base + Channel + "/" + release.package), zip);
+                wait.Wait();
+                if (failed != null) return "The download didn't finish, and nothing was changed. " + failed.Message;
+            }
+            report("Checking the download", 0.72f);
+            string hash;
+            using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
+            if (hash != release.sha256.ToLowerInvariant()) return "The download didn't match its checksum, so nothing was changed.";
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(zip)) {
+                var files = archive.Entries.Where(e => e.Name != "").ToList();
+                Func<System.IO.Compression.ZipArchiveEntry, string> relative = e => { string p = e.FullName.Replace('/', '\\'); int cut = p.IndexOf('\\'); return cut >= 0 ? p.Substring(cut + 1) : p; };
+                var names = new HashSet<string>(files.Select(relative), StringComparer.OrdinalIgnoreCase);
+                foreach (var needed in new[] { "NativeMonsLauncher.exe", "games.json", @"engines\gen1recomp\main.lua", @"engines\fulldex\Pokemon Fulldex.exe", @"engines\nativeplat\nativeplat.exe", @"tools\mon-bridge\mon-bridge.exe" })
+                    if (!names.Contains(needed)) return "This release is missing " + needed + ", so nothing was changed.";
+                int done = 0, changed = 0;
+                foreach (var entry in files) {
+                    string rel = relative(entry), target = Path.Combine(here, rel);
+                    report("Updating", 0.75f + 0.25f * done++ / files.Count);
+                    if (IsKept(rel)) continue;
+                    if (File.Exists(target) && new FileInfo(target).Length == entry.Length && SameFile(entry, target)) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    string part = target + ".update";
+                    System.IO.Compression.ZipFileExtensions.ExtractToFile(entry, part, true);
+                    if (string.Equals(rel, "NativeMonsLauncher.exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target)) {
+                        // A running program can be renamed but not overwritten. The old one goes at the next start.
+                        string old = target + ".old";
+                        if (File.Exists(old)) File.Delete(old);
+                        File.Move(target, old);
+                    } else if (File.Exists(target)) File.Delete(target);
+                    File.Move(part, target);
+                    changed++;
+                }
+                // Gen1Recomp's code is replaced exactly, so a file upstream removed can't linger. Its player data lives elsewhere.
+                string code = Path.Combine(here, "engines", "gen1recomp", "src");
+                if (Directory.Exists(code))
+                    foreach (var f in Directory.GetFiles(code, "*", SearchOption.AllDirectories))
+                        if (!names.Contains(f.Substring(here.Length).TrimStart('\\'))) File.Delete(f);
+                // A package without this stamp would look out of date for ever.
+                File.WriteAllText(Path.Combine(here, "version.txt"), "channel=" + release.channel + "\nbuild=" + release.build + "\nrevision=" + release.revision + "\n");
+                report(changed + " files updated", 1f);
+            }
+            return null;
+        } catch (Exception x) { return "The update stopped partway: " + x.Message + " Your saves and settings weren't touched. Run it again to finish."; }
+        finally { try { if (Directory.Exists(work)) Directory.Delete(work, true); } catch { } }
+    }
+    static bool SameFile(System.IO.Compression.ZipArchiveEntry entry, string file) {
+        using (var sha = SHA256.Create()) {
+            byte[] a, b;
+            using (var s = entry.Open()) a = sha.ComputeHash(s);
+            using (var f = File.OpenRead(file)) b = sha.ComputeHash(f);
+            return a.SequenceEqual(b);
+        }
+    }
+    public static void CleanUp() { try { string old = Path.Combine(Config.Here, "NativeMonsLauncher.exe.old"); if (File.Exists(old)) File.Delete(old); } catch { } }
+}
+
 static class Sprites {
     public static void Touch() { Arrived++; }
     const string Site = "https://pogo.hails.app/api/pokemon-sprite/";
@@ -1452,6 +1557,8 @@ class LauncherForm : Form {
             string err = null;
             try { Library.Scan(Gen1Cli); RecoverSwitches(); } catch (Exception e) { err = e.Message; }
             // Title screens are gathered afterwards, without holding up the menu.
+            Updater.CleanUp();
+            Task.Run(() => { System.Threading.Thread.Sleep(2000); Updater.Check(); });
             Task.Run(() => { System.Threading.Thread.Sleep(3000); try { GameArt.CaptureMissing(() => job != null || RunningGames() != ""); } catch { } });
             Sprites.LoadFamilies(BridgeFamilies);
             int left = (int)((1.1 - (DateTime.Now - startSince).TotalSeconds) * 1000);
@@ -1545,9 +1652,39 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
+        p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
         return p;
+    }
+    void OpenUpdates() {
+        string problem = null;
+        Busy("Looking for updates", delegate { problem = Updater.Check(); return null; }, delegate(string e) {
+            string here = Updater.Build > 0 ? "build " + Updater.Build + " (" + Updater.Channel + ")" : "a local build, not from a release";
+            var p = new Page { Title = "Updates" };
+            if (problem != null || e != null) { p.Body = "This copy is " + here + ".\n\nCouldn't look for updates. " + (e ?? problem); pages.Push(p); return; }
+            if (!Updater.Ready) { p.Body = "This copy is " + here + ".\n\nThe newest on " + Updater.Channel + " is build " + Updater.Latest.build + ". You're up to date."; pages.Push(p); return; }
+            p.Body = "This copy is " + here + ".\n\nBuild " + Updater.Latest.build + " is ready. It updates the launcher and every engine together, downloading about 200 MB.\n\nYour saves, ROM copies, wallpapers and settings stay as they are. The launcher restarts when it's done.";
+            p.Items.Add(new Item("Update now", "", true, delegate { pages.Pop(); StartUpdate(); }) { Icon = '\uE896' });
+            p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
+            pages.Push(p);
+        });
+    }
+    void StartUpdate() {
+        string running = RunningGames();
+        if (running != "") { ShowText("Close your game first", "Already running: " + running + ". Close it, then update.", null); return; }
+        string wrong = null;
+        Busy("Updating nativeMons", delegate {
+            wrong = Updater.Apply(delegate(string stage, float part) {
+                progress = part; dirty = true;
+                BeginInvoke((Action)delegate { if (log.Count == 0 || log[log.Count - 1] != stage) log.Add(stage); });
+            });
+            return null;
+        }, delegate(string e) {
+            if (e != null || wrong != null) { ShowText("Update stopped", e ?? wrong, null); return; }
+            try { Process.Start(Path.Combine(Config.Here, "NativeMonsLauncher.exe")); Close(); }
+            catch (Exception x) { ShowText("Updated", "Start the launcher again to finish. " + x.Message, null); }
+        });
     }
     Page GameOptionsPage(GameEntry g) {
         var p = new Page { Title = g == null ? "Game options" : "Options: " + g.Title };
@@ -4441,6 +4578,14 @@ static class NativeMonsLauncher {
         }
         if (argv.Length == 3 && argv[0] == "--extract-nds") {
             try { NdsExtract.Run(argv[1], argv[2]); } catch (Exception x) { File.WriteAllText(Path.Combine(argv[2], "extract-error.txt"), x.ToString()); Environment.ExitCode = 2; }
+            return;
+        }
+        // For tests: --update <result file> checks for a release and applies it, with no window.
+        if (argv.Length == 2 && argv[0] == "--update") {
+            string problem = Updater.Check();
+            string line = "installed " + Updater.Build + " latest " + (Updater.Latest != null ? Updater.Latest.build.ToString() : "?") + " ready " + Updater.Ready;
+            if (problem == null && Updater.Ready) problem = Updater.Apply(delegate(string a, float b) { });
+            File.WriteAllText(argv[1], line + "\nresult " + (problem ?? "ok") + "\nnow " + Updater.Build + "\n");
             return;
         }
         // For tests: --saves <game> <result file> list | new [name] | use <n> | copy <n> | delete <n> | recover

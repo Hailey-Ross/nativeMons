@@ -30,6 +30,8 @@ runs:
         $sha = "${{ github.sha }}"
         $zip = "nativeMons-windows-x64.zip"
 
+        # The launcher's updater compares this with the channel's release.json.
+        "channel=$env:TAG`nbuild=$env:BUILD`nrevision=$sha" | Out-File -Encoding ascii dist\nativeMons\version.txt
         Compress-Archive dist\nativeMons $zip
         $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
         "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256" -NoNewline
