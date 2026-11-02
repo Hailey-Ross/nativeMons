@@ -39,6 +39,8 @@ static class Program
             if (args.Length == 3 && args[0] == "compare") return Compare(args[1], args[2]);
             if (args.Length == 3 && args[0] == "repair") return Repair(args[1], args[2]);
             if (args.Length == 2 && args[0] == "caught") return Caught(args[1]);
+            if (args.Length == 2 && args[0] == "dex") return Dex(args[1]);
+            if (args.Length == 1 && args[0] == "names") return Names();
             if (args.Length >= 3 && args[0] == "options") return GameOptions(args[1], args.Skip(2).ToArray());
         }
         catch (Exception e)
@@ -156,6 +158,26 @@ static class Program
         var sav = Open(path);
         var caught = sav.HasPokeDex ? Enumerable.Range(1, sav.MaxSpeciesID).Where(i => sav.GetCaught((ushort)i)) : Enumerable.Empty<int>();
         Console.WriteLine(string.Join(',', caught));
+        return 0;
+    }
+
+    // What this save's Pokedex says, and which species it holds a shiny of. A save keeps no record of a shiny that's gone.
+    static int Dex(string path)
+    {
+        var sav = Open(path);
+        var ids = Enumerable.Range(1, sav.MaxSpeciesID);
+        Console.WriteLine("caught:" + (sav.HasPokeDex ? string.Join(',', ids.Where(i => sav.GetCaught((ushort)i))) : ""));
+        Console.WriteLine("seen:" + (sav.HasPokeDex ? string.Join(',', ids.Where(i => sav.GetSeen((ushort)i))) : ""));
+        var shiny = new HashSet<int>();
+        foreach (var mon in sav.BoxData.Concat(sav.PartyData))
+            if (mon.Species != 0 && !mon.IsEgg && mon.IsShiny) shiny.Add(mon.Species);
+        Console.WriteLine("shiny:" + string.Join(',', shiny.OrderBy(x => x)));
+        return 0;
+    }
+
+    static int Names()
+    {
+        for (int i = 1; i <= 649; i++) Console.WriteLine(i + "\t" + GameInfo.Strings.Species[i]);
         return 0;
     }
 

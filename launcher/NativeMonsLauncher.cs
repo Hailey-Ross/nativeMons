@@ -961,7 +961,80 @@ static class Library {
 
 // Pokemon pictures from pogo.hails.app, kept on disk because they rarely change. A picture is fetched only when it is
 // missing or over 30 days old, and an old copy keeps working if the site can't be reached.
+// A Pokedex entry's words and numbers: from PokeAPI when first looked at, then from a cache, so no game text is in this project.
+class DexInfo {
+    public string Genus = ""; public int Height, Weight; public string[] Types = new string[0], Abilities = new string[0];
+    public int[] Stats = new int[6]; public Dictionary<string, string> Flavor = new Dictionary<string, string>();
+}
+static class DexInfos {
+    static readonly object gate = new object();
+    static readonly Dictionary<int, DexInfo> loaded = new Dictionary<int, DexInfo>();
+    static readonly Dictionary<int, DateTime> asked = new Dictionary<int, DateTime>();
+    static string FileOf(int id) { return Path.Combine(Config.State, "pokedex-cache", id + ".json"); }
+    static System.Web.Script.Serialization.JavaScriptSerializer Json() { return new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue }; }
+    // Null until it's ready; asking starts the fetch, and after a failure it's tried again a minute later.
+    public static DexInfo Get(int id) {
+        lock (gate) {
+            DexInfo d; DateTime when;
+            if (loaded.TryGetValue(id, out d)) return d;
+            if (asked.TryGetValue(id, out when) && (DateTime.Now - when).TotalSeconds < 60) return null;
+            asked[id] = DateTime.Now;
+        }
+        Task.Run(delegate { try { Fetch(id); } catch { } Sprites.Touch(); });
+        return null;
+    }
+    public static bool Wait(int id, int seconds) {
+        for (int i = 0; i < seconds * 10; i++) { if (Get(id) != null) return true; System.Threading.Thread.Sleep(100); }
+        return false;
+    }
+    // Every entry, for offline use. Ones already here aren't fetched again. Reports done, total, newly fetched, failed.
+    public static void GetAll(int total, Action<int, int, int, int> report) {
+        int done = 0, fresh = 0, failed = 0;
+        System.Threading.Tasks.Parallel.For(1, total + 1, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 3 }, id => {
+            bool had = File.Exists(FileOf(id));
+            try {
+                Fetch(id);
+                if (!had) System.Threading.Interlocked.Increment(ref fresh);
+            } catch { System.Threading.Interlocked.Increment(ref failed); }
+            report(System.Threading.Interlocked.Increment(ref done), total, fresh, failed);
+        });
+    }
+    static string Download(string url) {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        using (var web = new System.Net.WebClient()) {
+            web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+            web.Encoding = Encoding.UTF8;
+            return web.DownloadString(url);
+        }
+    }
+    static void Fetch(int id) {
+        string file = FileOf(id);
+        DexInfo info = null;
+        if (File.Exists(file)) try { info = Json().Deserialize<DexInfo>(File.ReadAllText(file)); } catch { }
+        if (info == null) {
+            var species = (Dictionary<string, object>)Json().DeserializeObject(Download("https://pokeapi.co/api/v2/pokemon-species/" + id));
+            var mon = (Dictionary<string, object>)Json().DeserializeObject(Download("https://pokeapi.co/api/v2/pokemon/" + id));
+            info = new DexInfo();
+            info.Height = Convert.ToInt32(mon["height"]); info.Weight = Convert.ToInt32(mon["weight"]);
+            Func<object, string, string> name = delegate(object row, string key) { return (string)((Dictionary<string, object>)((Dictionary<string, object>)row)[key])["name"]; };
+            info.Types = ((object[])mon["types"]).Select(x => name(x, "type")).ToArray();
+            info.Abilities = ((object[])mon["abilities"]).Select(x => name(x, "ability")).ToArray();
+            info.Stats = ((object[])mon["stats"]).Select(x => Convert.ToInt32(((Dictionary<string, object>)x)["base_stat"])).Take(6).ToArray();
+            foreach (var row in (object[])species["genera"]) if (name(row, "language") == "en") info.Genus = (string)((Dictionary<string, object>)row)["genus"];
+            foreach (var row in (object[])species["flavor_text_entries"]) if (name(row, "language") == "en") {
+                string text = ((string)((Dictionary<string, object>)row)["flavor_text"]).Replace("-\n", "-").Replace('\n', ' ').Replace('\f', ' ').Replace("\u00AD ", "").Replace("POK\u00E9MON", "Pok\u00E9mon").Replace("POKeMON", "Pok\u00E9mon");
+                info.Flavor[name(row, "version")] = System.Text.RegularExpressions.Regex.Replace(text, " +", " ").Trim();
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(file));
+            File.WriteAllText(file + ".part", Json().Serialize(info));
+            File.Copy(file + ".part", file, true); File.Delete(file + ".part");
+        }
+        lock (gate) loaded[id] = info;
+    }
+}
+
 static class Sprites {
+    public static void Touch() { Arrived++; }
     const string Site = "https://pogo.hails.app/api/pokemon-sprite/";
     static readonly object gate = new object();
     static readonly Dictionary<string, Bitmap> loaded = new Dictionary<string, Bitmap>();
@@ -1159,6 +1232,11 @@ class Page {
     public Action OnBack;        // null = pop the page
     public string Mono;          // a fixed-width block under the body
     public float BodyScroll;     // how far a long body has been scrolled, in pixels
+    public int Jump;             // left and right move this many rows at once, on a very long list
+    public int DexId;            // a Pokedex entry: this species
+    public int[] DexOrder;       // what left and right step through on an entry
+    public bool DexShiny;        // the entry is showing its shiny picture
+    public float DexHeight;      // how tall the entry came out
     public bool Main;
     public Theme Theme;
 }
@@ -1224,6 +1302,7 @@ class LauncherForm : Form {
         iconSmall = new Font("Segoe MDL2 Assets", h / 40f, GraphicsUnit.Pixel);
     }
 
+    string previewId;
     public void Snapshot(string file, string screen, int w, int h) {
         MakeFonts(w);
         try { Library.Scan(Gen1Cli); } catch (Exception e) { Library.Note = e.Message; }
@@ -1231,6 +1310,7 @@ class LauncherForm : Form {
         int colon = screen.IndexOf(':');
         if (colon > 0) {
             string id = screen.Substring(colon + 1); screen = screen.Substring(0, colon);
+            previewId = id;
             var preview = Library.Games.Find(g => g.Id == id);
             if (preview != null) current = preview;
         }
@@ -1262,6 +1342,14 @@ class LauncherForm : Form {
             pages.Push(sp);
             foreach (var it in sp.Items) Sprites.Get(it.Sprite);
             Sprites.Wait(30);
+        }
+        if (screen == "dex" || screen == "dexlist" || screen == "dexentry") {
+            LoadDex();
+            int species; if (!(colon > 0 && int.TryParse(previewId, out species))) species = 25;
+            var order = Enumerable.Range(1, 649).Where(DexSeen).ToArray();
+            if (screen == "dex") pages.Push(DexHomePage());
+            else if (screen == "dexlist") { var list = DexListPage("Kanto", 1, 151); list.Sel = Math.Min(species - 1, 150); pages.Push(list); for (int i = 0; i < 12 && list.Sel + i < 151; i++) if (DexSeen(list.Sel + i + 1)) Sprites.Get((list.Sel + i + 1).ToString()); Sprites.Wait(15); }
+            else { pages.Push(DexEntryPage(species, order)); if (DexCaught(species)) DexInfos.Wait(species, 30); Sprites.Get((DexShiny(species) ? "shiny/" : "") + species); Sprites.Wait(15); }
         }
         if (screen == "job") {
             job = new Process(); jobTitle = "Preparing Pokemon LeafGreen"; jobStart = DateTime.Now.AddSeconds(-14); progress = 0.62f;
@@ -1397,7 +1485,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item(current != null ? "Play " + current.Title : "Play", current != null ? "Start " + current.Title + " with " + GameEntry.EngineName(current.Engine()) + "." : "Add a ROM folder first.", current != null, delegate { Play(current); }) { Icon = '' });
         int have = Library.Games.Count(g => g.Playable);
         p.Items.Add(new Item("Games", have + " of " + Library.Games.Count + " found in your ROM folders.", true, delegate { pages.Push(GamesPage()); }) { Icon = '' });
-        p.Items.Add(new Item("My Collection", "Caught across your games.", have > 0 && File.Exists(Config.MonBridge), delegate { OpenCollection(); }) { Icon = '\uE8F1' });
+        p.Items.Add(new Item("My Collection", "Your Pokedex, across your games.", have > 0 && File.Exists(Config.MonBridge), delegate { OpenCollection(); }) { Icon = '\uE8F1' });
         bool mods = Library.Games.Exists(g => g.OnGen1);
         p.Items.Add(new Item("Mods", mods ? "Mods for the Gen1Recomp games." : "Needs a Gen1Recomp game.", mods, delegate { pages.Push(ModGamesPage()); }) { Icon = '' });
         int folders = Config.RomFolders().Count;
@@ -1415,7 +1503,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
-        p.Items.Add(new Item("Download all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
+        p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
@@ -2217,64 +2305,225 @@ class LauncherForm : Form {
         ShowText(problem == null ? "Imported" : "Not imported", problem ?? "Your save is ready in " + g.Title + ". It now counts in My Collection and Move Pokemon.", null);
     }
 
-    // Every installed game adds the entries it has, counted once however many games share them, and every save adds what it has caught.
-    static bool AddCaught(HashSet<int> into, string file) {
+    public static HashSet<int> CaughtInAllSaves(GameEntry g) {
+        var d = DexInAllSaves(g);
+        return d == null ? null : d.Caught;
+    }
+    class DexGame { public HashSet<int> Caught = new HashSet<int>(), Seen = new HashSet<int>(), Shiny = new HashSet<int>(); }
+    static bool AddDex(DexGame into, string file) {
         if (file == null || !File.Exists(file) || SaveGuard.IsBlank(file)) return false;
-        int code; string o = Bridge("caught \"" + file + "\"", out code);
+        int code; string o = Bridge("dex \"" + file + "\"", out code);
         if (code != 0) return false;
-        foreach (var id in o.Trim().Split(',')) { int n; if (int.TryParse(id, out n)) into.Add(n); }
+        foreach (var line in o.Split('\n')) {
+            int at = line.IndexOf(':');
+            if (at < 0) continue;
+            var set = line.StartsWith("caught") ? into.Caught : line.StartsWith("seen") ? into.Seen : line.StartsWith("shiny") ? into.Shiny : null;
+            if (set == null) continue;
+            foreach (var id in line.Substring(at + 1).Trim().Split(',')) { int n; if (int.TryParse(id, out n)) set.Add(n); }
+        }
         return true;
     }
     // Each Pokemon once, however many of a game's saves have it. Null when none of them could be read.
-    public static HashSet<int> CaughtInAllSaves(GameEntry g) {
-        var all = new HashSet<int>();
+    static DexGame DexInAllSaves(GameEntry g) {
+        var all = new DexGame();
         bool any = false;
         string active = SaveSets.Active(g);
         foreach (var set in SaveSets.All(g)) {
-            if (set == active) { string why; any |= AddCaught(all, SaveOf(g, out why)); continue; }
-            if (HasMaster(g) && File.Exists(ParkedSave(g, set))) { any |= AddCaught(all, ParkedSave(g, set)); continue; }
+            if (set == active) { string why; any |= AddDex(all, SaveOf(g, out why)); continue; }
+            if (HasMaster(g) && File.Exists(ParkedSave(g, set))) { any |= AddDex(all, ParkedSave(g, set)); continue; }
             // A Gen1Recomp slot can only be exported while it's in use, so it's briefly made so, unless a game is running.
             string slot = ReadSlot(g, set);
             if (slot == null || !HasGen1Slots(g) || RunningGames() != "") continue;
             string current = Gen1Slot(g, "active " + g.Gen1);
             if (current == null || Gen1Slot(g, "activate " + g.Gen1 + " " + slot) == null) continue;
-            try { string why; any |= AddCaught(all, Gen1Export(g, out why)); }
+            try { string why; any |= AddDex(all, Gen1Export(g, out why)); }
             finally { Gen1Slot(g, "activate " + g.Gen1 + " " + current); }
         }
         return any ? all : null;
     }
+    // ---------- the Pokedex ----------
+    static readonly string[] DexRegions = { "Kanto", "Johto", "Hoenn", "Sinnoh", "Unova" };
+    static readonly int[] DexRegionStart = { 1, 152, 252, 387, 494, 650 };
+    Dictionary<GameEntry, DexGame> dexBy = new Dictionary<GameEntry, DexGame>();
+    HashSet<GameEntry> dexNoSave = new HashSet<GameEntry>();
+    readonly Dictionary<int, string> dexNames = new Dictionary<int, string>();
+    string DexName(int id) { string n; return dexNames.TryGetValue(id, out n) ? n : "#" + id; }
+    bool DexCaught(int id) { return dexBy.Values.Any(d => d.Caught.Contains(id)); }
+    bool DexSeen(int id) { return dexBy.Values.Any(d => d.Seen.Contains(id) || d.Caught.Contains(id)); }
+    bool DexShiny(int id) { return dexBy.Values.Any(d => d.Shiny.Contains(id)); }
+    string LoadDex() {
+        if (dexNames.Count == 0) {
+            int code; string o = Bridge("names", out code);
+            if (code != 0) return "Couldn't read the Pokemon names.";
+            foreach (var line in o.Split('\n')) { var f = line.TrimEnd('\r').Split('\t'); int id; if (f.Length == 2 && int.TryParse(f[0], out id)) dexNames[id] = f[1]; }
+        }
+        var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>();
+        foreach (var g in Library.Games.Where(x => x.Playable)) { var d = DexInAllSaves(g); if (d == null) none.Add(g); else by[g] = d; }
+        dexBy = by; dexNoSave = none;
+        return null;
+    }
     void OpenCollection() {
-        var caughtBy = new Dictionary<GameEntry, HashSet<int>>();
-        var noSave = new HashSet<GameEntry>();
-        Busy("Counting your collection", delegate {
-            foreach (var g in Library.Games.Where(x => x.Playable)) {
-                var set = CaughtInAllSaves(g);
-                if (set == null) noSave.Add(g); else caughtBy[g] = set;
-            }
-            return null;
-        }, delegate(string e) {
-            if (e != null) { ShowText("My Collection", e, null); return; }
-            var games = Library.Games.Where(x => x.Playable).ToList();
-            int entries = games.Count == 0 ? 0 : Enumerable.Range(1, games.Max(x => x.Dex)).Count(n => games.Exists(x => n <= x.Dex));
-            var all = new HashSet<int>();
-            foreach (var set in caughtBy.Values) all.UnionWith(set);
-            int percent = entries == 0 ? 0 : all.Count * 100 / entries;
-            var p = new Page { Title = "My Collection" };
-            var total = new Item("All games: " + all.Count + " of " + entries, "", true, null) { Icon = '\uE8F1', Info = "You've caught " + all.Count + " different Pokemon out of the " + entries + " Pokedex entries in your " + games.Count + " games (" + percent + "%)." };
-            p.Items.Add(total);
-            foreach (var g in games) {
-                bool has = caughtBy.ContainsKey(g);
-                var it = new Item(g.Title + ": " + (has ? caughtBy[g].Count + " of " + g.Dex : "no save"), "", has, null) { Icon = '\uE7FC', Theme = g.Theme };
-                int saveCount = SaveSets.All(g).Count;
-                it.Info = has ? (saveCount > 1 ? "Different Pokemon caught across your " + saveCount + " saves" : "Caught in this save") + ", out of the " + g.Dex + " entries in this game." :"No save here yet. It still adds its entries to the total. Bring one in with Settings > Import saves.";
-                if (has) {
-                    int only = caughtBy[g].Count(n => !caughtBy.Where(o => o.Key != g).Any(o => o.Value.Contains(n)));
-                    it.Records = new[] { "Only here: " + only };
-                }
-                p.Items.Add(it);
-            }
-            pages.Push(p);
+        Busy("Opening your Pokedex", delegate { return LoadDex(); }, delegate(string e) {
+            if (e != null) { ShowText("Pokedex", e, null); return; }
+            pages.Push(DexHomePage());
         });
+    }
+    string DexCount(int from, int to) { return Enumerable.Range(from, to - from + 1).Count(DexCaught) + " of " + (to - from + 1); }
+    Page DexHomePage() {
+        var p = new Page { Title = "Pokedex" };
+        int last = DexRegionStart[DexRegions.Length] - 1;
+        p.Items.Add(new Item("National: " + DexCount(1, last), "", true, delegate { pages.Push(DexListPage("National", 1, last)); }) { Icon = '\uE8F1', Info = "Every Pokemon from 001 to " + last.ToString("000") + ", the Pokemon in the games nativeMons runs." });
+        for (int i = 0; i < DexRegions.Length; i++) {
+            int a = DexRegionStart[i], b = DexRegionStart[i + 1] - 1; string name = DexRegions[i];
+            p.Items.Add(new Item(name + ": " + DexCount(a, b), "", true, delegate { pages.Push(DexListPage(name, a, b)); }) { Icon = '\uE707', Info = "Numbers " + a.ToString("000") + " to " + b.ToString("000") + ", the Pokemon introduced in " + name + "." });
+        }
+        p.Items.Add(new Item("By game", "", true, delegate { pages.Push(DexGamesPage()); }) { Icon = '\uE7FC', Info = "How many each of your games has caught." });
+        return p;
+    }
+    Page DexListPage(string title, int from, int to) {
+        var p = new Page { Title = title, Jump = 10 };
+        var order = Enumerable.Range(from, to - from + 1).Where(DexSeen).ToArray();
+        for (int n = from; n <= to; n++) {
+            int id = n; bool caught = DexCaught(id), seen = DexSeen(id);
+            string label = "#" + id.ToString("000") + " " + (seen ? DexName(id) : "???");
+            if (DexShiny(id)) label += ": \u2605";
+            else if (caught) label += ": Caught";
+            p.Items.Add(new Item(label, seen ? "" : "Not seen yet", seen, delegate { pages.Push(DexEntryPage(id, order)); }) { Icon = '\uE9CE', Sprite = seen ? id.ToString() : null, Info = caught ? "Caught." : seen ? "Seen, not caught." : "Not seen yet." });
+        }
+        return p;
+    }
+    Page DexEntryPage(int id, int[] order) { return new Page { Title = "#" + id.ToString("000") + " " + DexName(id), DexId = id, DexOrder = order, DexShiny = DexShiny(id) }; }
+    Page DexGamesPage() {
+        var games = Library.Games.Where(x => x.Playable).ToList();
+        var p = new Page { Title = "By game" };
+        foreach (var g in games) {
+            bool has = dexBy.ContainsKey(g);
+            var it = new Item(g.Title + ": " + (has ? dexBy[g].Caught.Count + " of " + g.Dex : "no save"), "", has, null) { Icon = '\uE7FC', Theme = g.Theme };
+            int saveCount = SaveSets.All(g).Count;
+            it.Info = has ? (saveCount > 1 ? "Different Pokemon caught across your " + saveCount + " saves" : "Caught in this save") + ", out of the " + g.Dex + " entries in this game." : "No save to read yet. Play and save once.";
+            if (has) {
+                int only = dexBy[g].Caught.Count(n => !dexBy.Where(o => o.Key != g).Any(o => o.Value.Caught.Contains(n)));
+                it.Records = new[] { "Only here: " + only };
+            }
+            p.Items.Add(it);
+        }
+        return p;
+    }
+    static readonly Dictionary<string, Color> TypeColors = new Dictionary<string, Color> {
+        { "normal", Color.FromArgb(156, 156, 118) }, { "fire", Color.FromArgb(232, 118, 52) }, { "water", Color.FromArgb(84, 132, 232) }, { "electric", Color.FromArgb(232, 186, 36) },
+        { "grass", Color.FromArgb(104, 178, 72) }, { "ice", Color.FromArgb(104, 192, 192) }, { "fighting", Color.FromArgb(186, 48, 42) }, { "poison", Color.FromArgb(158, 66, 158) },
+        { "ground", Color.FromArgb(206, 170, 86) }, { "flying", Color.FromArgb(150, 124, 232) }, { "psychic", Color.FromArgb(236, 76, 126) }, { "bug", Color.FromArgb(160, 172, 42) },
+        { "rock", Color.FromArgb(176, 150, 60) }, { "ghost", Color.FromArgb(108, 84, 148) }, { "dragon", Color.FromArgb(108, 56, 240) }, { "dark", Color.FromArgb(108, 84, 70) },
+        { "steel", Color.FromArgb(160, 160, 190) }, { "fairy", Color.FromArgb(226, 130, 170) },
+    };
+    static string Titled(string s) { return string.Join(" ", s.Split('-').Select(w => w.Length == 0 ? w : char.ToUpper(w[0]) + w.Substring(1)).ToArray()); }
+    // The game's own words: from a game you caught it in, otherwise the newest one nativeMons runs.
+    string DexFlavor(DexInfo info, int id, out string from) {
+        from = null;
+        var mine = dexBy.Where(x => x.Value.Caught.Contains(id)).Select(x => x.Key).ToList();
+        mine.AddRange(Library.Games.AsEnumerable().Reverse());
+        foreach (var g in mine) {
+            string key = g.Id == "black2" ? "black-2" : g.Id == "white2" ? "white-2" : g.Id, text;
+            if (info.Flavor.TryGetValue(key, out text)) { from = g.Title; return text; }
+        }
+        return null;
+    }
+    void RenderDexEntry(Graphics g, Page p, int w, int h, float m, float y, float bottom, float t, Theme th) {
+        int id = p.DexId; bool caught = DexCaught(id);
+        var area = new RectangleF(0, y, w, bottom - y);
+        float view = area.Height, width = w - 2 * m, pad = w * 0.04f, rad = w * 0.04f, gap = h * 0.016f;
+        p.BodyScroll = Math.Max(0, Math.Min(p.BodyScroll, Math.Max(0, p.DexHeight - view)));
+        var kept = g.Save();
+        g.SetClip(area, System.Drawing.Drawing2D.CombineMode.Intersect);
+        float top0 = y - p.BodyScroll, cy = top0;
+        var info = caught ? DexInfos.Get(id) : null;
+        // The picture and the facts beside it.
+        float pic = width * 0.42f, headH = pic + pad * 0.6f;
+        Group(g, new RectangleF(m, cy, width, headH), rad);
+        var sprite = Sprites.Get((p.DexShiny ? "shiny/" : "") + id);
+        if (sprite != null) DrawSprite(g, sprite, new RectangleF(m + pad * 0.3f, cy + pad * 0.3f, pic, pic));
+        if (p.DexShiny) Write(g, "\u2605", titleFont, Color.FromArgb(232, 170, 20), new RectangleF(m + pad * 0.6f, cy + pad * 0.4f, pic, titleFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
+        float fx = m + pic + pad * 0.8f, fw = width - pic - pad * 1.2f, fy = cy + pad;
+        if (!caught) {
+            Write(g, "Seen, not caught yet.", itemFont, PhoneSub, new RectangleF(fx, fy, fw, headH - 2 * pad), StringAlignment.Near, StringAlignment.Near, true);
+        } else if (info == null) {
+            Write(g, "Getting this entry. It needs the internet the first time.", smallFont, PhoneSub, new RectangleF(fx, fy, fw, headH - 2 * pad), StringAlignment.Near, StringAlignment.Near, true);
+        } else {
+            Write(g, info.Genus, itemFont, PhoneText, new RectangleF(fx, fy, fw, itemFont.Height * 2.4f), StringAlignment.Near, StringAlignment.Near, true);
+            fy += g.MeasureString(info.Genus, itemFont, (int)fw).Height + pad * 0.4f;
+            float tx = fx, chipH = smallBold.Height * 1.5f;
+            foreach (var type in info.Types) {
+                string label = Titled(type); float cw = g.MeasureString(label, smallBold).Width + chipH * 0.5f;
+                if (tx + cw > fx + fw) { tx = fx; fy += chipH * 1.15f; }
+                Color tc; if (!TypeColors.TryGetValue(type, out tc)) tc = PhoneSub;
+                Card(g, new RectangleF(tx, fy, cw, chipH), chipH / 2, tc, tc, Color.Empty, 0);
+                Write(g, label, smallBold, Color.White, new RectangleF(tx, fy, cw, chipH), StringAlignment.Center, StringAlignment.Center, false);
+                tx += cw + chipH * 0.25f;
+            }
+            fy += chipH + pad * 0.6f;
+            Write(g, "Height", smallFont, PhoneSub, new RectangleF(fx, fy, fw, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
+            Write(g, (info.Height / 10.0).ToString("0.0") + " m", smallBold, PhoneText, new RectangleF(fx, fy, fw, smallFont.Height * 1.3f), StringAlignment.Far, StringAlignment.Near, false);
+            fy += smallFont.Height * 1.4f;
+            Write(g, "Weight", smallFont, PhoneSub, new RectangleF(fx, fy, fw, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
+            Write(g, (info.Weight / 10.0).ToString("0.0") + " kg", smallBold, PhoneText, new RectangleF(fx, fy, fw, smallFont.Height * 1.3f), StringAlignment.Far, StringAlignment.Near, false);
+        }
+        cy += headH + gap;
+        if (caught && info != null) {
+            // The game's own description.
+            string from, flavor = DexFlavor(info, id, out from);
+            if (flavor != null) {
+                float textW = width - 2 * pad, textH = g.MeasureString(flavor, bodyFont, (int)textW).Height + 2, boxH = textH + smallFont.Height * 1.5f + pad * 1.4f;
+                Group(g, new RectangleF(m, cy, width, boxH), rad);
+                Write(g, flavor, bodyFont, PhoneText, new RectangleF(m + pad, cy + pad * 0.7f, textW, textH), StringAlignment.Near, StringAlignment.Near, true);
+                Write(g, from.Replace("Pokemon ", ""), smallFont, PhoneSub, new RectangleF(m + pad, cy + pad * 0.7f + textH + 2, textW, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
+                cy += boxH + gap;
+            }
+            // Base stats.
+            string[] names = { "HP", "Attack", "Defense", "Sp. Atk", "Sp. Def", "Speed" };
+            float rowH = smallFont.Height * 1.75f, statsH = rowH * 7 + pad * 0.8f, nameW = width * 0.22f, numW = width * 0.1f;
+            Group(g, new RectangleF(m, cy, width, statsH), rad);
+            float sy = cy + pad * 0.4f, barX = m + pad + nameW + numW, barW = width - 2 * pad - nameW - numW, barH = Math.Max(4f, h * 0.008f);
+            var stroke = Accent(th);
+            for (int i = 0; i < 6 && i < info.Stats.Length; i++) {
+                Write(g, names[i], smallFont, PhoneSub, new RectangleF(m + pad, sy, nameW, rowH), StringAlignment.Near, StringAlignment.Center, false);
+                Write(g, info.Stats[i].ToString(), smallBold, PhoneText, new RectangleF(m + pad + nameW, sy, numW * 0.8f, rowH), StringAlignment.Far, StringAlignment.Center, false);
+                var bar = new RectangleF(barX, sy + (rowH - barH) / 2, barW, barH);
+                Card(g, bar, barH / 2, PhoneLine, PhoneLine, Color.Empty, 0);
+                Card(g, new RectangleF(bar.X, bar.Y, Math.Max(barH, barW * Math.Min(1f, info.Stats[i] / 255f)), barH), barH / 2, stroke, stroke, Color.Empty, 0);
+                sy += rowH;
+            }
+            Write(g, "Total", smallBold, PhoneText, new RectangleF(m + pad, sy, nameW, rowH), StringAlignment.Near, StringAlignment.Center, false);
+            Write(g, info.Stats.Sum().ToString(), smallBold, PhoneText, new RectangleF(m + pad + nameW, sy, numW * 0.8f, rowH), StringAlignment.Far, StringAlignment.Center, false);
+            cy += statsH + gap;
+            string abilities = string.Join(", ", info.Abilities.Select(Titled).ToArray());
+            float abH = g.MeasureString(abilities, itemFont, (int)(width - 2 * pad)).Height + smallFont.Height * 1.3f + pad;
+            Group(g, new RectangleF(m, cy, width, abH), rad);
+            Write(g, "Abilities", smallFont, PhoneSub, new RectangleF(m + pad, cy + pad * 0.5f, width - 2 * pad, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
+            Write(g, abilities, itemFont, PhoneText, new RectangleF(m + pad, cy + pad * 0.5f + smallFont.Height * 1.3f, width - 2 * pad, abH), StringAlignment.Near, StringAlignment.Near, true);
+            cy += abH + gap;
+        }
+        // Where you have it.
+        var rows = dexBy.Where(x => x.Value.Caught.Contains(id) || x.Value.Seen.Contains(id)).OrderBy(x => x.Value.Caught.Contains(id) ? 0 : 1).ToList();
+        float gameH = h * 0.068f;
+        if (rows.Count > 0) {
+            Group(g, new RectangleF(m, cy, width, gameH * rows.Count), rad);
+            foreach (var row in rows) {
+                float icon = gameH * 0.62f;
+                Cart(g, m + pad, cy + (gameH - icon) / 2, icon, row.Key.Theme);
+                Write(g, row.Key.Title.Replace("Pokemon ", ""), itemFont, PhoneText, new RectangleF(m + pad * 1.4f + icon, cy, width * 0.5f, gameH), StringAlignment.Near, StringAlignment.Center, false);
+                bool shiny = row.Value.Shiny.Contains(id);
+                string mark = shiny ? "\u2605 Shiny" : row.Value.Caught.Contains(id) ? "Caught" : "Seen";
+                Write(g, mark, shiny ? smallBold : smallFont, shiny ? Color.FromArgb(196, 138, 8) : PhoneSub, new RectangleF(m, cy, width - pad, gameH), StringAlignment.Far, StringAlignment.Center, false);
+                cy += gameH;
+            }
+            cy += gap;
+        }
+        p.DexHeight = cy - top0;
+        g.Restore(kept);
+        if (p.DexHeight > view) {
+            float barW = Math.Max(3f, w * 0.008f), barH = view * view / p.DexHeight, barY = y + (view - barH) * p.BodyScroll / (p.DexHeight - view);
+            using (var path = Round(new RectangleF(w - m * 0.5f, barY, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
+        }
     }
     Page GamesPage() {
         var p = new Page { Title = "Games" };
@@ -2451,7 +2700,7 @@ class LauncherForm : Form {
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
             + "\n\nnativeplat by sohamb117 (github.com/sohamb117/gen4recomp), native Diamond, Pearl and Platinum from the pret decompilations. Not affiliated with nativeMons."
             + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
-            + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection."
+            + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection. Pokedex entries from PokeAPI (pokeapi.co)."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
@@ -2469,16 +2718,23 @@ class LauncherForm : Form {
     }
 
     void GetAllSprites() {
-        string summary = null;
-        Busy("Downloading all sprites", delegate {
+        string summary = null, dexSummary = null;
+        Busy("Downloading the Pokedex", delegate {
             Sprites.GetAll(delegate(int done, int total, int fresh, int failed) {
                 progress = done / (float)total;
                 if (done % 25 == 0 || done == total) BeginInvoke((Action)delegate { log.Add(done + " of " + total + " checked"); });
                 dirty = true;
                 if (done == total) summary = fresh + " downloaded, " + (total - fresh - failed) + " already here." + (failed > 0 ? "\n\n" + failed + " couldn't be fetched. Run this again when you're online: it only fetches what's missing." : "\n\nEvery picture is ready for offline play.");
             });
+            log.Add("Pictures done. Now the Pokedex entries.");
+            DexInfos.GetAll(649, delegate(int done, int total, int fresh, int failed) {
+                progress = done / (float)total;
+                if (done % 25 == 0 || done == total) BeginInvoke((Action)delegate { log.Add(done + " of " + total + " entries"); });
+                dirty = true;
+                if (done == total) dexSummary = "Pokedex entries: " + fresh + " downloaded, " + (total - fresh - failed) + " already here." + (failed > 0 ? " " + failed + " couldn't be fetched. Run this again when you're online." : "");
+            });
             return null;
-        }, delegate(string e) { ShowText("Download all sprites", e ?? summary, null); });
+        }, delegate(string e) { ShowText("Download Pokedex", e ?? ("Pictures: " + summary + "\n\n" + dexSummary), null); });
     }
 
     // ---------- moving Pokemon (tools\mon-bridge, built on PKHeX.Core) ----------
@@ -3126,9 +3382,19 @@ class LauncherForm : Form {
         if (a == "back") {
             if (p.OnBack != null) p.OnBack(); else pages.Pop();
             if (pages.Count == 0) pages.Push(MainPage());
+        } else if (p.DexId > 0) {
+            if (a == "up" || a == "down") p.BodyScroll += (a == "down" ? 1 : -1) * bodyFont.Height * 3;
+            else if (a == "ok") { if (DexShiny(p.DexId)) p.DexShiny = !p.DexShiny; }
+            else if ((a == "left" || a == "right") && p.DexOrder != null && p.DexOrder.Length > 0) {
+                // The next Pokemon you've met, as the games' Pokedex steps through them.
+                int at = Array.IndexOf(p.DexOrder, p.DexId), next = at + (a == "right" ? 1 : -1);
+                if (at >= 0 && next >= 0 && next < p.DexOrder.Length) { pages.Pop(); pages.Push(DexEntryPage(p.DexOrder[next], p.DexOrder)); }
+            }
         } else if (p.Items.Count > 0) {
             if (a == "ok") { var it = p.Items[p.Sel]; if (it.On && it.Run != null) it.Run(); }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
+            else if (p.Jump > 0 && a == "left") p.Sel = Math.Max(0, p.Sel - p.Jump);
+            else if (p.Jump > 0 && a == "right") p.Sel = Math.Min(p.Items.Count - 1, p.Sel + p.Jump);
             else if (p.Body == null) p.Sel = PageGridMove(p.Sel, a, p.Items.Count, 1);
             else if (a == "up" || a == "left") p.Sel = (p.Sel - 1 + p.Items.Count) % p.Items.Count;
             else if (a == "down" || a == "right") p.Sel = (p.Sel + 1) % p.Items.Count;
@@ -3914,6 +4180,7 @@ class LauncherForm : Form {
         var tf = FitFont(g, p.Title, titleArea, titleFont, 0.6f, false);
         Write(g, p.Title, tf, PhoneText, new RectangleF(m, y, titleArea.Width, titleArea.Height), StringAlignment.Near, StringAlignment.Center, false);
         y += titleArea.Height + h * 0.012f;
+        if (p.DexId > 0) { RenderDexEntry(g, p, w, h, m, y, bottom, t, th); return; }
         float rad = w * 0.04f;
         if (p.Body != null) {
             float bodyH = p.Items.Count > 0 ? (bottom - y) * 0.6f : bottom - y;
@@ -4022,7 +4289,7 @@ class LauncherForm : Form {
         float valueW = 0;
         if (value != null) {
             valueW = Math.Min(g.MeasureString(value, itemFont).Width + 4, (right - tx) * 0.55f);
-            Write(g, value, itemFont, sel ? accent : PhoneSub, new RectangleF(right - valueW, r.Y, valueW, r.Height), StringAlignment.Far, StringAlignment.Center, false);
+            Write(g, value, itemFont, value == "★" ? Color.FromArgb(226, 164, 16) : sel ? accent : PhoneSub, new RectangleF(right - valueW, r.Y, valueW, r.Height), StringAlignment.Far, StringAlignment.Center, false);
         }
         float tw = right - tx - valueW;
         string sub = it.TileHint != "" ? it.TileHint : (!it.On ? it.Hint : "");
