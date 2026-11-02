@@ -330,6 +330,7 @@ if (On 'play') {
     $matrix = $pickRows
   }
   foreach ($row in $matrix) {
+    # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
     $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
     if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
     ClearGames
@@ -340,7 +341,7 @@ if (On 'play') {
     while (((Get-Date) - $t).TotalSeconds -lt $limit) {
       Start-Sleep 1
       if ($p.HasExited) { $bad = "launcher exited $($p.ExitCode) before the game settled"; break }
-      $game = @(GameProcs | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch 'Fulldex' }) | Select-Object -First 1
+      $game = @(GameProcs | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
       if ($game) { if (-not $steady) { $steady = Get-Date } elseif (((Get-Date) - $steady).TotalSeconds -ge 4) { break } } else { $steady = $null }
     }
     $took = [int]((Get-Date) - $t).TotalSeconds
