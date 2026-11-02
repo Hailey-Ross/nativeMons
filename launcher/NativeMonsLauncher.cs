@@ -1527,6 +1527,7 @@ class LauncherForm : Form {
             var preview = Library.Games.Find(g => g.Id == id);
             if (preview != null) current = preview;
         }
+        if (screen == "updatebanner") { Updater.Latest = new Updater.Release { build = Updater.Build + 1, sha256 = "preview" }; bannerBuild = Updater.Latest.build; bannerAt = -1; }
         if (screen == "splash") { starting = true; startSince = DateTime.Now.AddSeconds(-4); startStage = "Looking for your games"; }
         else pages.Push(MainPage());
         if (screen == "games") pages.Push(GamesPage());
@@ -3616,6 +3617,7 @@ class LauncherForm : Form {
         return 0;
     }
     DateTime scannedAt; int spritesSeen;
+    DateTime updateCheckedAt = DateTime.Now;
     void Poll() {
         WatchGba();
         if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
@@ -3625,7 +3627,10 @@ class LauncherForm : Form {
                 Play(Library.Games.Find(g => g.Id == id));
             }
             WatchGame();
+            // A launcher left open still finds out.
+            if (job == null && (DateTime.Now - updateCheckedAt).TotalHours >= 6) { updateCheckedAt = DateTime.Now; Task.Run(() => Updater.Check()); }
         }
+        if (BannerAge((float)clock.Elapsed.TotalSeconds) >= 0) dirty = true;
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
@@ -3680,7 +3685,7 @@ class LauncherForm : Form {
         string over = PromptAt(e.Location);
         if (over != hoverPrompt) { hoverPrompt = over; Cursor = over != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
         int i = HitAt(e.Location);
-        if (job == null && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
+        if (job == null && over != "N" && over != "NX" && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
     }
     protected override void OnMouseClick(MouseEventArgs e) {
         base.OnMouseClick(e);
@@ -3688,6 +3693,8 @@ class LauncherForm : Form {
         if (prompt == "M") { WindowState = FormWindowState.Minimized; return; }
         if (prompt == "X" && job == null) { Close(); return; }
         if (job != null) return;
+        if (prompt == "NX") { bannerClosed = bannerBuild.ToString(); Config.Write("update-dismissed.txt", bannerClosed); Invalidate(); return; }
+        if (prompt == "N") { bannerAt = -BannerSeconds * 2; OpenUpdates(); return; }
         if (prompt != null) {
             Act(prompt == "A" ? "ok" : prompt == "B" ? "back" : prompt == "U" ? "up" : prompt == "D" ? "down" : prompt == "L" ? "left" : prompt == "R" ? "right" : "", false);
             return;
@@ -4397,8 +4404,46 @@ class LauncherForm : Form {
         }
         g.Restore(content);
         StatusBar(g, w, h, home ? Color.White : PhoneText);
+        UpdateBanner(g, w, h, t);
         float barW = w * 0.34f, barH = Math.Max(3f, h * 0.0065f);
         using (var path = Round(new RectangleF((w - barW) / 2, h - barH * 2.4f, barW, barH), barH / 2)) using (var b = new SolidBrush(home ? Color.White : PhoneText)) g.FillPath(b, path);
+    }
+    // A phone-style notice: it slides in over the screen and leaves by itself. It takes no keys or focus, makes no sound and
+    // installs nothing. Clicking it opens Updates, which still asks. Closing it hides that build for good; a newer one shows again.
+    const float BannerSeconds = 8f;
+    int bannerBuild; float bannerAt; string bannerClosed;
+    float BannerAge(float t) {
+        if (!Updater.Ready || job != null || starting) return -1;
+        if (bannerClosed == null) bannerClosed = Config.Read("update-dismissed.txt", "").Trim();
+        int build = Updater.Latest.build;
+        if (bannerClosed == build.ToString()) return -1;
+        if (bannerBuild != build) { bannerBuild = build; bannerAt = t; }
+        // It waits while the mouse is on it.
+        if ((hoverPrompt == "N" || hoverPrompt == "NX") && t - bannerAt > 0.3f) bannerAt = t - 0.3f;
+        float age = t - bannerAt;
+        return age <= BannerSeconds ? age : -1;
+    }
+    void UpdateBanner(Graphics g, int w, int h, float t) {
+        float age = BannerAge(t);
+        if (age < 0) return;
+        float show = Math.Min(Ease(age / 0.28f), Ease((BannerSeconds - age) / 0.28f));
+        float m = w * 0.03f, bh = h * 0.092f, y = h * 0.052f - (1 - show) * (bh + h * 0.06f), rad = bh * 0.26f;
+        var r = new RectangleF(m, y, w - 2 * m, bh);
+        using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.005f, r.Width, r.Height), rad)) using (var b = new SolidBrush(Color.FromArgb((int)(55 * show), 0, 0, 0))) g.FillPath(b, shadow);
+        using (var body = Round(r, rad)) using (var b = new SolidBrush(Color.FromArgb((int)(248 * show), 252, 252, 254))) g.FillPath(b, body);
+        float pad = bh * 0.17f, size = bh - 2 * pad;
+        var icon = new RectangleF(r.X + pad, r.Y + pad, size, size);
+        Card(g, icon, size * 0.24f, Color.FromArgb(52, 134, 240), Color.FromArgb(30, 104, 214), Color.Empty, 0);
+        Write(g, "\uE895", iconSmall, Color.White, icon, StringAlignment.Center, StringAlignment.Center, false);
+        float x = icon.Right + pad, close = bh * 0.56f, textW = r.Right - x - close - pad * 0.5f, line = bh * 0.34f, ty = r.Y + (bh - 2 * line) / 2;
+        Write(g, "Update available", smallBold, PhoneText, new RectangleF(x, ty, textW, line), StringAlignment.Near, StringAlignment.Center, false);
+        Write(g, "Build " + bannerBuild + " is ready. Click to see it.", smallFont, PhoneSub, new RectangleF(x, ty + line, textW, line), StringAlignment.Near, StringAlignment.Center, false);
+        var x1 = new RectangleF(r.Right - close, r.Y + (bh - close) / 2, close, close);
+        float cross = close * 0.14f, cx = x1.X + close / 2, cy = x1.Y + close / 2;
+        using (var pen = new Pen(hoverPrompt == "NX" ? PhoneText : PhoneSub, Math.Max(1.5f, w * 0.004f))) { g.DrawLine(pen, cx - cross, cy - cross, cx + cross, cy + cross); g.DrawLine(pen, cx - cross, cy + cross, cx + cross, cy - cross); }
+        // The close button first: the first match wins.
+        promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(x1.X + screenX, x1.Y + screenY, x1.Width, x1.Height), "NX"));
+        promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(r.X + screenX, r.Y + screenY, r.Width, r.Height), "N"));
     }
     void StatusBar(Graphics g, int w, int h, Color ink) {
         float bar = h * 0.05f, x = w * 0.06f;
@@ -4465,6 +4510,10 @@ class LauncherForm : Form {
             Card(g, r, size * 0.24f, Mix(c, Color.White, 0.14f), Mix(c, Color.Black, 0.1f), Color.Empty, 0);
             if (sel) using (var ring = Round(new RectangleF(r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6), size * 0.27f)) using (var pen = new Pen(Color.White, Math.Max(2.5f, w * 0.007f))) g.DrawPath(pen, ring);
             Write(g, AppIcons[i].ToString(), iconFont, it.On ? Color.White : Color.FromArgb(190, 255, 255, 255), r, StringAlignment.Center, StringAlignment.Center, false);
+            if (AppNames[i] == "Settings" && Updater.Ready) {
+                float dot = size * 0.26f;
+                using (var b = new SolidBrush(Color.FromArgb(240, 58, 50))) g.FillEllipse(b, r.Right - dot * 0.72f, r.Y - dot * 0.28f, dot, dot);
+            }
             var label = new RectangleF(cx - cell / 2, cy + icon + labelH * 0.1f, cell, labelH);
             float labelW = g.MeasureString(AppNames[i], smallBold).Width + smallBold.Height * 0.5f;
             using (var path = Round(new RectangleF(cx - labelW / 2, label.Y, labelW, label.Height), label.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillPath(b, path);
