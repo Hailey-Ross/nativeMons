@@ -24,7 +24,7 @@ runs:
         LOVE_VERSION: "11.5"
         FULLDEX_RELEASE: "pc-v1"
         PLATINUM_RELEASE: "v0.1.13"
-        NATIVEPLAT_RELEASE: "windows-5d5a59a6d"
+        NATIVEPLAT_RELEASE: "windows-189a1d480"
       run: |
         $dist = "dist\nativeMons"
         Copy-Item LICENSE, README.md $dist
