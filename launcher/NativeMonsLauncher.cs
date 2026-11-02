@@ -43,7 +43,9 @@ static class Native {
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
     // Windows only lets the foreground owner hand the foreground on; joining its input for the call lifts that.
+    public static readonly bool Quiet = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_QUIET") == "1";
     public static void Front(IntPtr h) {
+        if (Quiet) return;
         if (h == IntPtr.Zero) return;
         if (IsIconic(h)) ShowWindow(h, 9);
         uint fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero), me = GetCurrentThreadId();
@@ -1645,7 +1647,7 @@ class LauncherForm : Form {
 
     // ---------- start ----------
     void Start() {
-        Activate(); Native.Front(Handle);
+        if (!Native.Quiet) Activate(); Native.Front(Handle);
         starting = true; startSince = DateTime.Now; startStage = "Looking for your games"; Invalidate();
         Task.Run(() => {
             string err = null;
@@ -3622,7 +3624,7 @@ class LauncherForm : Form {
     void RunJob(string title, ProcessStartInfo psi, bool isGame, Action<int> done) {
         log.Clear(); jobTitle = title; jobIsGame = isGame; jobHid = false; jobStart = DateTime.Now; if (isGame) gameStart = jobStart; progress = -1; jobDone = done;
         // Let the game take the foreground from us.
-        Native.AllowSetForegroundWindow(-1);
+        if (!Native.Quiet) Native.AllowSetForegroundWindow(-1);
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         DataReceivedEventHandler add = delegate(object s, DataReceivedEventArgs e) {
             if (e.Data == null) return;
@@ -3669,7 +3671,7 @@ class LauncherForm : Form {
         watchGba = false; gbaClosed = false;
         if (!Visible) Show();
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-        Activate(); Native.Front(Handle);
+        if (!Native.Quiet) Activate(); Native.Front(Handle);
         var then = jobDone; jobDone = null;
         if (then != null) then(code);
         Invalidate();
@@ -3768,6 +3770,7 @@ class LauncherForm : Form {
         base.OnMouseDown(e);
         if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
     }
+    protected override bool ShowWithoutActivation { get { return Native.Quiet; } }
     readonly List<KeyValuePair<RectangleF, string>> promptHits = new List<KeyValuePair<RectangleF, string>>();
     string hoverPrompt;
     string PromptAt(Point pt) { foreach (var h in promptHits) if (h.Key.Contains(pt)) return h.Value; return null; }
