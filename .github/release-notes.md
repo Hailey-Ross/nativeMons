@@ -36,7 +36,8 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **Import and export saves:** plain `.sav` files for emulators and flash carts, and Checkpoint folders for the 3DS.
 - **Open in PKHeX or OpenHome:** a game's page opens your own copy of either, ready for that game's save.
 - **Settings** for both engines in one place, including **Download Pokedex** for offline play.
-- **Updates:** the launcher checks this project's releases and can update itself and every engine from one checked download, leaving your saves and settings alone.
+- **Updates:** the launcher checks this project's releases, shows a short banner when a build is ready, and can update itself and every engine from one checked download, leaving your saves and settings alone. Choose **Stable** or **Dev** on the Updates page.
+- **Several copies of a game:** if your folders hold more than one version, a game's page lets you choose which to use. GBA ROM hacks can be chosen too: they run on Fulldex only, with their own save.
 - **Mods** for Gen1Recomp games, and **hails.nds-Patcher** for `.nds` ROMs that won't load.
 
 ## Testing and reports
