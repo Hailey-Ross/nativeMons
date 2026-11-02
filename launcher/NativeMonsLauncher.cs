@@ -692,10 +692,16 @@ static class GameArt {
     public static void Watch(Process p) { current = p; if (Hold) StopNow(); }
     // Nothing a capture makes is kept unless it finished, so stopping one costs only a retry at the next start.
     public static void StopNow() { Hold = true; try { var p = current; if (p != null) p.Kill(); } catch { } }
-    public static void CaptureMissing(Func<bool> busy) {
-        Hold = false; Capturing = true; OnCaptureThread = true;
-        try { CaptureAll(() => Hold || busy()); } finally { Capturing = false; }
+    public static void CaptureMissing(Func<bool> busy, Action first) {
+        Background(delegate { first(); CaptureAll(() => Hold || busy()); });
     }
+    public static void Background(Action work) {
+        lock (BackgroundLock) {
+            Hold = false; Capturing = true; OnCaptureThread = true;
+            try { work(); } catch { } finally { Capturing = false; OnCaptureThread = false; current = null; }
+        }
+    }
+    static readonly object BackgroundLock = new object();
     static void CaptureAll(Func<bool> busy) {
         foreach (var g in Library.Games.Where(x => CanCapture(x) && !Has(x.Id)).ToList()) {
             if (busy()) return;
@@ -1154,8 +1160,16 @@ static class Updater {
         return d;
     }
     public static int Build { get { string v; int n; return Version().TryGetValue("build", out v) && int.TryParse(v, out n) ? n : 0; } }
-    public static string Channel { get { string v; return Version().TryGetValue("channel", out v) ? v : "bleeding-edge"; } }
-    public static bool Ready { get { var r = Latest; return r != null && r.build > Build && !string.IsNullOrEmpty(r.sha256); } }
+    public const string StableTag = "stable", DevTag = "bleeding-edge";
+    static string Installed { get { string v; return Version().TryGetValue("channel", out v) ? v : null; } }
+    static string Revision { get { string v; return Version().TryGetValue("revision", out v) ? v : ""; } }
+    // The player's choice, or else what this copy came from. The tags stay as published; players see Stable and Dev.
+    public static string Channel { get { string c = Config.Read("update-channel.txt", "").Trim(); return c == StableTag || c == DevTag ? c : Installed ?? DevTag; } }
+    public static void Choose(string channel) { Config.Write("update-channel.txt", channel); Latest = null; }
+    public static string Name(string channel) { return channel == StableTag ? "Stable" : "Dev"; }
+    public static string InstalledName { get { return Name(Installed ?? DevTag); } }
+    public static bool Switching { get { return Installed != null && Installed != Channel; } }
+    public static bool Ready { get { var r = Latest; if (r == null || string.IsNullOrEmpty(r.sha256)) return false; return Installed != null && r.channel != Installed ? r.revision != Revision : r.build > Build; } }
     static System.Net.WebClient Web() {
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
         var web = new System.Net.WebClient();
@@ -1170,7 +1184,7 @@ static class Updater {
             Latest = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Release>(text.TrimStart('\uFEFF'));
             Sprites.Touch();
             return null;
-        } catch (Exception x) { return x.Message; }
+        } catch (Exception x) { Latest = null; return x.Message; }
     }
     static string[] Kept = {
         @"engines\fulldex\saves\", @"engines\fulldex\roms\", @"engines\fulldex\states\", @"engines\fulldex\cheats\", @"engines\fulldex\settings.cfg",
@@ -1639,7 +1653,7 @@ class LauncherForm : Form {
             // Title screens are gathered afterwards, without holding up the menu.
             Updater.CleanUp();
             Task.Run(() => { System.Threading.Thread.Sleep(2000); Updater.Check(); });
-            Task.Run(() => { System.Threading.Thread.Sleep(3000); try { GameArt.CaptureMissing(() => job != null || RunningGames() != ""); } catch { } });
+            Task.Run(() => { System.Threading.Thread.Sleep(3000); try { GameArt.CaptureMissing(() => job != null || RunningGames() != "", delegate { LoadDex(true); }); } catch { } });
             Sprites.LoadFamilies(BridgeFamilies);
             int left = (int)((1.1 - (DateTime.Now - startSince).TotalSeconds) * 1000);
             if (left > 0) Task.Delay(left).Wait();
@@ -1740,13 +1754,17 @@ class LauncherForm : Form {
     void OpenUpdates() {
         string problem = null;
         Busy("Looking for updates", delegate { problem = Updater.Check(); return null; }, delegate(string e) {
-            string here = Updater.Build > 0 ? "build " + Updater.Build + " (" + Updater.Channel + ")" : "a local build, not from a release";
+            string here = Updater.Build > 0 ? Updater.InstalledName + " build " + Updater.Build : "a local build, not from a release";
+            string chosen = Updater.Name(Updater.Channel);
+            string other = Updater.Channel == Updater.StableTag ? Updater.DevTag : Updater.StableTag;
+            var channel = new Item("Get updates from: " + chosen, "", true, delegate { Updater.Choose(other); pages.Pop(); OpenUpdates(); }) { Icon = '\uE895', Info = "Stable is the tested build. Dev gets every change first, and may have more problems. Select to switch to " + Updater.Name(other) + "." };
             var p = new Page { Title = "Updates" };
-            if (problem != null || e != null) { p.Body = "This copy is " + here + ".\n\nCouldn't look for updates. " + (e ?? problem); pages.Push(p); return; }
-            if (!Updater.Ready) { p.Body = "This copy is " + here + ".\n\nThe newest on " + Updater.Channel + " is build " + Updater.Latest.build + ". You're up to date."; pages.Push(p); return; }
-            p.Body = "This copy is " + here + ".\n\nBuild " + Updater.Latest.build + " is ready. It updates the launcher and every engine together, downloading about 200 MB.\n\nYour saves, ROM copies, wallpapers and settings stay as they are. The launcher restarts when it's done.";
+            if (problem != null || e != null) { p.Body = "This copy is " + here + ".\n\nCouldn't look for updates on " + chosen + ". " + (e ?? problem); p.Items.Add(channel); pages.Push(p); return; }
+            if (!Updater.Ready) { p.Body = "This copy is " + here + ".\n\nThe newest on " + chosen + " is build " + Updater.Latest.build + ". You're up to date."; p.Items.Add(channel); pages.Push(p); return; }
+            p.Body = "This copy is " + here + ".\n\n" + chosen + " build " + Updater.Latest.build + " is ready." + (Updater.Switching ? " It can be older than what you have now." : "") + " It updates the launcher and every engine together, downloading about 200 MB.\n\nYour saves, ROM copies, wallpapers and settings stay as they are. The launcher restarts when it's done.";
             p.Items.Add(new Item("Update now", "", true, delegate { pages.Pop(); StartUpdate(); }) { Icon = '\uE896' });
             p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
+            p.Items.Add(channel);
             pages.Push(p);
         });
     }
@@ -2582,7 +2600,9 @@ class LauncherForm : Form {
         return true;
     }
     // Each Pokemon once, however many of a game's saves have it. Null when none of them could be read.
-    static DexGame DexInAllSaves(GameEntry g) {
+    static DexGame DexInAllSaves(GameEntry g) { bool partial; return DexInAllSaves(g, true, out partial); }
+    static DexGame DexInAllSaves(GameEntry g, bool mayMoveSlots, out bool partial) {
+        partial = false;
         var all = new DexGame();
         bool any = false;
         string active = SaveSets.Active(g);
@@ -2591,7 +2611,8 @@ class LauncherForm : Form {
             if (HasMaster(g) && File.Exists(ParkedSave(g, set))) { any |= AddDex(all, ParkedSave(g, set)); continue; }
             // A Gen1Recomp slot can only be exported while it's in use, so it's briefly made so, unless a game is running.
             string slot = ReadSlot(g, set);
-            if (slot == null || !HasGen1Slots(g) || RunningGames() != "") continue;
+            if (slot == null || !HasGen1Slots(g)) continue;
+            if (!mayMoveSlots || RunningGames() != "") { partial = true; continue; }
             string current = Gen1Slot(g, "active " + g.Gen1);
             if (current == null || Gen1Slot(g, "activate " + g.Gen1 + " " + slot) == null) continue;
             try { string why; any |= AddDex(all, Gen1Export(g, out why)); }
@@ -2609,19 +2630,88 @@ class LauncherForm : Form {
     bool DexCaught(int id) { return dexBy.Values.Any(d => d.Caught.Contains(id)); }
     bool DexSeen(int id) { return dexBy.Values.Any(d => d.Seen.Contains(id) || d.Caught.Contains(id)); }
     bool DexShiny(int id) { return dexBy.Values.Any(d => d.Shiny.Contains(id)); }
-    string LoadDex() {
-        if (dexNames.Count == 0) {
-            int code; string o = Bridge("names", out code);
-            if (code != 0) return "Couldn't read the Pokemon names.";
-            foreach (var line in o.Split('\n')) { var f = line.TrimEnd('\r').Split('\t'); int id; if (f.Length == 2 && int.TryParse(f[0], out id)) dexNames[id] = f[1]; }
+    // What a game's Pokedex was read from, cheaply: when this changes, it's read again, and otherwise never.
+    static string DexPrint(GameEntry g) {
+        var o = new StringBuilder(g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
+        Action<string> file = delegate(string f) { try { var i = new FileInfo(f); if (i.Exists) o.Append("|" + i.Name + ":" + i.Length + ":" + i.LastWriteTimeUtc.Ticks); } catch { } };
+        Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
+        if (g.Save != null) file(MasterOf(g));
+        folder(Path.Combine(Config.State, "save-sets", g.Id));
+        if (g.Gen1 != null) folder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", "nativemons", "saves", g.Gen1));
+        return o.ToString();
+    }
+    class DexKept { public string Print; public DexGame Dex; }
+    static readonly Dictionary<string, DexKept> dexKept = new Dictionary<string, DexKept>();
+    static bool dexKeptRead;
+    static string DexFile { get { return Path.Combine(Config.State, "dex-cache.txt"); } }
+    static string Ids(HashSet<int> set) { return string.Join(",", set.OrderBy(x => x)); }
+    static void ReadIds(string text, HashSet<int> into) { foreach (var id in text.Split(',')) { int n; if (int.TryParse(id, out n)) into.Add(n); } }
+    static void ReadDexKept() {
+        if (dexKeptRead) return;
+        dexKeptRead = true;
+        try {
+            if (!File.Exists(DexFile)) return;
+            foreach (var l in File.ReadAllLines(DexFile)) {
+                var f = l.Split('\t');
+                if (f.Length < 3) continue;
+                DexGame d = null;
+                if (f.Length == 5) { d = new DexGame(); ReadIds(f[2], d.Caught); ReadIds(f[3], d.Seen); ReadIds(f[4], d.Shiny); }
+                dexKept[f[0]] = new DexKept { Print = f[1], Dex = d };
+            }
+        } catch { }
+    }
+    static void SaveDexKept() {
+        try {
+            Directory.CreateDirectory(Config.State);
+            File.WriteAllLines(DexFile, dexKept.Select(x => x.Key + "\t" + x.Value.Print + "\t" + (x.Value.Dex == null ? "none" : Ids(x.Value.Dex.Caught) + "\t" + Ids(x.Value.Dex.Seen) + "\t" + Ids(x.Value.Dex.Shiny))).ToArray());
+        } catch { }
+    }
+    // Everything already known, on the entries of the latest scan. True when none of it is out of date.
+    bool DexReady() {
+        lock (dexKept) {
+            ReadDexKept();
+            if (dexNames.Count == 0) return false;
+            var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>(); bool all = true;
+            foreach (var g in Library.Games.Where(x => x.Playable)) {
+                DexKept k;
+                if (!dexKept.TryGetValue(g.Id, out k) || k.Print != DexPrint(g)) { all = false; continue; }
+                if (k.Dex == null) none.Add(g); else by[g] = k.Dex;
+            }
+            if (all) { dexBy = by; dexNoSave = none; }
+            return all;
         }
-        var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>();
-        foreach (var g in Library.Games.Where(x => x.Playable)) { var d = DexInAllSaves(g); if (d == null) none.Add(g); else by[g] = d; }
-        dexBy = by; dexNoSave = none;
+    }
+    string LoadDex() { return LoadDex(false); }
+    // In the background it gives way to anything the player starts, and keeps what it has so far.
+    string LoadDex(bool background) {
+        lock (dexKept) {
+            ReadDexKept();
+            if (dexNames.Count == 0) {
+                int code; string o = Bridge("names", out code);
+                if (code != 0) return "Couldn't read the Pokemon names.";
+                foreach (var line in o.Split('\n')) { var f = line.TrimEnd('\r').Split('\t'); int id; if (f.Length == 2 && int.TryParse(f[0], out id)) dexNames[id] = f[1]; }
+            }
+            bool changed = false;
+            foreach (var g in Library.Games.Where(x => x.Playable).ToList()) {
+                if (background && (GameArt.Hold || job != null || RunningGames() != "")) break;
+                string print = DexPrint(g); DexKept k;
+                if (dexKept.TryGetValue(g.Id, out k) && k.Print == print) continue;
+                bool partial; var d = DexInAllSaves(g, !background, out partial);
+                // Stopped or incomplete: it's read again later, not remembered wrong.
+                if (partial || (background && GameArt.Hold)) continue;
+                dexKept[g.Id] = new DexKept { Print = print, Dex = d }; changed = true;
+            }
+            if (changed) SaveDexKept();
+            var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>();
+            foreach (var g in Library.Games.Where(x => x.Playable)) { DexKept k; if (!dexKept.TryGetValue(g.Id, out k) || k.Dex == null) none.Add(g); else by[g] = k.Dex; }
+            dexBy = by; dexNoSave = none;
+        }
         return null;
     }
     void OpenCollection() {
-        Busy("Opening your Pokedex", delegate { return LoadDex(); }, delegate(string e) {
+        if (!GameArt.Capturing && DexReady()) { pages.Push(DexHomePage()); return; }
+        if (AfterCapture(OpenCollection)) return;
+        Busy("Opening your Pokedex", delegate { return LoadDex(false); }, delegate(string e) {
             if (e != null) { ShowText("Pokedex", e, null); return; }
             pages.Push(DexHomePage());
         });
@@ -3510,6 +3600,7 @@ class LauncherForm : Form {
         });
     }
     void Finished(GameEntry g, int code) {
+        Task.Run(() => { System.Threading.Thread.Sleep(5000); GameArt.Background(delegate { LoadDex(true); }); });
         var t = DateTime.Now - gameStart;
         string text = g.Title + " ran for " + ((int)t.TotalMinutes) + ":" + t.Seconds.ToString("00") + ".";
         if (code != 0) text += " It ended with code " + code + ".";
@@ -4377,6 +4468,8 @@ class LauncherForm : Form {
         var c = th.Main;
         return 0.299 * c.R + 0.587 * c.G + 0.114 * c.B > 150 ? Mix(c, Color.Black, 0.42f) : c;
     }
+    // For tests: which screen is showing, so a script knows where its key presses landed.
+    static readonly string TestLog = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_LOG");
     void RenderScreen(Graphics g, int w, int h, Theme th, float t) {
         bool home = job == null && pages.Count > 0 && pages.Peek().Main;
         var all = new RectangleF(0, 0, w, h);
@@ -4388,6 +4481,7 @@ class LauncherForm : Form {
         float m = w * 0.045f, top = h * 0.055f, bottom = h * 0.965f;
         string key = job != null ? "job" : pages.Count + "|" + (pages.Count > 0 ? pages.Peek().Title : "");
         if (key != screenKey) {
+            if (TestLog != null) try { File.AppendAllText(TestLog, key + Environment.NewLine); } catch { }
             int depth = job != null ? pages.Count + 1 : pages.Count;
             screenDir = depth >= screenDepth ? 1 : -1;
             screenKey = key; screenDepth = depth; screenAt = t;

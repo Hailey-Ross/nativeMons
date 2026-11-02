@@ -57,10 +57,12 @@ Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. n
 
 ## Download
 
-- **[Bleeding edge](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
+- **[Dev](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
 - **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable):** the latest working build, from `main`.
 
 Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patching `.nds` ROMs needs Python 3.
+
+Before a stable release, `tests/stable-check/stable-check.ps1` tests a release package on copies of your ROMs and saves. It runs in groups, so a failed part can be retested with `-Retest`; its header explains the options.
 
 ## Saves
 
@@ -103,7 +105,7 @@ Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotG
 
 Each engine has its own page of options, stored where its menus keep them, so changes show up on both sides.
 
-**Updates** checks this project's releases when the launcher starts, and shows on that row when a new build is ready. Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data and settings stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
+**Updates** checks this project's releases when the launcher starts and every 6 hours while it's open. When a new build is ready, a banner appears for a few seconds and Settings gets a badge; nothing downloads until you choose to. The same page switches between **Stable** and **Dev**. Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data and settings stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
 
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
