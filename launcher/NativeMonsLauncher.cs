@@ -115,8 +115,8 @@ class Theme {
 class GameEntry {
     public Theme Theme = Theme.Default;
     public int Dex;   // how many National Dex entries this game has
-    public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port, Nativeplat;
-    public int ArtFrame;   // when this game's title screen is up, in frames from power-on
+    public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port, Nativeplat, TownCore;
+    public int ArtFrame, TownFrame;   // when this game's title screen is up, in frames from power-on
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
     public bool Imported;
     public bool OnGen1 { get { return Gen1 != null && (Imported || Gen1Rom != null); } }
@@ -304,11 +304,13 @@ static class GameArt {
             return loadedTown;
         }
     }
-    public static bool CanCaptureTown(GameEntry g) { return g.OnNativeplat || (g.Gen1 != null && g.Gen1Rom != null); }
+    // A game nativeplat can show but doesn't run for the player names its core as townCore: its wallpaper comes from there.
+    public static bool CanCaptureTown(GameEntry g) { return (g.TownFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom)) || g.OnNativeplat || (g.TownCore != null && g.FulldexRom != null && File.Exists(Config.Nativeplat) && !Library.NeedsPatch(g.FulldexRom)) || (g.Gen1 != null && g.Gen1Rom != null); }
     // nativeplat's test mode, which uses saves of its own and never the player's. At its furthest camera the whole of Twinleaf
     // fits and the people, the player included, are too far off to be drawn. Diamond and Pearl play a scripted new game (from
     // gen4recomp's tests/dp) until they can walk, then jump to the town. Platinum's save lab makes a save standing there.
     const string DpNewGame = "1250:start;1350:a:4:40:35;2800:down;2820:down;2840:a;2900:a:4:40:14;3560:tap:128:100:8:40:3;3700:a:4:40:49;5850:tap:82:118:6;6600:b:4:40:6;6950:down;6980:a;7040:a:4:40:40;9300:a:4:40:120";
+    const string HgNewGame = "1300:start;1700:start;2100:a:4:40:10;3100:tap:220:170:4:80:30;6100:tap:128:72:4;6500:a:4;6800:tap:128:147:4;7200:tap:220:170:4:80:50;11500:tap:70:140:4;11900:tap:220:180:4:80:3;12500:tap:60:80:4;12800:tap:220:180:4;13200:tap:190:55:4;13500:tap:220:180:4:80:3;14000:start:4;14100:a:4;14500:tap:220:180:4;14800:tap:190:55:4;15100:tap:220:180:4:80:20";
     const string Twinleaf = "411", TwinleafX = "110", TwinleafZ = "888";
     static int RunNativeplatTest(string spec, string lab, string warp) {
         var psi = new ProcessStartInfo(Config.Nativeplat) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(Config.Nativeplat), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
@@ -324,13 +326,49 @@ static class GameArt {
             return p.ExitCode;
         }
     }
+    // Generation 5's own opening flies over the player's home town. Pressing A through a new game reaches it at a fixed frame,
+    // set per game in games.json, on Fulldex with no save.
+    static string CaptureTownOpening(GameEntry g) {
+        string temp = Path.Combine(Config.State, "game-art", g.Id + "-town"), script = temp + ".txt";
+        try {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            Directory.CreateDirectory(temp);
+            var presses = new List<string>();
+            for (int f = 1500; f < g.TownFrame; f += 60) presses.Add(f + " " + (f + 6) + " A");
+            File.WriteAllLines(script, presses.ToArray());
+            string dir = Config.FulldexDir;
+            string args = "\"" + g.FulldexRom + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --input \"" + script + "\" --shot-dir \"" + temp + "\" --shot-at " + g.TownFrame + " --frames " + (g.TownFrame + 10) + " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
+            var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            using (var p = Process.Start(psi)) {
+                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                p.BeginOutputReadLine(); p.BeginErrorReadLine();
+                if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
+            }
+            var shot = Directory.GetFiles(temp, "*.bmp").FirstOrDefault();
+            return shot == null ? "No picture came out." : SaveTown(g, shot);
+        } catch (Exception x) { return x.Message; }
+        finally {
+            try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { }
+            try { if (File.Exists(script)) File.Delete(script); } catch { }
+        }
+    }
     static string CaptureTownNativeplat(GameEntry g) {
         string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png"), root = Path.Combine(Path.GetDirectoryName(Config.Nativeplat), "userdata");
-        string slotName = "nativemons-wallpaper", slot = Path.Combine(root, "saves", g.Nativeplat, slotName + ".sav"), script = shot + ".press";
-        string view = "size=1024x768,layout=top,zoom=1024,game=" + g.Nativeplat + ",png=" + shot + ",rom=" + LauncherForm.NativeplatRomCopy(g);
+        string slotName = "nativemons-wallpaper", slot = Path.Combine(root, "saves", g.TownCore ?? g.Nativeplat, slotName + ".sav"), script = shot + ".press";
+        string romCopy = shot + ".nds", core = g.TownCore ?? g.Nativeplat;
+        string view = "size=1024x768,layout=top,zoom=1024,game=" + core + ",png=" + shot + ",rom=" + (g.TownCore != null ? romCopy : LauncherForm.NativeplatRomCopy(g));
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(shot));
             if (File.Exists(shot)) File.Delete(shot);
+            if (g.TownCore != null) {
+                // New Bark Town, from a new game on a copy of the player's ROM. The ROM stays as it is.
+                File.Copy(g.FulldexRom, romCopy, true);
+                File.SetAttributes(romCopy, FileAttributes.Normal);
+                File.WriteAllText(script, HgNewGame.Replace(";", Environment.NewLine));
+                RunNativeplatTest("frames=18500," + view + ",press=@" + script, null, "60:686:393:1");
+                if (!File.Exists(shot)) return "No picture came out.";
+                return SaveTown(g, shot, new RectangleF(0.02f, 0.24f, 0.76f, 0.64f));
+            }
             if (g.Nativeplat == "platinum") {
                 Directory.CreateDirectory(Path.GetDirectoryName(slot));
                 File.WriteAllBytes(slot, new byte[0]);
@@ -349,7 +387,7 @@ static class GameArt {
             return SaveTown(g, shot, new RectangleF(0.1f, 0.06f, 0.66f, 0.9f));
         } catch (Exception x) { return x.Message; }
         finally {
-            foreach (var f in new[] { shot, script, slot, slot + ".bak", slot + ".tmp", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
+            foreach (var f in new[] { shot, script, romCopy, slot, slot + ".bak", slot + ".tmp", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
         }
     }
     // Whatever surrounds the picture is cut away: the window's edge, or the unloaded dark beyond a map.
@@ -373,6 +411,7 @@ static class GameArt {
     }
     // Always under the throwaway identity: the game has to start a new game to reach a town, and that must never meet a real save.
     public static string CaptureTown(GameEntry g) {
+        if (g.TownFrame > 0) return CaptureTownOpening(g);
         if (g.IsDs) return CaptureTownNativeplat(g);
         string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png");
         string identityFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", ArtIdentity);
@@ -849,10 +888,11 @@ static class Library {
         var json = new JavaScriptSerializer().Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(Config.GamesFile));
         Func<Dictionary<string, object>, string, string> str = delegate(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; };
         foreach (var d in json) {
-            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat") };
+            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat"), TownCore = str(d, "townCore") };
             object c, dx;
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
+            object tf; if (d.TryGetValue("townFrame", out tf)) e.TownFrame = Convert.ToInt32(tf);
             if (d.TryGetValue("colors", out c)) {
                 var hex = ((System.Collections.IEnumerable)c).Cast<object>().Select(x => (string)x).ToArray();
                 if (hex.Length == 3) { e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish")); e.Theme.GameId = e.Id; }
