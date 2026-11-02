@@ -29,13 +29,13 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **One launcher** for every game, shaped like a phone-sized Pokédex that takes on each version's colours, with a phone-style screen. A game's intro plays in its Play button, and its home screen shows one of its towns as the wallpaper, both captured from your own ROM on your PC.
 - **Game options for every game:** volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound, set once in Settings or per game. Each is left alone until you choose. Options kept in the save aren't available on Black, White, Black 2 and White 2 yet.
 - **Several saves per game**, each with a name you choose. Switch, copy, rename or delete them from a game's page, and import saves with their trainer, play time, badges and party shown first.
-- **My Collection:** the different Pokémon you've caught across all your saves, counting each once, against the Pokédex entries your games cover.
+- **My Collection:** a Pokédex with National and regional lists and full entries for what you've caught, including the games you have it in and any shinies. Entries come from PokéAPI. It counts each Pokémon once across all your saves, against the entries your games cover.
 - **Move Pokémon** between games from their PC boxes, using PKHeX.Core, with both saves backed up first. If attacks or a held item stand in the way, you choose what to delete or change, then retry. A Pokémon copied by hand keeps its original data, which comes back when it returns to its own generation.
 - **One save across engines** on FireRed, LeafGreen, Emerald and Platinum, with every conversion checked before it's used.
 - **Save backups:** checked copies before anything changes, a corruption check after each game, and restore from a game's page.
 - **Import and export saves:** plain `.sav` files for emulators and flash carts, and Checkpoint folders for the 3DS.
 - **Open in PKHeX or OpenHome:** a game's page opens your own copy of either, ready for that game's save.
-- **Settings** for both engines in one place, including **Download all sprites** for offline play.
+- **Settings** for both engines in one place, including **Download Pokedex** for offline play.
 - **Mods** for Gen1Recomp games, and **hails.nds-Patcher** for `.nds` ROMs that won't load.
 
 ## Testing and reports
@@ -60,6 +60,6 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 
 Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
 
-[Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp), using [melonDS](https://melonds.kuribo64.net) and [mGBA](https://mgba.io). [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr), from the [pret](https://github.com/pret/pokeplatinum) decompilation; they aren't affiliated with nativeMons. [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117; not affiliated with nativeMons. [PKHeX](https://github.com/kwsch/PKHeX) by Kaphotics and contributors. [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington. Sprites served by [hailsDotGO](https://pogo.hails.app). Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
+[Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp), using [melonDS](https://melonds.kuribo64.net) and [mGBA](https://mgba.io). [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr), from the [pret](https://github.com/pret/pokeplatinum) decompilation; they aren't affiliated with nativeMons. [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117; not affiliated with nativeMons. [PKHeX](https://github.com/kwsch/PKHeX) by Kaphotics and contributors. Pokédex entries from [PokéAPI](https://pokeapi.co). [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington. Sprites served by [hailsDotGO](https://pogo.hails.app). Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
 
 Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company.

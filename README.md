@@ -83,7 +83,11 @@ Only some of this has been tried on a real 3DS, so back up your 3DS save first.
 
 ## Pokémon
 
-**My Collection** tallies the different Pokémon you've caught across all the saves of every game the launcher finds, against the National Dex entries those games cover. A game with no save yet still adds its entries to the total.
+**My Collection** is a Pokédex built from all the saves of every game the launcher finds. It has a National list from 001 to 649, a list for each region from Kanto to Unova (by the generation that introduced each Pokémon), and your counts by game. Pokémon you haven't seen show as `???`.
+
+A caught Pokémon's entry shows its picture, category, types, height, weight, base stats, abilities and the description from a game you caught it in, plus each game that has it. A gold star marks a shiny, and A switches between its shiny and normal pictures. Shinies are counted only while they're in a party or a box, because saves keep no record of the rest.
+
+Entries come from [PokéAPI](https://pokeapi.co) the first time you open them and are kept in `state\pokedex-cache`. **Settings > Download Pokedex** fetches every picture and entry at once for offline use. No game text is included in nativeMons.
 
 **Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there.
 
@@ -95,7 +99,7 @@ Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotG
 
 ## Settings
 
-One place for both engines: fullscreen and volume for every game, plus each engine's own options. They're stored where each engine's menus keep them, so changes show up on both sides.
+Each engine has its own page of options, stored where its menus keep them, so changes show up on both sides.
 
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
@@ -137,6 +141,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.
 - [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) by Hails.
+- Pokédex entries from [PokéAPI](https://pokeapi.co).
 - Pokémon pictures served by [hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO) at pogo.hails.app, from the [PokeAPI sprites](https://github.com/PokeAPI/sprites) collection.
 - Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
 
