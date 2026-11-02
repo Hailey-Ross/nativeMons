@@ -287,6 +287,123 @@ static class GameArt {
     static string FrameFile(string id, int i) { return Path.Combine(Folder(id), "frame-" + i.ToString("00") + ".jpg"); }
     static string LogoFile(string id) { return Path.Combine(Folder(id), "logo.png"); }
     public static bool Has(string id) { return id != null && File.Exists(FrameFile(id, Count - 1)); }
+    // The home screen's wallpaper: one of the game's towns.
+    static string TownFile(string id) { return Path.Combine(Folder(id), "town.jpg"); }
+    public static bool HasTown(string id) { return id != null && File.Exists(TownFile(id)); }
+    static string loadedTownId; static Bitmap loadedTown;
+    public static Bitmap Town(string id) {
+        if (!HasTown(id)) return null;
+        lock (gate) {
+            if (loadedTownId != id) {
+                try {
+                    Bitmap next; using (var f = new Bitmap(TownFile(id))) next = new Bitmap(f);
+                    if (loadedTown != null) loadedTown.Dispose();
+                    loadedTown = next; loadedTownId = id;
+                } catch { return null; }
+            }
+            return loadedTown;
+        }
+    }
+    public static bool CanCaptureTown(GameEntry g) { return g.OnNativeplat || (g.Gen1 != null && g.Gen1Rom != null); }
+    // nativeplat's test mode, which uses saves of its own and never the player's. At its furthest camera the whole of Twinleaf
+    // fits and the people, the player included, are too far off to be drawn. Diamond and Pearl play a scripted new game (from
+    // gen4recomp's tests/dp) until they can walk, then jump to the town. Platinum's save lab makes a save standing there.
+    const string DpNewGame = "1250:start;1350:a:4:40:35;2800:down;2820:down;2840:a;2900:a:4:40:14;3560:tap:128:100:8:40:3;3700:a:4:40:49;5850:tap:82:118:6;6600:b:4:40:6;6950:down;6980:a;7040:a:4:40:40;9300:a:4:40:120";
+    const string Twinleaf = "411", TwinleafX = "110", TwinleafZ = "888";
+    static int RunNativeplatTest(string spec, string lab, string warp) {
+        var psi = new ProcessStartInfo(Config.Nativeplat) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(Config.Nativeplat), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
+        psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
+        psi.EnvironmentVariables["NP_AUTOTEST"] = spec;
+        if (lab != null) { psi.EnvironmentVariables["PC_LAB"] = lab; psi.EnvironmentVariables["PC_LAB_AT"] = "300"; }
+        if (warp != null) psi.EnvironmentVariables["PC_WARP"] = warp;
+        using (var p = Process.Start(psi)) {
+            try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+            p.BeginOutputReadLine(); p.BeginErrorReadLine();
+            if (!p.WaitForExit(600000)) { try { p.Kill(); } catch { } return -1; }
+            return p.ExitCode;
+        }
+    }
+    static string CaptureTownNativeplat(GameEntry g) {
+        string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png"), root = Path.Combine(Path.GetDirectoryName(Config.Nativeplat), "userdata");
+        string slotName = "nativemons-wallpaper", slot = Path.Combine(root, "saves", g.Nativeplat, slotName + ".sav"), script = shot + ".press";
+        string view = "size=1024x768,layout=top,zoom=1024,game=" + g.Nativeplat + ",png=" + shot + ",rom=" + LauncherForm.NativeplatRomCopy(g);
+        try {
+            Directory.CreateDirectory(Path.GetDirectoryName(shot));
+            if (File.Exists(shot)) File.Delete(shot);
+            if (g.Nativeplat == "platinum") {
+                Directory.CreateDirectory(Path.GetDirectoryName(slot));
+                File.WriteAllBytes(slot, new byte[0]);
+                string stored = ",storage=1,slot=" + slotName;
+                // This run ends itself once the save is made, with an exit code of its own.
+                RunNativeplatTest("frames=1500," + view + stored, "inline:map " + Twinleaf + " " + TwinleafX + " " + TwinleafZ + " 1;", null);
+                if (new FileInfo(slot).Length == 0) return "The wallpaper's save wasn't made.";
+                if (File.Exists(shot)) File.Delete(shot);
+                RunNativeplatTest("frames=2800," + view + stored + ",press=1450:start:4:40:4;1800:a:4:60:6", null, null);
+            } else {
+                File.WriteAllText(script, DpNewGame.Replace(";", "\n"));
+                RunNativeplatTest("frames=15500," + view + ",press=@" + script, null, Twinleaf + ":" + TwinleafX + ":" + TwinleafZ + ":1");
+            }
+            if (!File.Exists(shot)) return "No picture came out.";
+            // Around the town itself, which sits in the upper middle of this view, clear of the dark past the loaded map.
+            return SaveTown(g, shot, new RectangleF(0.1f, 0.06f, 0.66f, 0.9f));
+        } catch (Exception x) { return x.Message; }
+        finally {
+            foreach (var f in new[] { shot, script, slot, slot + ".bak", slot + ".tmp", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
+        }
+    }
+    // Whatever surrounds the picture is cut away: the window's edge, or the unloaded dark beyond a map.
+    static string SaveTown(GameEntry g, string shot, RectangleF? part = null) {
+        Directory.CreateDirectory(Folder(g.Id));
+        using (var pic = new Bitmap(shot)) {
+            int left = pic.Width, top = pic.Height, right = 0, bottom = 0;
+            for (int y = 0; y < pic.Height; y += 2) for (int x = 0; x < pic.Width; x += 2) {
+                var c = pic.GetPixel(x, y);
+                if (c.R + c.G + c.B > 24) { left = Math.Min(left, x); top = Math.Min(top, y); right = Math.Max(right, x); bottom = Math.Max(bottom, y); }
+            }
+            if (left >= right || top >= bottom) return "The town came out blank.";
+            var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+            var quality = new System.Drawing.Imaging.EncoderParameters(1);
+            quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+            var area = Rectangle.FromLTRB(left, top, Math.Min(pic.Width, right + 2), Math.Min(pic.Height, bottom + 2));
+            if (part != null) area = new Rectangle((int)(pic.Width * part.Value.X), (int)(pic.Height * part.Value.Y), (int)(pic.Width * part.Value.Width), (int)(pic.Height * part.Value.Height));
+            using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(TownFile(g.Id), jpeg, quality);
+        }
+        return null;
+    }
+    // Always under the throwaway identity: the game has to start a new game to reach a town, and that must never meet a real save.
+    public static string CaptureTown(GameEntry g) {
+        if (g.IsDs) return CaptureTownNativeplat(g);
+        string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png");
+        string identityFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", ArtIdentity);
+        try {
+            Directory.CreateDirectory(Path.GetDirectoryName(shot));
+            if (File.Exists(shot)) File.Delete(shot);
+            var import = LauncherForm.Gen1Start("");
+            import.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+            import.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
+            import.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
+            int code;
+            using (var rom = new LauncherForm.PlainPath(g.Gen1Rom)) {
+                import.EnvironmentVariables["POKEPORT_IMPORT_ROM"] = rom.Path_;
+                LauncherForm.RunCapture(import, 240, out code);
+            }
+            if (code != 0) return "Could not prepare the game for its picture.";
+            var psi = LauncherForm.Gen1Start("");
+            psi.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+            psi.EnvironmentVariables["POKEPORT_VERSION"] = g.Gen1;
+            psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
+            psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TownArt.lua";
+            psi.EnvironmentVariables["NATIVEMONS_TOWN_ART"] = shot.Replace('\\', '/');
+            string said = LauncherForm.RunCapture(psi, 240, out code);
+            if (!File.Exists(shot)) return "No picture came out. " + said;
+            return SaveTown(g, shot);
+        } catch (Exception x) { return x.Message; }
+        finally {
+            try { if (File.Exists(shot)) File.Delete(shot); } catch { }
+            try { if (Directory.Exists(identityFolder)) Directory.Delete(identityFolder, true); } catch { }
+        }
+    }
     static void Load(string id) {
         if (loadedId == id) return;
         var old = loaded; var oldLogo = loadedLogo;
@@ -514,24 +631,35 @@ static class GameArt {
             if (busy()) return;
             Capture(g);
         }
+        foreach (var g in Library.Games.Where(x => CanCaptureTown(x) && !HasTown(x.Id)).ToList()) {
+            if (busy()) return;
+            CaptureTown(g);
+        }
     }
 }
 
-// Options kept inside each game's save. Settings holds a default for all games, and each game can follow it or choose its own.
-// "own" leaves what the game has set alone. Nothing is written for a game unless one of these says so.
+// Settings holds a default for all games, and each game can follow it or choose its own. "own" leaves things as they are, and
+// nothing is written for a game unless one of these says so. Most are kept inside each game's save. Engine ones aren't, so they
+// work for every generation, and go in the engine's own settings when a game starts.
 class GameOption {
-    public string Key, Name; public string[] Values, Labels; public bool GameOnly; public int FirstGen = 1;
+    public string Key, Name, Note; public char Icon = '\uE713'; public string[] Values, Labels; public bool GameOnly, Engine; public int FirstGen = 1;
     public string Label(string value) { int i = Array.IndexOf(Values, value); return i >= 0 ? Labels[i] : value; }
 }
 static class GameOptions {
     public const string Own = "own", Follow = "follow";
     public static readonly GameOption[] All = {
-        new GameOption { Key = "text", Name = "Text speed", Values = new[] { "slow", "mid", "fast" }, Labels = new[] { "Slow", "Medium", "Fast" } },
-        new GameOption { Key = "scene", Name = "Battle scene", Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" } },
-        new GameOption { Key = "style", Name = "Battle style", Values = new[] { "shift", "set" }, Labels = new[] { "Shift", "Set" } },
-        new GameOption { Key = "sound", Name = "Sound", Values = new[] { "mono", "stereo" }, Labels = new[] { "Mono", "Stereo" }, FirstGen = 2 },
-        new GameOption { Key = "button", Name = "Button mode", Values = new[] { "normal", "alt", "lequalsa" }, Labels = new[] { "Normal", "Alternate (LR or Start = X)", "L = A" }, GameOnly = true, FirstGen = 3 },
-        new GameOption { Key = "frame", Name = "Text frame", Values = Enumerable.Range(1, 20).Select(i => i.ToString()).ToArray(), Labels = Enumerable.Range(1, 20).Select(i => "Type " + i).ToArray(), GameOnly = true, FirstGen = 3 },
+        new GameOption { Key = "text", Name = "Text speed", Icon = '\uE8D2', Values = new[] { "slow", "mid", "fast" }, Labels = new[] { "Slow", "Medium", "Fast" } },
+        new GameOption { Key = "scene", Name = "Battle scene", Icon = '\uE8B2', Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" } },
+        new GameOption { Key = "style", Name = "Battle style", Icon = '\uE8AB', Values = new[] { "shift", "set" }, Labels = new[] { "Shift", "Set" } },
+        new GameOption { Key = "sound", Name = "Sound", Icon = '\uE7F5', Values = new[] { "mono", "stereo" }, Labels = new[] { "Mono", "Stereo" }, FirstGen = 2 },
+        new GameOption { Key = "button", Name = "Button mode", Icon = '\uE7FC', Values = new[] { "normal", "alt", "lequalsa" }, Labels = new[] { "Normal", "Alternate (LR or Start = X)", "L = A" }, GameOnly = true, FirstGen = 3 },
+        new GameOption { Key = "frame", Name = "Text frame", Icon = '\uE8A9', Values = Enumerable.Range(1, 20).Select(i => i.ToString()).ToArray(), Labels = Enumerable.Range(1, 20).Select(i => "Type " + i).ToArray(), GameOnly = true, FirstGen = 3 },
+        new GameOption { Key = "vol", Name = "Volume", Icon = '\uE767', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "Overall volume, on every engine." },
+        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex and the Platinum PC port only have the overall volume." },
+        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex and the Platinum PC port only have the overall volume." },
+        new GameOption { Key = "full", Name = "Fullscreen", Icon = '\uE740', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "On every engine." },
+        new GameOption { Key = "wide", Name = "Widescreen", Icon = '\uE799', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "The world on Fulldex and nativeplat, and battles on Gen1Recomp. The Platinum PC port doesn't have it." },
+        new GameOption { Key = "smooth", Name = "Smooth scaling", Icon = '\uE91B', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "Softens the picture on Fulldex and nativeplat, instead of sharp pixels." },
     };
     public static int Generation(GameEntry g) {
         if (g.Console == "Game Boy") return 1;
@@ -541,6 +669,7 @@ static class GameOptions {
     }
     // Where a save's options are known. Gen 5's aren't yet.
     public static bool Available(GameEntry g) { return Generation(g) <= 4; }
+    public static bool Has(GameEntry g, GameOption o) { return o.Engine || (Available(g) && Generation(g) >= o.FirstGen); }
     static string File_(GameEntry g) { return Path.Combine(Config.State, g == null ? "game-options.txt" : "game-options-" + g.Id + ".txt"); }
     static Dictionary<string, string> Read(GameEntry g) {
         var d = new Dictionary<string, string>();
@@ -570,16 +699,34 @@ static class GameOptions {
         return value == Own ? (g == null ? "Each game's own" : "This game's own") : o.Label(value);
     }
     // The settings this game should start with, as key=value.
-    public static List<string> ForGame(GameEntry g) {
-        var r = new List<string>();
-        if (!Available(g)) return r;
+    public static Dictionary<string, string> ForGame(GameEntry g) {
+        var r = new Dictionary<string, string>();
         foreach (var o in All) {
-            if (Generation(g) < o.FirstGen) continue;
+            if (!Has(g, o)) continue;
             string v = Stored(g, o);
             if (v == Follow) v = Stored(null, o);
-            if (v != Own) r.Add(o.Key + "=" + v);
+            if (v != Own) r[o.Key] = v;
         }
         return r;
+    }
+    public static bool IsEngine(string key) { return All.First(o => o.Key == key).Engine; }
+    // A value in an INI file, keeping every other line. Engines fill in anything the file doesn't have.
+    public static void SetIni(string file, string section, string key, string value) {
+        var lines = File.Exists(file) ? File.ReadAllLines(file).ToList() : new List<string>();
+        int start = lines.FindIndex(l => l.Trim().Equals("[" + section + "]", StringComparison.OrdinalIgnoreCase));
+        if (start < 0) { lines.Add("[" + section + "]"); lines.Add(key + " = " + value); File.WriteAllLines(file, lines.ToArray()); return; }
+        int end = start + 1;
+        while (end < lines.Count && !lines[end].TrimStart().StartsWith("[")) end++;
+        for (int i = start + 1; i < end; i++) {
+            int eq = lines[i].IndexOf('=');
+            if (eq > 0 && lines[i].Substring(0, eq).Trim().Equals(key, StringComparison.OrdinalIgnoreCase)) {
+                lines[i] = lines[i].Substring(0, eq + 1) + (lines[i][eq - 1] == ' ' ? " " : "") + value;
+                File.WriteAllLines(file, lines.ToArray());
+                return;
+            }
+        }
+        lines.Insert(end, key + " = " + value);
+        File.WriteAllLines(file, lines.ToArray());
     }
 }
 
@@ -1256,7 +1403,7 @@ class LauncherForm : Form {
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
         p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && have > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
-        p.Items.Add(new Item("Settings", "Both engines, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
+        p.Items.Add(new Item("Settings", "Game options, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
         return p;
     }
@@ -1264,13 +1411,12 @@ class LauncherForm : Form {
     // One place for both engines. Values are stored where each engine's own menus keep them, so the two always agree.
     Page SettingsPage() {
         var p = new Page { Title = "Settings" };
-        p.Items.Add(new Item("Both engines", "", true, delegate { OpenEngineSettings("both"); }) { Icon = '\uE713', Info = "Fullscreen and volume, for every game." });
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download all sprites", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture for offline play. Run it again at any time: it only fetches what's missing." });
-        p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Text speed, battle scene, battle style and sound, for every game." });
+        p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
         return p;
@@ -1280,23 +1426,25 @@ class LauncherForm : Form {
         if (g != null) p.Theme = g.Theme;
         foreach (var option in GameOptions.All) {
             var o = option;
-            if (g == null ? o.GameOnly : GameOptions.Generation(g) < o.FirstGen) continue;
+            if (g == null ? o.GameOnly : !GameOptions.Has(g, o)) continue;
             p.Items.Add(new Item(o.Name + ": " + GameOptions.Describe(g, o, GameOptions.Stored(g, o)), "Press to change.", true, delegate {
                 GameOptions.Store(g, o, GameOptions.Next(g, o));
                 var was = pages.Pop(); var again = GameOptionsPage(g); again.Sel = was.Sel; again.TopRow = was.TopRow; again.ScrollRow = was.ScrollRow; pages.Push(again);
-            }) { Icon = '\uE8D2', Info = g == null ? "Applies to every game when it starts, unless the game's own page says otherwise. It replaces what's set in the game. Not on Black, White, Black 2 and White 2 yet." : "Applies when this game starts, and replaces what's set in the game. Global follows Game options in Settings." });
+            }) { Icon = o.Icon, Info = (o.Note != null ? o.Note + " " : "") + (g == null ? "Applies to every game when it starts, unless the game's own page says otherwise." + (o.Engine ? "" : " It replaces what's set in the game. Not on Black, White, Black 2 and White 2 yet.") : "Applies when this game starts. Global follows Game options in Settings.") });
         }
         return p;
     }
     // Called after the save is backed up and shared. Gen1Recomp is told at start instead (NATIVEMONS_OPTIONS). A save it can't
     // change is left alone and the game still starts. The sync record moves with it, so this never looks like a conflict.
     static void ApplyOptions(GameEntry g) {
+        var wanted = GameOptions.ForGame(g);
+        try { ApplyEngineOptions(g, wanted); } catch { }
         try {
-            var wanted = GameOptions.ForGame(g);
+            var inSave = wanted.Where(x => !GameOptions.IsEngine(x.Key)).Select(x => x.Key + "=" + x.Value).ToList();
             string master = MasterOf(g);
-            if (wanted.Count == 0 || g.Engine() == "gen1" || !HasMaster(g) || !File.Exists(master) || SaveGuard.IsBlank(master) || !File.Exists(Config.MonBridge)) return;
+            if (inSave.Count == 0 || g.Engine() == "gen1" || !HasMaster(g) || !File.Exists(master) || SaveGuard.IsBlank(master) || !File.Exists(Config.MonBridge)) return;
             string before = SaveGuard.Hash(master);
-            int code; SaveGuard.Bridge("options \"" + master + "\" " + string.Join(" ", wanted.ToArray()), out code);
+            int code; SaveGuard.Bridge("options \"" + master + "\" " + string.Join(" ", inSave.ToArray()), out code);
             string after = SaveGuard.Hash(master);
             if (code != 0 || before == after) return;
             var st = ReadSync(g);
@@ -1304,6 +1452,29 @@ class LauncherForm : Form {
             st.TryGetValue("master", out lastM); st.TryGetValue("gen1", out lastG); st.TryGetValue("slot", out slot);
             if (lastM == before) WriteSync(g, after, lastG ?? "", slot ?? "");
         } catch { }
+    }
+    // Each engine's own settings file. Gen1Recomp's come in with NATIVEMONS_OPTIONS.
+    static void ApplyEngineOptions(GameEntry g, Dictionary<string, string> w) {
+        string v, engine = g.Engine();
+        if (engine == "fulldex") {
+            if (w.TryGetValue("vol", out v)) WriteFulldex("volume", v);
+            if (w.TryGetValue("full", out v)) WriteFulldex("fullscreen", v == "on" ? "1" : "0");
+            if (w.TryGetValue("wide", out v)) WriteFulldex("wide", v == "on" ? "1" : "0");
+            if (w.TryGetValue("smooth", out v)) WriteFulldex("smooth", v == "on" ? "1" : "0");
+        } else if (engine == "port") {
+            string ini = Path.Combine(PortDir, "sim_config.ini");
+            if (w.TryGetValue("vol", out v)) GameOptions.SetIni(ini, "General", "MasterVolume", (int.Parse(v) * 127 / 100).ToString());
+            if (w.TryGetValue("full", out v)) GameOptions.SetIni(ini, "General", "FullScreen", v == "on" ? "true" : "false");
+        } else if (engine == "nativeplat") {
+            string ini = Path.Combine(NativeplatDir, "userdata", "options.ini");
+            Directory.CreateDirectory(Path.GetDirectoryName(ini));
+            if (w.TryGetValue("vol", out v)) GameOptions.SetIni(ini, "audio", "volume", v);
+            if (w.TryGetValue("music", out v)) GameOptions.SetIni(ini, "game", "bgm_volume", v);
+            if (w.TryGetValue("sfx", out v)) GameOptions.SetIni(ini, "game", "se_volume", v);
+            if (w.TryGetValue("full", out v)) GameOptions.SetIni(ini, "video", "fullscreen", v == "on" ? "1" : "0");
+            if (w.TryGetValue("wide", out v)) GameOptions.SetIni(ini, "game", "widescreen", v == "on" ? "1" : "0");
+            if (w.TryGetValue("smooth", out v)) GameOptions.SetIni(ini, "video", "filter", v == "on" ? "linear" : "nearest");
+        }
     }
     static string FulldexCfg { get { return Path.Combine(Config.FulldexDir, "settings.cfg"); } }
     static Dictionary<string, string> ReadFulldex() {
@@ -1351,21 +1522,7 @@ class LauncherForm : Form {
             var cfg = hasFulldex ? ReadFulldex() : new Dictionary<string, string>();
             Func<string, string, string> g1 = delegate(string k, string d) { string v; return gen1.TryGetValue(k, out v) && v != "nil" ? v : d; };
             var p = new Page();
-            if (group == "both") {
-                p.Title = "Both engines";
-                string v;
-                bool full = hasFulldex ? (!cfg.TryGetValue("fullscreen", out v) || v == "1") : g1("videoMode", "windowed") == "borderless";
-                p.Items.Add(Choice("Fullscreen", "Every game opens fullscreen, or in a window.", new[] { "ON", "OFF" }, full ? 0 : 1, delegate(int i) {
-                    if (hasFulldex) WriteFulldex("fullscreen", i == 0 ? "1" : "0");
-                    if (hasGen1) WriteGen1("videoMode", i == 0 ? "borderless" : "windowed");
-                }));
-                string[] levels = { "OFF", "20%", "40%", "60%", "80%", "100%" };
-                int percent; if (!(cfg.TryGetValue("volume", out v) && int.TryParse(v, out percent))) percent = hasFulldex ? 100 : int.Parse(g1("musicVol", "7")) * 100 / 7;
-                p.Items.Add(Choice("Volume", "Music and sound for every game.", levels, Math.Min(5, (percent + 10) / 20), delegate(int i) {
-                    if (hasFulldex) WriteFulldex("volume", (i * 20).ToString());
-                    if (hasGen1) { string level = ((i * 7 + 2) / 5).ToString(); WriteGen1("musicVol", level); WriteGen1("sfxVol", level); }
-                }));
-            } else if (group == "fulldex") {
+            if (group == "fulldex") {
                 p.Title = "Fulldex";
                 p.Items.Add(FulldexSwitch(cfg, "wide", "Widescreen world", true, "Draws the world out to the sides of a widescreen display."));
                 p.Items.Add(FulldexSwitch(cfg, "fps60", "60 FPS", true, "Adds in-between frames for smoother motion."));
@@ -2156,7 +2313,7 @@ class LauncherForm : Form {
             }) { Icon = '' });
         }
         p.Items.Add(new Item("Saves", "In use: " + SaveSets.Name(g, SaveSets.Active(g)) + ".", true, delegate { OpenSaves(g); }) { Icon = '\uE896' });
-        p.Items.Add(new Item("Game options", GameOptions.Available(g) ? "Text speed, battle style and more." : "Not available for this generation yet.", GameOptions.Available(g), delegate { pages.Push(GameOptionsPage(g)); }) { Icon = '\uE8D2' });
+        p.Items.Add(new Item("Game options", GameOptions.Available(g) ? "Volume, text speed, battle style and more." : "Volume, fullscreen and more.", true, delegate { pages.Push(GameOptionsPage(g)); }) { Icon = '\uE8D2' });
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
         p.Items.Add(new Item("Save backups", "Checked copies you can go back to.", true, delegate { pages.Push(BackupsPage(g)); }) { Icon = '\uE81C' });
         p.Items.Add(new Item("Export save", "Send it to a 3DS, flash cart or emulator.", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898' });
@@ -2591,7 +2748,7 @@ class LauncherForm : Form {
     void PlayGen1(GameEntry g) {
         var psi = Gen1Start(" --game=" + g.Gen1);
         var wanted = GameOptions.ForGame(g);
-        if (wanted.Count > 0) psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = string.Join(",", wanted.ToArray());
+        if (wanted.Count > 0) psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = string.Join(",", wanted.Select(x => x.Key + "=" + x.Value).ToArray());
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
     }
     // Explicit arguments, as Fulldex's own list builds them: it then skips that list, and QUIT ends the program.
@@ -2972,7 +3129,7 @@ class LauncherForm : Form {
         } else if (p.Items.Count > 0) {
             if (a == "ok") { var it = p.Items[p.Sel]; if (it.On && it.Run != null) it.Run(); }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
-            else if (p.Body == null) p.Sel = PageGridMove(p.Sel, a, p.Items.Count, 2);
+            else if (p.Body == null) p.Sel = PageGridMove(p.Sel, a, p.Items.Count, 1);
             else if (a == "up" || a == "left") p.Sel = (p.Sel - 1 + p.Items.Count) % p.Items.Count;
             else if (a == "down" || a == "right") p.Sel = (p.Sel + 1) % p.Items.Count;
         } else if ((a == "up" || a == "down") && p.Body != null) {
@@ -3010,7 +3167,7 @@ class LauncherForm : Form {
     string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
     bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null; }
-    const int TileCols = 2;
+    const int TileCols = 4;   // the home screen's app grid
     static System.Drawing.Drawing2D.GraphicsPath Round(RectangleF r, float rad) {
         var path = new System.Drawing.Drawing2D.GraphicsPath();
         float d = Math.Min(rad * 2, Math.Min(r.Width, r.Height));
@@ -3522,7 +3679,12 @@ class LauncherForm : Form {
         var s = ScreenRect(w, h);
         screenX = s.X; screenY = s.Y;
         float rad = w * 0.03f;
-        using (var bezel = Round(new RectangleF(s.X - w * 0.014f, s.Y - w * 0.014f, s.Width + w * 0.028f, s.Height + w * 0.028f), rad * 1.3f)) using (var b = new SolidBrush(Line)) g.FillPath(b, bezel);
+        // A black glass front, set into a recess in the case.
+        float inset = w * 0.016f, rim = inset * 0.45f;
+        var front = new RectangleF(s.X - inset, s.Y - inset, s.Width + 2 * inset, s.Height + 2 * inset);
+        var recess = new RectangleF(front.X - rim, front.Y - rim, front.Width + 2 * rim, front.Height + 2 * rim);
+        using (var path = Round(recess, rad * 1.6f)) using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(recess, Mix(th.Deep, Color.Black, 0.55f), Mix(th.Main, Color.White, 0.25f), 90f)) g.FillPath(b, path);
+        using (var bezel = Round(front, rad * 1.35f)) using (var b = new SolidBrush(Color.FromArgb(12, 12, 14))) g.FillPath(b, bezel);
         var outer = g.Save();
         using (var clip = Round(s, rad)) g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
         g.TranslateTransform(s.X, s.Y);
@@ -3530,12 +3692,29 @@ class LauncherForm : Form {
         if (starting && job == null && pages.Count == 0) RenderSplash(g, sw, sh);
         else RenderScreen(g, sw, sh, th, t);
         g.Restore(outer);
+        // One soft reflection across the glass.
+        using (var clip = Round(s, rad)) {
+            var kept = g.Save();
+            g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+            using (var b = new SolidBrush(Color.FromArgb(9, 255, 255, 255))) g.FillPolygon(b, new[] { new PointF(s.X, s.Y), new PointF(s.X + s.Width * 0.55f, s.Y), new PointF(s.X, s.Y + s.Height * 0.42f) });
+            g.Restore(kept);
+        }
     }
 
     void Shell(Graphics g, int w, int h, Theme th, float t) {
+        // A moulded case in the game's colour. The game's scene lives on the screen, as its wallpaper.
+        float corner = CornerRadius(w), edge = Math.Max(3f, w * 0.008f);
         var body = new RectangleF(0, 0, w, h);
-        VersionFill(g, body, CornerRadius(w), th, t);
-        using (var path = Round(new RectangleF(1, 1, w - 2, h - 2), CornerRadius(w))) using (var pen = new Pen(Line, Math.Max(3f, w * 0.008f))) g.DrawPath(pen, path);
+        using (var path = Round(body, corner)) using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(body, Mix(th.Main, Color.White, 0.1f), Mix(th.Main, th.Deep, 0.75f), 78f)) g.FillPath(b, path);
+        var lip = new RectangleF(edge, edge, w - 2 * edge, h - 2 * edge);
+        using (var path = Round(lip, corner - edge)) using (var pen = new Pen(Fade(Color.White, 70), Math.Max(1.5f, w * 0.003f))) g.DrawPath(pen, path);
+        using (var path = Round(new RectangleF(1, 1, w - 2, h - 2), corner)) using (var pen = new Pen(Mix(th.Deep, Color.Black, 0.45f), edge)) g.DrawPath(pen, path);
+        // The fold of the hinge, and its knuckles at the left edge.
+        float fold = h * 0.1f;
+        using (var pen = new Pen(Fade(Color.Black, 70), Math.Max(1.5f, h * 0.002f))) g.DrawLine(pen, edge, fold, w - edge, fold);
+        using (var pen = new Pen(Fade(Color.White, 60), Math.Max(1f, h * 0.0012f))) g.DrawLine(pen, edge, fold + Math.Max(2f, h * 0.002f), w - edge, fold + Math.Max(2f, h * 0.002f));
+        float knuckle = h * 0.032f, kw = w * 0.012f;
+        foreach (float ky0 in new[] { fold - knuckle * 0.5f }) Card(g, new RectangleF(0, ky0, kw, knuckle), kw * 0.3f, Mix(th.Deep, Color.White, 0.2f), Mix(th.Deep, Color.Black, 0.35f), Color.Empty, 0);
         // The top: big lens, status lights, wordmark.
         float lensR = h * 0.038f, topY = h * 0.056f;
         Lens(g, w * 0.06f + lensR * 1.14f, topY, lensR, t, true);
@@ -3556,7 +3735,14 @@ class LauncherForm : Form {
         DpadHit(new RectangleF(cx - arm, cy + d * 0.5f, arm * 2, d), "D", g, cx, cy + d, 180);
         DpadHit(new RectangleF(cx - d * 1.5f, cy - arm, d, arm * 2), "L", g, cx - d, cy, 270);
         DpadHit(new RectangleF(cx + d * 0.5f, cy - arm, d, arm * 2), "R", g, cx + d, cy, 90);
-        using (var pen = new Pen(Fade(Line, 150), Math.Max(2f, h * 0.0035f))) for (int i = 0; i < 4; i++) { float sx = w * 0.46f + i * w * 0.028f; g.DrawLine(pen, sx, cy - h * 0.025f, sx, cy + h * 0.025f); }
+        // The speaker: rows of drilled holes.
+        float hole = Math.Max(2f, h * 0.0034f), holeGap = hole * 2.3f;
+        using (var dark = new SolidBrush(Mix(th.Deep, Color.Black, 0.6f))) using (var light = new SolidBrush(Fade(Color.White, 60)))
+            for (int row = 0; row < 5; row++) for (int col = 0; col < 7; col++) {
+                float hx = w * 0.42f + col * holeGap + (row % 2) * holeGap / 2, hy = cy - holeGap * 2 + row * holeGap;
+                g.FillEllipse(light, hx, hy + 1, hole, hole);
+                g.FillEllipse(dark, hx, hy, hole, hole);
+            }
         float rb = h * 0.038f;
         RoundKey(g, w * 0.86f, cy - rb * 0.75f, rb, "A", "Select", Color.FromArgb(108, 196, 74), th);
         RoundKey(g, w * 0.70f, cy + rb * 0.55f, rb, "B", "Back", Color.FromArgb(228, 76, 70), th);
@@ -3587,9 +3773,22 @@ class LauncherForm : Form {
         using (var f = new Font("Segoe MDL2 Assets", r.Height * 0.46f, GraphicsUnit.Pixel)) Write(g, glyph, f, hoverPrompt == key ? Line : Cream, r, StringAlignment.Center, StringAlignment.Center, false);
     }
 
+    // The screen is a phone's: status bar, home screen of apps, lists that fill the screen, and a home indicator.
+    static readonly Color PhoneBg = Color.FromArgb(242, 242, 247), PhoneRow = Color.White, PhoneLine = Color.FromArgb(222, 222, 228), PhoneText = Color.FromArgb(28, 28, 30), PhoneSub = Color.FromArgb(108, 108, 114);
+    // The game's colour, dark enough to read on white.
+    static Color Accent(Theme th) {
+        var c = th.Main;
+        return 0.299 * c.R + 0.587 * c.G + 0.114 * c.B > 150 ? Mix(c, Color.Black, 0.42f) : c;
+    }
     void RenderScreen(Graphics g, int w, int h, Theme th, float t) {
-        Floor(g, w, h, th);
-        float m = w * 0.04f, top = h * 0.028f, bottom = h - h * 0.028f;
+        bool home = job == null && pages.Count > 0 && pages.Peek().Main;
+        var all = new RectangleF(0, 0, w, h);
+        if (home) {
+            var town = GameArt.Town(th.GameId);
+            if (town != null) GameArt.Draw(g, town, all); else VersionFill(g, all, 0, th, t);
+            using (var b = new SolidBrush(Color.FromArgb(town != null ? 30 : 80, 0, 0, 0))) g.FillRectangle(b, all);
+        } else using (var b = new SolidBrush(PhoneBg)) g.FillRectangle(b, all);
+        float m = w * 0.045f, top = h * 0.055f, bottom = h * 0.965f;
         string key = job != null ? "job" : pages.Count + "|" + (pages.Count > 0 ? pages.Peek().Title : "");
         if (key != screenKey) {
             int depth = job != null ? pages.Count + 1 : pages.Count;
@@ -3599,113 +3798,90 @@ class LauncherForm : Form {
         float ease = Ease((t - screenAt) / 0.18f);
         var content = g.Save();
         g.TranslateTransform(screenDir * (1 - ease) * w * 0.04f, 0);
-        if (job != null) { RenderJob(g, w, h, m, top, bottom, t, th); g.Restore(content); return; }
-        if (pages.Count == 0) { g.Restore(content); return; }
-        var p = pages.Peek();
-        if (p.Sel != selIndex) { selIndex = p.Sel; selAt = t; }
-        selEase = Ease((t - selAt) / 0.12f);
-        if (p.Main) RenderMain(g, p, w, h, m, top, bottom, t, th); else RenderPage(g, p, w, h, m, top, bottom, t, th);
+        if (job != null) RenderJob(g, w, h, m, top, bottom, t, th);
+        else if (pages.Count > 0) {
+            var p = pages.Peek();
+            if (p.Sel != selIndex) { selIndex = p.Sel; selAt = t; }
+            selEase = Ease((t - selAt) / 0.12f);
+            if (p.Main) RenderMain(g, p, w, h, m, top, bottom, t, th); else RenderPage(g, p, w, h, m, top, bottom, t, th);
+        }
         g.Restore(content);
+        StatusBar(g, w, h, home ? Color.White : PhoneText);
+        float barW = w * 0.34f, barH = Math.Max(3f, h * 0.0065f);
+        using (var path = Round(new RectangleF((w - barW) / 2, h - barH * 2.4f, barW, barH), barH / 2)) using (var b = new SolidBrush(home ? Color.White : PhoneText)) g.FillPath(b, path);
     }
-
+    void StatusBar(Graphics g, int w, int h, Color ink) {
+        float bar = h * 0.05f, x = w * 0.06f;
+        Write(g, DateTime.Now.ToString("h:mm"), smallBold, ink, new RectangleF(x, 0, w * 0.4f, bar), StringAlignment.Near, StringAlignment.Center, false);
+        // The PC's real battery, on a PC that has one.
+        var power = SystemInformation.PowerStatus;
+        if ((power.BatteryChargeStatus & BatteryChargeStatus.NoSystemBattery) != 0) return;
+        float bw = w * 0.055f, bh = bw * 0.5f, bx = w - x - bw, by = (bar - bh) / 2;
+        using (var path = Round(new RectangleF(bx, by, bw, bh), bh * 0.28f)) using (var pen = new Pen(Fade(ink, 150), 1)) g.DrawPath(pen, path);
+        float fill = (bw - 4) * Math.Max(0.05f, Math.Min(1f, power.BatteryLifePercent));
+        using (var path = Round(new RectangleF(bx + 2, by + 2, fill, bh - 4), (bh - 4) * 0.25f)) using (var b = new SolidBrush(ink)) g.FillPath(b, path);
+    }
+    static readonly char[] AppIcons = { ' ', '\uE7FC', '\uE8F1', '\uE74C', '\uE8B7', '\uE8AB', '\uE713', '\uE7E8' };
+    static readonly string[] AppNames = { "", "Games", "Collection", "Mods", "ROMs", "Move", "Settings", "Exit" };
+    static readonly Color[] AppColors = { Color.Empty, Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(124, 84, 214), Color.FromArgb(40, 124, 232), Color.FromArgb(24, 164, 150), Color.FromArgb(120, 124, 134), Color.FromArgb(58, 60, 68) };
     void RenderMain(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
-        // The Play panel: the selected version's colour and finish.
-        var hero = new RectangleF(m, top, w - 2 * m, (bottom - top) * 0.42f);
-        float heroRad = w * 0.03f;
-        using (var path = Round(new RectangleF(hero.X + 2, hero.Y + 3, hero.Width, hero.Height), heroRad)) using (var b = new SolidBrush(Fade(Color.Black, 110))) g.FillPath(b, path);
-        VersionFill(g, hero, heroRad, th, t);
-        using (var path = Round(hero, heroRad)) using (var pen = new Pen(Line, Math.Max(2f, w * 0.006f))) g.DrawPath(pen, path);
-        float pad = hero.Width * 0.05f;
-        Write(g, "NOW SELECTED", smallBold, th.Ink, new RectangleF(hero.X + pad, hero.Y + pad * 0.7f, hero.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        string name = current != null ? current.Title : "No games yet";
-        var vr = new RectangleF(hero.X + pad, hero.Y + pad * 0.7f + smallFont.Height * 1.2f, hero.Width - 2 * pad, heroFont.Height * 1.2f);
-        var vf = FitFont(g, name, vr.Size, heroFont, 0.6f, false);
-        Write(g, name, vf, th.Ink, new RectangleF(vr.X, vr.Y + (heroFont.Height - vf.Height) / 2, vr.Width, vr.Height), StringAlignment.Near, StringAlignment.Near, false);
-        string sub = current != null ? current.Console + " with " + GameEntry.EngineName(current.Engine()) : "Add a ROM folder to get started.";
-        Write(g, sub, smallBold, th.Ink, new RectangleF(hero.X + pad, vr.Bottom, hero.Width - 2 * pad, smallFont.Height * 2.5f), StringAlignment.Near, StringAlignment.Near, true);
-        if (p.Items.Count > 0) {
-            bool sel = p.Sel == 0, on = p.Items[0].On;
-            // The selected game's intro plays inside this button, like a small splash, and nowhere else.
-            var intro = on && current != null ? GameArt.Frame(current.Id, t) : null;
-            float bh = hero.Height * (intro != null ? 0.36f : 0.3f);
-            var pr = new RectangleF(hero.X + pad, hero.Bottom - bh - pad * 0.7f, hero.Width - 2 * pad, bh);
-            hits.Add(new KeyValuePair<RectangleF, int>(pr, 0));
-            if (sel && on) using (var glow = Round(new RectangleF(pr.X - 5, pr.Y - 5, pr.Width + 10, pr.Height + 10), pr.Height * 0.3f)) using (var gb = new SolidBrush(Fade(Color.White, 70 + (int)(45 * Math.Sin(t * 3))))) g.FillPath(gb, glow);
-            Box(g, pr, pr.Height * 0.24f, th, sel, on);
-            if (intro != null) {
-                float inset = Math.Max(2f, pr.Height * 0.03f);
-                var inner = new RectangleF(pr.X + inset, pr.Y + inset, pr.Width - 2 * inset, pr.Height - 2 * inset);
-                using (var clip = Round(inner, inner.Height * 0.2f)) {
-                    var st = g.Save();
-                    g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
-                    GameArt.Draw(g, intro, inner);
-                    using (var shade = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillRectangle(shade, inner);
-                    g.Restore(st);
-                }
-            }
-            Color ink = intro != null ? Color.FromArgb(252, 250, 244) : on ? (th.OnCream) : Text3;
-            var size = g.MeasureString("PLAY", playFont);
-            float cx = pr.X + (pr.Width - size.Width - pr.Height * 0.5f) / 2;
-            if (intro != null) {
-                var pill = new RectangleF(cx - pr.Height * 0.3f, pr.Y + pr.Height * 0.2f, size.Width + pr.Height * 1f, pr.Height * 0.6f);
-                using (var path = Round(pill, pill.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(170, 0, 0, 0))) g.FillPath(b, path);
-            }
-            Cursor3(g, cx, pr.Y + pr.Height / 2, pr.Height * 0.2f, ink);
-            Write(g, "PLAY", playFont, ink, new RectangleF(cx + pr.Height * 0.4f, pr.Y, size.Width + 8, pr.Height), StringAlignment.Near, StringAlignment.Center, false);
+        // The Play widget: the only place a game's intro plays.
+        var widget = new RectangleF(m, top, w - 2 * m, (bottom - top) * 0.31f);
+        float rad = w * 0.06f;
+        if (p.Items.Count > 0) hits.Add(new KeyValuePair<RectangleF, int>(widget, 0));
+        var intro = current != null ? GameArt.Frame(current.Id, t) : null;
+        using (var shadow = Round(new RectangleF(widget.X, widget.Y + h * 0.006f, widget.Width, widget.Height), rad)) using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPath(b, shadow);
+        using (var clip = Round(widget, rad)) {
+            var st = g.Save();
+            g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+            if (intro != null) GameArt.Draw(g, intro, widget);
+            else using (var b = new SolidBrush(th.Deep)) g.FillRectangle(b, widget);
+            var low = new RectangleF(widget.X, widget.Y + widget.Height * 0.45f, widget.Width, widget.Height * 0.55f);
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(low.X, low.Y - 1, low.Width, low.Height + 2), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(205, 0, 0, 0), 90f)) g.FillRectangle(b, low);
+            g.Restore(st);
         }
-        float gy = hero.Bottom + h * 0.018f, gap = w * 0.022f;
-        int n = p.Items.Count - 1, rows = Math.Max(1, (n + TileCols - 1) / TileCols);
-        float tw = (w - 2 * m - gap * (TileCols - 1)) / TileCols, th2 = (bottom - gy - gap * (rows - 1)) / rows;
-        var hint = PageHintFont(g, p, 1, new RectangleF(0, 0, tw, th2), true);
-        for (int i = 1; i < p.Items.Count; i++) {
+        if (p.Sel == 0) using (var ring = Round(widget, rad)) using (var pen = new Pen(Color.White, Math.Max(3f, w * 0.009f))) g.DrawPath(pen, ring);
+        float pad = widget.Width * 0.05f, pillH = widget.Height * 0.23f, pillW = pillH * 2.6f;
+        var pill = new RectangleF(widget.Right - pad - pillW, widget.Bottom - pad - pillH, pillW, pillH);
+        bool on = p.Items.Count > 0 && p.Items[0].On;
+        using (var path = Round(pill, pillH / 2)) using (var b = new SolidBrush(on ? Color.White : Color.FromArgb(160, 255, 255, 255))) g.FillPath(b, path);
+        var pink = on ? Accent(th) : PhoneSub;
+        float tri = pillH * 0.19f, tx = pill.X + pillW * 0.2f, ty = pill.Y + pillH / 2;
+        using (var b = new SolidBrush(pink)) g.FillPolygon(b, new[] { new PointF(tx, ty - tri), new PointF(tx + tri * 1.6f, ty), new PointF(tx, ty + tri) });
+        Write(g, "Play", itemBold, pink, new RectangleF(tx + tri * 2.1f, pill.Y, pillW * 0.7f, pillH), StringAlignment.Near, StringAlignment.Center, false);
+        float textW = pill.X - widget.X - pad * 1.4f, subH = smallFont.Height * 1.25f;
+        string name = current != null ? current.Title.Replace("Pokemon ", "") : "No games yet";
+        string sub = current != null ? GameEntry.EngineShort(current.Engine()) : "Add a ROM folder to start";
+        Write(g, sub, smallFont, Color.FromArgb(225, 255, 255, 255), new RectangleF(widget.X + pad, widget.Bottom - pad - subH, textW, subH), StringAlignment.Near, StringAlignment.Far, false);
+        var nameArea = new SizeF(textW, titleFont.Height * 1.25f);
+        var nf = FitFont(g, name, nameArea, titleFont, 0.65f, false);
+        Write(g, name, nf, Color.White, new RectangleF(widget.X + pad, widget.Bottom - pad - subH - nameArea.Height, textW, nameArea.Height), StringAlignment.Near, StringAlignment.Far, false);
+
+        // The apps.
+        float cell = (w - 2 * m) / TileCols, icon = cell * 0.68f, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
+        int appRows = (Math.Min(p.Items.Count, AppNames.Length) - 1 + TileCols - 1) / TileCols;
+        // At the bottom, where a thumb would reach, leaving the wallpaper's town in view above them.
+        float gy = bottom - h * 0.012f - appRows * (icon + labelH) - (appRows - 1) * rowGap;
+        for (int i = 1; i < p.Items.Count && i < AppNames.Length; i++) {
             var it = p.Items[i];
-            int k = i - 1; var r = new RectangleF(m + (k % TileCols) * (tw + gap), gy + (k / TileCols) * (th2 + gap), tw, th2);
-            Tile(g, it, i == p.Sel, r, true, hint, th);
-            hits.Add(new KeyValuePair<RectangleF, int>(r, i));
+            int k = i - 1;
+            float cx = m + (k % TileCols) * cell + cell / 2, cy = gy + (k / TileCols) * (icon + labelH + rowGap);
+            bool sel = i == p.Sel;
+            float size = sel ? icon * (1 + 0.07f * selEase) : icon;
+            var r = new RectangleF(cx - size / 2, cy + (icon - size) / 2, size, size);
+            hits.Add(new KeyValuePair<RectangleF, int>(new RectangleF(cx - cell / 2, cy, cell, icon + labelH), i));
+            using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.004f, r.Width, r.Height), size * 0.24f)) using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPath(b, shadow);
+            Color c = it.On ? AppColors[i] : Mix(AppColors[i], Color.Gray, 0.7f);
+            Card(g, r, size * 0.24f, Mix(c, Color.White, 0.14f), Mix(c, Color.Black, 0.1f), Color.Empty, 0);
+            if (sel) using (var ring = Round(new RectangleF(r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6), size * 0.27f)) using (var pen = new Pen(Color.White, Math.Max(2.5f, w * 0.007f))) g.DrawPath(pen, ring);
+            Write(g, AppIcons[i].ToString(), iconFont, it.On ? Color.White : Color.FromArgb(190, 255, 255, 255), r, StringAlignment.Center, StringAlignment.Center, false);
+            var label = new RectangleF(cx - cell / 2, cy + icon + labelH * 0.1f, cell, labelH);
+            float labelW = g.MeasureString(AppNames[i], smallBold).Width + smallBold.Height * 0.5f;
+            using (var path = Round(new RectangleF(cx - labelW / 2, label.Y, labelW, label.Height), label.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillPath(b, path);
+            Write(g, AppNames[i], smallBold, Color.White, label, StringAlignment.Center, StringAlignment.Center, false);
         }
     }
 
-    void Tile(Graphics g, Item it, bool sel, RectangleF r, bool icon, Font hint, Theme th) {
-        float rad = r.Height * 0.14f;
-        var own = it.Theme ?? th;
-        if (sel) { float grow = 2 * selEase; r = new RectangleF(r.X - grow, r.Y - grow, r.Width + 2 * grow, r.Height + 2 * grow); }
-        Box(g, r, rad, own, sel, it.On);
-        var ink = it.On ? Text1 : Text3;
-        float pad = r.Height * 0.2f, tx = r.X + pad;
-        if (sel) Cursor3(g, r.X + pad * 0.42f, r.Y + r.Height / 2, r.Height * 0.09f, own.OnCream);
-        if (icon) {
-            var ib = new RectangleF(r.X + pad * 1.05f, r.Y + r.Height * 0.25f, r.Height * 0.5f, r.Height * 0.5f);
-            var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
-            if (pic != null) { float grow = ib.Height * 0.35f; DrawSprite(g, pic, new RectangleF(ib.X - grow, ib.Y - grow, ib.Width + grow * 2, ib.Height + grow * 2)); }
-            else if (it.Theme != null) Cart(g, ib.X, ib.Y - ib.Height * 0.02f, ib.Height, it.Theme);
-            else {
-                Card(g, ib, ib.Height * 0.2f, it.On ? th.Main : Text3, it.On ? th.Deep : Text3, Line, 1);
-                Write(g, it.Icon.ToString(), iconSmall, it.On ? th.Ink : CreamDim, ib, StringAlignment.Center, StringAlignment.Center, false);
-            }
-            tx = ib.Right + pad * 0.7f;
-        }
-        float tw = r.Right - tx - pad * 0.6f, ty = r.Y + r.Height * 0.16f;
-        if (it.Hint == "") {
-            Write(g, it.Text, itemBold, ink, new RectangleF(tx, r.Y, tw, r.Height), StringAlignment.Near, StringAlignment.Center, true);
-            return;
-        }
-        Write(g, it.Text, itemBold, ink, new RectangleF(tx, ty, tw, itemBold.Height * 1.15f), StringAlignment.Near, StringAlignment.Near, false);
-        Write(g, it.Hint, hint, it.On ? Text2 : Text3, HintArea(r, icon), StringAlignment.Near, StringAlignment.Near, true);
-    }
-    RectangleF HintArea(RectangleF r, bool icon) {
-        float pad = r.Height * 0.2f, tx = icon ? r.X + pad * 1.05f + r.Height * 0.5f + pad * 0.7f : r.X + pad;
-        float hy = r.Y + r.Height * 0.16f + itemBold.Height * 1.15f;
-        return new RectangleF(tx, hy, r.Right - tx - pad * 0.6f, r.Bottom - hy - pad * 0.3f);
-    }
-    Font PageHintFont(Graphics g, Page p, int from, RectangleF tile, bool icon) {
-        var area = HintArea(tile, icon).Size;
-        Font f = smallFont;
-        for (int i = from; i < p.Items.Count; i++) {
-            var x = FitFont(g, p.Items[i].Hint, area, smallFont, 0.7f, true);
-            if (x.Size < f.Size) f = x;
-        }
-        return f;
-    }
     readonly Dictionary<string, Font> fitFonts = new Dictionary<string, Font>();
     Font FitFont(Graphics g, string s, SizeF area, Font max, float minScale, bool wrap) {
         if (string.IsNullOrEmpty(s)) return max;
@@ -3721,15 +3897,29 @@ class LauncherForm : Form {
         }
         return f;
     }
-
+    // A white grouped panel, as phone settings use.
+    static void Group(Graphics g, RectangleF r, float rad) {
+        using (var path = Round(r, rad)) using (var b = new SolidBrush(PhoneRow)) g.FillPath(b, path);
+    }
     void RenderPage(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
-        Write(g, p.Title, titleFont, Cream, new RectangleF(m, top, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        float y = top + titleFont.Height * 1.5f;
+        var accent = Accent(th);
+        // Back, like a phone's: it does what B does.
+        var back = new RectangleF(m * 0.6f, top - h * 0.004f, w * 0.3f, smallBold.Height * 2f);
+        promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(back.X + screenX, back.Y + screenY, back.Width, back.Height), "B"));
+        float ch = back.Height * 0.2f, cmid = back.Y + back.Height / 2, cx0 = back.X + m * 0.4f;
+        using (var pen = new Pen(accent, Math.Max(2f, h * 0.0035f))) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; g.DrawLines(pen, new[] { new PointF(cx0 + ch * 0.8f, cmid - ch), new PointF(cx0, cmid), new PointF(cx0 + ch * 0.8f, cmid + ch) }); }
+        Write(g, "Back", itemFont, accent, new RectangleF(cx0 + ch * 1.4f, back.Y, back.Width, back.Height), StringAlignment.Near, StringAlignment.Center, false);
+        float y = back.Bottom;
+        var titleArea = new SizeF(w - 2 * m, titleFont.Height * 1.3f);
+        var tf = FitFont(g, p.Title, titleArea, titleFont, 0.6f, false);
+        Write(g, p.Title, tf, PhoneText, new RectangleF(m, y, titleArea.Width, titleArea.Height), StringAlignment.Near, StringAlignment.Center, false);
+        y += titleArea.Height + h * 0.012f;
+        float rad = w * 0.04f;
         if (p.Body != null) {
-            float bodyH = p.Items.Count > 0 ? (bottom - y) * 0.55f : bottom - y - h * 0.01f;
+            float bodyH = p.Items.Count > 0 ? (bottom - y) * 0.6f : bottom - y;
             var br = new RectangleF(m, y, w - 2 * m, bodyH);
-            Box(g, br, h * 0.018f, th, false, true);
-            float pad = h * 0.032f, bodyText = br.Height - 2 * pad;
+            Group(g, br, rad);
+            float pad = h * 0.024f, bodyText = br.Height - 2 * pad;
             if (p.Mono != null) bodyText = Math.Min(bodyText, g.MeasureString(p.Body, bodyFont, (int)(br.Width - 2 * pad)).Height + smallFont.Height * 0.5f);
             // A body too long for its box scrolls, on a page with nothing else to move through.
             float whole = p.Items.Count == 0 && p.Mono == null ? g.MeasureString(p.Body, bodyFont, (int)(br.Width - 2 * pad)).Height + bodyFont.Height : 0;
@@ -3737,112 +3927,111 @@ class LauncherForm : Form {
                 p.BodyScroll = Math.Max(0, Math.Min(p.BodyScroll, whole - bodyText));
                 var st = g.Save();
                 g.SetClip(new RectangleF(br.X, br.Y + pad, br.Width, bodyText), System.Drawing.Drawing2D.CombineMode.Intersect);
-                Write(g, p.Body, bodyFont, Text1, new RectangleF(br.X + pad, br.Y + pad - p.BodyScroll, br.Width - 2 * pad, whole), StringAlignment.Near, StringAlignment.Near, true);
+                Write(g, p.Body, bodyFont, PhoneText, new RectangleF(br.X + pad, br.Y + pad - p.BodyScroll, br.Width - 2 * pad, whole), StringAlignment.Near, StringAlignment.Near, true);
                 g.Restore(st);
-                if (p.BodyScroll < whole - bodyText) Write(g, "\u25BC", smallFont, Text2, new RectangleF(br.X, br.Bottom - pad, br.Width - pad * 0.6f, pad * 0.8f), StringAlignment.Far, StringAlignment.Center, false);
-                if (p.BodyScroll > 0) Write(g, "\u25B2", smallFont, Text2, new RectangleF(br.X, br.Y + pad * 0.2f, br.Width - pad * 0.6f, pad * 0.8f), StringAlignment.Far, StringAlignment.Center, false);
+                float maxScroll = whole - bodyText, barW = Math.Max(3f, w * 0.008f), barH = bodyText * bodyText / whole;
+                using (var path = Round(new RectangleF(br.Right - barW * 2, br.Y + pad + (bodyText - barH) * p.BodyScroll / maxScroll, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
             }
-            else Write(g, p.Body, bodyFont, Text1, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
+            else Write(g, p.Body, bodyFont, PhoneText, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
             if (p.Mono != null) {
                 var eb = new RectangleF(br.X + pad, br.Y + pad + bodyText, br.Width - 2 * pad, br.Height - 2 * pad - bodyText);
-                Card(g, eb, h * 0.01f, Color.FromArgb(40, 20, 22), Color.FromArgb(26, 14, 16), Color.FromArgb(120, 228, 76, 70), 1);
-                Write(g, p.Mono, monoFont, Color.FromArgb(236, 226, 226), new RectangleF(eb.X + pad * 0.5f, eb.Y + pad * 0.5f, eb.Width - pad, eb.Height - pad), StringAlignment.Near, StringAlignment.Near, true);
+                Card(g, eb, h * 0.012f, Color.FromArgb(28, 28, 30), Color.FromArgb(28, 28, 30), Color.Empty, 0);
+                Write(g, p.Mono, monoFont, Color.FromArgb(235, 235, 240), new RectangleF(eb.X + pad * 0.5f, eb.Y + pad * 0.5f, eb.Width - pad, eb.Height - pad), StringAlignment.Near, StringAlignment.Near, true);
             }
-            y = br.Bottom + h * 0.025f;
+            y = br.Bottom + h * 0.016f;
         }
         if (p.Items.Count == 0) return;
+        // Below the list, a note about what's selected.
+        float footH = 0;
+        var chosen = p.Items[Math.Min(p.Sel, p.Items.Count - 1)];
+        string note = p.Body != null ? "" : chosen.Info != "" ? chosen.Info : chosen.Hint;
+        float width = w - 2 * m, noteX = m + w * 0.02f, noteW = width - w * 0.04f;
         if (p.Body == null) {
-            const int cols = 2;
-            float tgap = w * 0.022f, tw = (w - 2 * m - tgap * (cols - 1)) / cols, tileH = h * 0.1f;
-            float detailH = (bottom - y) * 0.46f;
-            RenderDetail(g, p.Items[p.Sel], new RectangleF(m, y, w - 2 * m, detailH), h, t, th);
-            y += detailH + tgap;
-            int rows = (p.Items.Count + cols - 1) / cols;
-            int fitRows = Math.Max(1, (int)((bottom - y + tgap) / (tileH + tgap)));
-            // The view moves only when the selection would leave it, and glides there.
-            int selRow = p.Sel / cols;
-            if (selRow < p.TopRow) p.TopRow = selRow;
-            else if (selRow >= p.TopRow + fitRows) p.TopRow = selRow - fitRows + 1;
-            p.TopRow = Math.Max(0, Math.Min(p.TopRow, rows - fitRows));
-            if (p.ScrollRow < 0) p.ScrollRow = p.TopRow;
-            p.ScrollRow += (p.TopRow - p.ScrollRow) * 0.3f;
-            if (Math.Abs(p.TopRow - p.ScrollRow) < 0.01f) p.ScrollRow = p.TopRow;
-            scrolling = p.ScrollRow != p.TopRow;
-            float rowH = tileH + tgap;
-            // Tiles are cut off at the edges, so a part-hidden row shows there's more to see.
-            var area = new RectangleF(m - 4, y - 4, w - 2 * m + 8, bottom - y + 4);
+            if (note != "") footH += g.MeasureString(note, smallFont, (int)noteW).Height + h * 0.006f;
+            foreach (var rec in chosen.Records) footH += g.MeasureString(rec.Replace(": ", ":  "), smallFont, (int)noteW).Height + h * 0.002f;
+            footH = Math.Min(footH + h * 0.012f, (bottom - y) * 0.34f);
+        }
+        float listBottom = bottom - footH, rowH = h * 0.082f;
+        int fit = Math.Max(1, (int)((listBottom - y) / rowH));
+        // The list moves only when the selection would leave it, and glides there.
+        if (p.Sel < p.TopRow) p.TopRow = p.Sel;
+        else if (p.Sel >= p.TopRow + fit) p.TopRow = p.Sel - fit + 1;
+        p.TopRow = Math.Max(0, Math.Min(p.TopRow, p.Items.Count - fit));
+        if (p.ScrollRow < 0) p.ScrollRow = p.TopRow;
+        p.ScrollRow += (p.TopRow - p.ScrollRow) * 0.3f;
+        if (Math.Abs(p.TopRow - p.ScrollRow) < 0.01f) p.ScrollRow = p.TopRow;
+        scrolling = p.ScrollRow != p.TopRow;
+        // A list that doesn't all fit runs to its edge and is cut off there, which shows there's more.
+        bool overflow = p.Items.Count > fit;
+        float groupH = overflow ? listBottom - y : p.Items.Count * rowH;
+        var group = new RectangleF(m, y, width, groupH);
+        Group(g, group, rad);
+        using (var clip = Round(group, rad)) {
             var kept = g.Save();
-            g.SetClip(area, System.Drawing.Drawing2D.CombineMode.Intersect);
+            g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
             for (int i = 0; i < p.Items.Count; i++) {
-                var r = new RectangleF(m + (i % cols) * (tw + tgap), y + (i / cols - p.ScrollRow) * rowH, tw, tileH);
-                if (!r.IntersectsWith(area)) continue;
-                var shown = new Item(p.Items[i].Text.Replace("Pokemon ", ""), p.Items[i].TileHint, p.Items[i].On, null) { Icon = p.Items[i].Icon, Theme = p.Items[i].Theme, Sprite = p.Items[i].Sprite };
-                Tile(g, shown, i == p.Sel, r, true, smallFont, th);
-                hits.Add(new KeyValuePair<RectangleF, int>(RectangleF.Intersect(r, area), i));
+                var r = new RectangleF(m, y + (i - p.ScrollRow) * rowH, width, rowH);
+                if (!r.IntersectsWith(group)) continue;
+                ListRow(g, p.Items[i], i == p.Sel, r, i < p.Items.Count - 1, h, accent, th);
+                hits.Add(new KeyValuePair<RectangleF, int>(RectangleF.Intersect(r, group), i));
             }
             g.Restore(kept);
-            if (rows > fitRows) {
-                float barW = Math.Max(3f, w * 0.008f), barX = w - m + (w * 0.012f), barH = bottom - y;
-                float thumbH = barH * fitRows / rows, thumbY = y + (barH - thumbH) * p.ScrollRow / (rows - fitRows);
-                using (var track = new SolidBrush(Fade(Cream, 45))) using (var path = Round(new RectangleF(barX, y, barW, barH), barW / 2)) g.FillPath(track, path);
-                using (var thumb = new SolidBrush(Cream)) using (var path = Round(new RectangleF(barX, thumbY, barW, thumbH), barW / 2)) g.FillPath(thumb, path);
-            }
-            if (rows > fitRows)
-                Write(g, (p.Sel + 1) + " / " + p.Items.Count, smallFont, FootInk, new RectangleF(m, top, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Far, StringAlignment.Center, false);
-            return;
         }
-        float ch = h * 0.095f, gap = h * 0.014f;
-        int fit = Math.Max(1, (int)((bottom - y + gap) / (ch + gap)));
-        int first = Math.Max(0, Math.Min(p.Sel - fit / 2, p.Items.Count - fit));
-        var hint = PageHintFont(g, p, 0, new RectangleF(0, 0, w - 2 * m, ch), false);
-        for (int i = first; i < p.Items.Count && i < first + fit; i++) {
-            var r = new RectangleF(m, y, w - 2 * m, ch);
-            Tile(g, p.Items[i], i == p.Sel, r, false, hint, th);
-            hits.Add(new KeyValuePair<RectangleF, int>(r, i));
-            y += ch + gap;
+        if (overflow) {
+            float barW = Math.Max(3f, w * 0.008f), barH = group.Height * fit / p.Items.Count;
+            float barY = group.Y + (group.Height - barH) * p.ScrollRow / (p.Items.Count - fit);
+            using (var path = Round(new RectangleF(group.Right - barW * 1.6f, barY, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
+        }
+        if (p.Body != null) return;
+        float fy = listBottom + h * 0.01f;
+        if (note != "") {
+            float nh = Math.Min(g.MeasureString(note, smallFont, (int)noteW).Height + 2, bottom - fy);
+            Write(g, note, smallFont, PhoneSub, new RectangleF(noteX, fy, noteW, nh), StringAlignment.Near, StringAlignment.Near, true);
+            fy += nh + h * 0.006f;
+        }
+        foreach (var rec in chosen.Records) {
+            float rh = g.MeasureString(rec.Replace(": ", ":  "), smallFont, (int)noteW).Height;
+            if (fy + rh > bottom) break;
+            Write(g, rec.Replace(": ", ":  "), smallFont, PhoneSub, new RectangleF(noteX, fy, noteW, rh + 1), StringAlignment.Near, StringAlignment.Near, true);
+            fy += rh + h * 0.002f;
         }
     }
-
-    // The detail panel: a banner in the highlighted version's colour over a dialog box.
-    void RenderDetail(Graphics g, Item it, RectangleF r, int h, float t, Theme th) {
-        float rad = h * 0.022f, pad = h * 0.04f;
-        Box(g, r, rad, th, false, true);
-        float bannerH = titleFont.Height * 2.3f;
-        var banner = new RectangleF(r.X + 4, r.Y + 4, r.Width - 8, bannerH);
-        VersionFill(g, banner, rad * 0.75f, th, t);
-        using (var path = Round(banner, rad * 0.75f)) using (var pen = new Pen(Line, 2)) g.DrawPath(pen, path);
-        float x = r.X + pad, cw = r.Width - 2 * pad;
-        Write(g, it.Text, titleFont, th.Ink, new RectangleF(x, banner.Y, cw, bannerH), StringAlignment.Near, StringAlignment.Center, false);
-        var big = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
-        if (big != null) { float bs = bannerH * 1.3f; DrawSprite(g, big, new RectangleF(banner.Right - bs - pad * 0.3f, banner.Y + (bannerH - bs) / 2, bs, bs)); }
-        float y = banner.Bottom + h * 0.024f;
-        string pill = it.On ? "READY" : "NOT AVAILABLE";
-        var ps = g.MeasureString(pill, smallBold);
-        var pr = new RectangleF(x, y, ps.Width + smallBold.Height * 0.9f, smallBold.Height * 1.4f);
-        Color pc = it.On ? Color.FromArgb(46, 140, 58) : Color.FromArgb(196, 52, 46);
-        Card(g, pr, pr.Height / 2, Fade(pc, 40), Fade(pc, 40), pc, 1);
-        Write(g, pill, smallBold, pc, pr, StringAlignment.Center, StringAlignment.Center, false);
-        y += pr.Height + h * 0.024f;
-        string info = it.Info != "" ? it.Info : it.Hint;
-        if (info != "") {
-            float ih = Math.Min(g.MeasureString(info, bodyFont, (int)cw).Height + 2, r.Bottom - pad - y);
-            Write(g, info, bodyFont, Text1, new RectangleF(x, y, cw, ih), StringAlignment.Near, StringAlignment.Near, true);
-            y += ih + h * 0.024f;
+    static readonly Color[] RowColors = { Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(46, 164, 79), Color.FromArgb(40, 124, 232), Color.FromArgb(124, 84, 214), Color.FromArgb(24, 164, 150), Color.FromArgb(226, 72, 140), Color.FromArgb(92, 104, 124) };
+    void ListRow(Graphics g, Item it, bool sel, RectangleF r, bool line, int h, Color accent, Theme th) {
+        if (sel) using (var b = new SolidBrush(Fade(accent, 38))) g.FillRectangle(b, r);
+        float icon = r.Height * 0.62f, pad = r.Height * 0.2f, ix = r.X + pad, iy = r.Y + (r.Height - icon) / 2;
+        var ib = new RectangleF(ix, iy, icon, icon);
+        var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
+        if (pic != null) DrawSprite(g, pic, new RectangleF(ib.X - icon * 0.15f, ib.Y - icon * 0.15f, icon * 1.3f, icon * 1.3f));
+        else if (it.Theme != null) Cart(g, ib.X + icon * 0.1f, ib.Y, icon, it.Theme);
+        else {
+            Color tint = it.On ? RowColors[it.Icon % RowColors.Length] : Text3;
+            Card(g, ib, icon * 0.24f, Mix(tint, Color.White, 0.12f), tint, Color.Empty, 0);
+            Write(g, it.Icon.ToString(), iconSmall, Color.White, ib, StringAlignment.Center, StringAlignment.Center, false);
         }
-        float nameW = cw * 0.3f, dx = x + nameW + pad * 0.5f, dw = x + cw - dx, rowGap = h * 0.008f;
-        using (var line = new Pen(Fade(Line, 70), 1)) {
-            foreach (var rec in it.Records) {
-                int cut = rec.IndexOf(": ");
-                string a = cut > 0 ? rec.Substring(0, cut) : rec, b = cut > 0 ? rec.Substring(cut + 2) : "";
-                float rh = Math.Max(g.MeasureString(a, smallBold, (int)nameW).Height, g.MeasureString(b, smallFont, (int)dw).Height);
-                if (y + rh + rowGap > r.Bottom - pad) return;
-                g.DrawLine(line, x, y, x + cw, y);
-                y += rowGap;
-                Write(g, a, smallBold, Text1, new RectangleF(x, y, nameW, rh), StringAlignment.Near, StringAlignment.Near, true);
-                Write(g, b, smallFont, Text2, new RectangleF(dx, y, dw, rh), StringAlignment.Near, StringAlignment.Near, true);
-                y += rh + rowGap;
-            }
+        float tx = ib.Right + pad, right = r.Right - pad;
+        string title = it.Text.Replace("Pokemon ", ""), value = null;
+        int colon = title.IndexOf(": ");
+        if (colon > 0) { value = title.Substring(colon + 2); title = title.Substring(0, colon); }
+        Color ink = it.On ? PhoneText : Text3;
+        if (value == null && it.On) {
+            float c = r.Height * 0.1f, cy = r.Y + r.Height / 2, cx = right - c * 0.3f;
+            using (var pen = new Pen(Color.FromArgb(190, 190, 196), Math.Max(2f, h * 0.0032f))) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; g.DrawLines(pen, new[] { new PointF(cx - c * 0.7f, cy - c), new PointF(cx, cy), new PointF(cx - c * 0.7f, cy + c) }); }
+            right -= c * 1.6f;
         }
+        float valueW = 0;
+        if (value != null) {
+            valueW = Math.Min(g.MeasureString(value, itemFont).Width + 4, (right - tx) * 0.55f);
+            Write(g, value, itemFont, sel ? accent : PhoneSub, new RectangleF(right - valueW, r.Y, valueW, r.Height), StringAlignment.Far, StringAlignment.Center, false);
+        }
+        float tw = right - tx - valueW;
+        string sub = it.TileHint != "" ? it.TileHint : (!it.On ? it.Hint : "");
+        if (sub != "") {
+            float th1 = itemFont.Height * 1.2f, th2 = smallFont.Height * 1.25f, ty = r.Y + (r.Height - th1 - th2) / 2;
+            Write(g, title, itemFont, ink, new RectangleF(tx, ty, tw, th1), StringAlignment.Near, StringAlignment.Center, false);
+            Write(g, sub, smallFont, PhoneSub, new RectangleF(tx, ty + th1, tw, th2), StringAlignment.Near, StringAlignment.Center, false);
+        } else Write(g, title, itemFont, ink, new RectangleF(tx, r.Y, tw, r.Height), StringAlignment.Near, StringAlignment.Center, false);
+        if (line) using (var pen = new Pen(PhoneLine, 1)) g.DrawLine(pen, tx, r.Bottom - 1, r.Right, r.Bottom - 1);
     }
 
     // The start splash: the device powering on, its lens above the wordmark, every version's cartridge rolling by.
@@ -3850,29 +4039,28 @@ class LauncherForm : Form {
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
         float t = (float)clock.Elapsed.TotalSeconds, since = (float)(DateTime.Now - startSince).TotalSeconds;
-        Floor(g, w, h, Theme.Default);
         var all = new RectangleF(0, 0, w, h);
-        float cx = w / 2f, cy = h * 0.46f;
-        float rise = (1 - Ease(since / 0.6f)) * h * 0.02f;
-        Lens(g, cx, cy - h * 0.25f + rise, h * 0.055f, t, false);
-        var a1 = g.MeasureString("NATIVE", splashMark); var a2 = g.MeasureString("MONS", splashLight);
-        float markW = a1.Width * 0.94f + a2.Width, mx = cx - markW / 2, my = cy - a1.Height * 0.95f + rise;
-        Write(g, "NATIVE", splashMark, Cream, new RectangleF(mx, my, a1.Width + 8, a1.Height), StringAlignment.Near, StringAlignment.Near, false);
-        Write(g, "MONS", splashLight, CreamDim, new RectangleF(mx + a1.Width * 0.94f, my, a2.Width + 8, a1.Height), StringAlignment.Near, StringAlignment.Near, false);
-        float trackW = markW * 1.2f, cartLen = trackW * 0.09f;
-        var track = new RectangleF(cx - trackW / 2, cy + h * 0.095f + rise, trackW, Math.Max(3f, h * 0.005f));
-        Card(g, track, track.Height / 2, Line, Line, Color.Empty, 0);
-        var row = Theme.Parade;
-        var clip = g.Save(); g.SetClip(new RectangleF(track.X, 0, track.Width, h));
-        float gapX = cartLen * 1.25f, span = gapX * row.Length, shift = (t * cartLen * 0.9f) % span;
-        for (int i = 0; i < row.Length; i++) {
-            float x = track.X + ((i * gapX + shift) % span) - cartLen;
-            if (x < track.Right) Cart(g, x, track.Y - cartLen * 0.97f, cartLen, row[i]);
+        using (var b = new SolidBrush(Color.Black)) g.FillRectangle(b, all);
+        // A phone starting up: black glass, the mark, and one quiet line of progress.
+        float cx = w / 2f, cy = h * 0.42f, rise = (1 - Ease(since / 0.6f)) * h * 0.012f;
+        Lens(g, cx, cy - h * 0.1f + rise, h * 0.052f, t, false);
+        float size = h * 0.062f;
+        using (var bold = new Font("Segoe UI Semibold", size, GraphicsUnit.Pixel)) using (var light = new Font("Segoe UI Light", size, GraphicsUnit.Pixel)) {
+            var a1 = g.MeasureString("Native", bold); var a2 = g.MeasureString("Mons", light);
+            float nudge = size * 0.28f, markW = a1.Width + a2.Width - nudge, mx = cx - markW / 2, my = cy + rise;
+            Write(g, "Native", bold, Color.White, new RectangleF(mx, my, a1.Width + 8, a1.Height), StringAlignment.Near, StringAlignment.Near, false);
+            Write(g, "Mons", light, Color.FromArgb(200, 255, 255, 255), new RectangleF(mx + a1.Width - nudge, my, a2.Width + 8, a2.Height), StringAlignment.Near, StringAlignment.Near, false);
         }
+        var track = new RectangleF(w * 0.32f, cy + h * 0.115f, w * 0.36f, Math.Max(3f, h * 0.0048f));
+        using (var path = Round(track, track.Height / 2)) using (var b = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) g.FillPath(b, path);
+        float run = track.Width * 0.3f, at = (t * 0.55f % 1f) * (track.Width + run) - run;
+        var clip = g.Save();
+        using (var path = Round(track, track.Height / 2)) g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+        using (var b = new SolidBrush(Color.White)) g.FillRectangle(b, track.X + at, track.Y, run, track.Height);
         g.Restore(clip);
-        Write(g, startStage ?? "", itemFont, FootInk, new RectangleF(0, track.Bottom + h * 0.04f, w, itemFont.Height * 1.4f), StringAlignment.Center, StringAlignment.Near, false);
+        Write(g, startStage ?? "", smallFont, Color.FromArgb(170, 255, 255, 255), new RectangleF(0, track.Bottom + h * 0.018f, w, smallFont.Height * 1.4f), StringAlignment.Center, StringAlignment.Near, false);
         // Gen1Recomp's LICENSE.MD, term 1: its credit must show visibly in any launcher. Here on every start, and on the Credits page.
-        Write(g, Gen1Credit, smallFont, FootInk, new RectangleF(w * 0.05f, h - smallFont.Height * 5.4f, w * 0.9f, smallFont.Height * 4.8f), StringAlignment.Center, StringAlignment.Near, true);
+        Write(g, Gen1Credit, smallFont, Color.FromArgb(150, 255, 255, 255), new RectangleF(w * 0.07f, h - smallFont.Height * 5.6f, w * 0.86f, smallFont.Height * 5f), StringAlignment.Center, StringAlignment.Near, true);
         float fade = Ease(since / 0.45f);
         if (fade < 1) using (var veil = new SolidBrush(Color.FromArgb((int)(255 * (1 - fade)), 8, 10, 14))) g.FillRectangle(veil, all);
     }
@@ -3890,35 +4078,36 @@ class LauncherForm : Form {
     }
 
     void RenderJob(Graphics g, int w, int h, float m, float top, float bottom, float t, Theme th) {
-        var card = new RectangleF(m, top, w - 2 * m, bottom - top);
-        Box(g, card, h * 0.024f, th, false, true);
-        float pad = card.Height * 0.07f;
-        Write(g, jobIsGame ? "STARTING" : "WORKING", smallBold, th.OnCream, new RectangleF(card.X + pad, card.Y + pad, card.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
-        var el = DateTime.Now - jobStart;
-        Write(g, ((int)el.TotalMinutes) + ":" + el.Seconds.ToString("00"), smallBold, Text2, new RectangleF(card.X + pad, card.Y + pad, card.Width - 2 * pad, smallFont.Height * 1.2f), StringAlignment.Far, StringAlignment.Near, false);
-        Write(g, jobTitle, heroFont, Text1, new RectangleF(card.X + pad, card.Y + pad + smallFont.Height * 1.3f, card.Width - 2 * pad, heroFont.Height * 1.25f), StringAlignment.Near, StringAlignment.Near, false);
-        float ty = card.Y + pad + smallFont.Height * 1.4f + heroFont.Height * 1.5f, cartLen = card.Height * 0.1f;
-        var track = new RectangleF(card.X + pad, ty + cartLen, card.Width - 2 * pad, h * 0.012f);
-        Card(g, track, track.Height / 2, Line, Line, Color.Empty, 0);
+        var accent = Accent(th);
+        float y = top + h * 0.1f, cartLen = w * 0.22f;
+        // The game's cartridge going in, or a tool at work.
+        Cart(g, (w - cartLen) / 2, y, cartLen, th);
+        y += cartLen * 1.12f;
+        var ta = new SizeF(w - 2 * m, titleFont.Height * 1.3f);
+        var tf = FitFont(g, jobTitle, ta, titleFont, 0.6f, false);
+        Write(g, jobTitle, tf, PhoneText, new RectangleF(m, y, ta.Width, ta.Height), StringAlignment.Center, StringAlignment.Center, false);
+        y += ta.Height + h * 0.018f;
+        var track = new RectangleF(w * 0.2f, y, w * 0.6f, Math.Max(4f, h * 0.007f));
+        Card(g, track, track.Height / 2, PhoneLine, PhoneLine, Color.Empty, 0);
         if (progress >= 0) {
-            var fill = new RectangleF(track.X, track.Y, Math.Max(track.Height, track.Width * Math.Min(1f, progress)), track.Height);
-            VersionFill(g, fill, track.Height / 2, th, t);
-            Cart(g, fill.Right - cartLen * 0.5f, track.Y - cartLen * 0.97f, cartLen, th);
+            Card(g, new RectangleF(track.X, track.Y, Math.Max(track.Height, track.Width * Math.Min(1f, progress)), track.Height), track.Height / 2, accent, accent, Color.Empty, 0);
         } else {
-            var clip = g.Save(); g.SetClip(card);
-            Cart(g, Rolling(track, cartLen, t), track.Y - cartLen * 0.97f, cartLen, th);
+            float run = track.Width * 0.3f, at = (t * 0.6f % 1f) * (track.Width + run) - run;
+            var clip = g.Save();
+            using (var path = Round(track, track.Height / 2)) g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            Card(g, new RectangleF(track.X + at, track.Y, run, track.Height), track.Height / 2, accent, accent, Color.Empty, 0);
             g.Restore(clip);
         }
-        float ly = track.Bottom + h * 0.03f;
+        y = track.Bottom + h * 0.018f;
+        var el = DateTime.Now - jobStart;
         var lines = new List<string>();
         for (int i = log.Count - 1; i >= 0 && lines.Count < 9; i--) lines.Add(log[i]);
-        Write(g, lines.Count > 0 ? lines[0] : "One moment...", itemFont, Text1, new RectangleF(card.X + pad, ly, card.Width - 2 * pad, itemFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-        ly += itemFont.Height * 1.6f;
-        var logBox = new RectangleF(card.X + pad, ly, card.Width - 2 * pad, card.Bottom - pad - ly);
-        Card(g, logBox, h * 0.012f, Color.FromArgb(232, 226, 206), Color.FromArgb(226, 220, 200), Fade(Line, 90), 1);
-        float lh = smallFont.Height * 1.15f, lp = h * 0.015f, yy = logBox.Bottom - lp - lh;
-        for (int i = 1; i < lines.Count && yy >= logBox.Y + lp; i++) {
-            Write(g, lines[i], smallFont, Text2, new RectangleF(logBox.X + lp, yy, logBox.Width - 2 * lp, lh), StringAlignment.Near, StringAlignment.Near, false);
+        Write(g, (lines.Count > 0 ? lines[0] : (jobIsGame ? "Starting" : "One moment")), smallFont, PhoneSub, new RectangleF(m, y, w - 2 * m, smallFont.Height * 1.3f), StringAlignment.Center, StringAlignment.Center, false);
+        y += smallFont.Height * 1.4f;
+        Write(g, ((int)el.TotalMinutes) + ":" + el.Seconds.ToString("00"), smallFont, PhoneSub, new RectangleF(m, y, w - 2 * m, smallFont.Height * 1.3f), StringAlignment.Center, StringAlignment.Center, false);
+        float lh = smallFont.Height * 1.2f, yy = bottom - lh * 1.5f, floorY = y + lh * 2;
+        for (int i = 1; i < lines.Count && yy >= floorY; i++) {
+            Write(g, lines[i], smallFont, Fade(PhoneSub, 170), new RectangleF(m, yy, w - 2 * m, lh), StringAlignment.Center, StringAlignment.Center, false);
             yy -= lh;
         }
     }
@@ -3959,6 +4148,7 @@ static class NativeMonsLauncher {
             else if (verb == "adopt") outcome = LauncherForm.AdoptSlot(saved, arg, argv.Length > 5 ? argv[5] : null);
             else if (verb == "recover") LauncherForm.RecoverSwitches();
             else if (verb == "art") outcome = GameArt.Capture(saved);
+            else if (verb == "town") outcome = GameArt.CaptureTown(saved);
             else if (verb == "port-in") LauncherForm.PreparePort(saved);
             else if (verb == "port-out") outcome = LauncherForm.SaveFromPort(saved);
             else if (verb == "caught") { var c = LauncherForm.CaughtInAllSaves(saved); outcome = null; File.WriteAllText(argv[2] + ".caught", c == null ? "none" : string.Join(",", c.OrderBy(x => x))); }
