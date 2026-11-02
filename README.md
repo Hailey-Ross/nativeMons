@@ -101,6 +101,8 @@ Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotG
 
 Each engine has its own page of options, stored where its menus keep them, so changes show up on both sides.
 
+**Updates** checks this project's releases when the launcher starts, and shows on that row when a new build is ready. Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data and settings stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
+
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
 ## nativeplat
