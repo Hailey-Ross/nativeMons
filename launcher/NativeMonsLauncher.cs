@@ -118,6 +118,17 @@ class GameEntry {
     public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port, Nativeplat, TownCore;
     public int ArtFrame, TownFrame;   // when this game's title screen is up, in frames from power-on
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
+    public List<RomFile> Roms = new List<RomFile>();   // every different dump of this game that was found
+    public RomFile Chosen;
+    public bool CanVerify { get { return Gen1 != null || Nativeplat != null; } }
+    // Two dumps can share a revision, such as a clean one and a hack. They must not read the same.
+    public bool IsModified(RomFile r) { return !r.Verified && Roms.Any(x => x != r && x.Verified && x.Revision == r.Revision); }
+    public string LabelOf(RomFile r) {
+        if (r == null) return "";
+        if (IsModified(r)) return "Romhack or modified";
+        if (!Roms.Any(x => x != r && x.Revision == r.Revision && !IsModified(x))) return r.Label;
+        return r.Label + " (" + r.Sha1.Substring(0, 6) + ")";
+    }
     public bool Imported;
     public bool OnGen1 { get { return Gen1 != null && (Imported || Gen1Rom != null); } }
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
@@ -133,6 +144,8 @@ class GameEntry {
         if (OnGen1) l.Add("gen1");
         if (OnPort) l.Add("port");
         if (OnNativeplat) l.Add("nativeplat");
+        // A romhack only runs on Fulldex: the other engines only take clean copies.
+        if (Chosen != null && IsModified(Chosen) && l.Contains("fulldex")) return new List<string> { "fulldex" };
         return l;
     }
     public string Engine() {
@@ -143,6 +156,13 @@ class GameEntry {
     }
     public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : "Gen1Recomp (native, with mods)"; }
     public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : "Gen1Recomp"; }
+}
+
+// One dump of a game. Two files with the same contents are one dump.
+class RomFile {
+    public string File, Sha1; public int Revision; public DateTime Added; public bool Gen1Ok, NativeplatOk, Encrypted, EngineCopy;
+    public bool Verified { get { return Gen1Ok || NativeplatOk; } }
+    public string Label { get { return "Rev " + Revision; } }
 }
 
 // Unpacks a DS ROM the way the Platinum PC port does on first launch, so its file picker never shows.
@@ -319,7 +339,7 @@ static class GameArt {
         psi.EnvironmentVariables["NP_AUTOTEST"] = spec;
         if (lab != null) { psi.EnvironmentVariables["PC_LAB"] = lab; psi.EnvironmentVariables["PC_LAB_AT"] = "300"; }
         if (warp != null) psi.EnvironmentVariables["PC_WARP"] = warp;
-        using (var p = Process.Start(psi)) {
+        using (var p = Process.Start(psi)) { Watch(p);
             try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
             p.BeginOutputReadLine(); p.BeginErrorReadLine();
             if (!p.WaitForExit(600000)) { try { p.Kill(); } catch { } return -1; }
@@ -339,7 +359,7 @@ static class GameArt {
             string dir = Config.FulldexDir;
             string args = "\"" + g.FulldexRom + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --input \"" + script + "\" --shot-dir \"" + temp + "\" --shot-at " + g.TownFrame + " --frames " + (g.TownFrame + 10) + " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            using (var p = Process.Start(psi)) {
+            using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -566,7 +586,7 @@ static class GameArt {
             psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TitleArt.lua";
             psi.EnvironmentVariables["NATIVEMONS_TITLE_ART"] = temp.Replace('\\', '/');
-            using (var p = Process.Start(psi)) {
+            using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -605,7 +625,7 @@ static class GameArt {
             psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
             psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
             psi.EnvironmentVariables["NP_AUTOTEST"] = "frames=" + (1500 + Count * Step) + ",shots=" + Step + ",size=512x384,layout=top,game=" + g.Nativeplat + ",png=" + Path.Combine(temp, "s.png") + ",rom=" + LauncherForm.NativeplatRomCopy(g) + ",press=1200:start:10";
-            using (var p = Process.Start(psi)) {
+            using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -649,7 +669,7 @@ static class GameArt {
             string args = "\"" + romFile + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --shot-dir \"" + temp + "\" --shot-at " + string.Join(",", at) + " --frames " + (g.ArtFrame + Count * Step + 10);
             if (g.FulldexCode != "IPGE" && g.FulldexCode != "IPKE") args += " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            using (var p = Process.Start(psi)) {
+            using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -665,7 +685,17 @@ static class GameArt {
         }
     }
     // One game at a time, behind everything else. Anything the player starts simply waits or goes first.
+    public static volatile bool Capturing, Hold;
+    [ThreadStatic] public static bool OnCaptureThread;
+    static volatile Process current;
+    public static void Watch(Process p) { current = p; if (Hold) StopNow(); }
+    // Nothing a capture makes is kept unless it finished, so stopping one costs only a retry at the next start.
+    public static void StopNow() { Hold = true; try { var p = current; if (p != null) p.Kill(); } catch { } }
     public static void CaptureMissing(Func<bool> busy) {
+        Hold = false; Capturing = true; OnCaptureThread = true;
+        try { CaptureAll(() => Hold || busy()); } finally { Capturing = false; }
+    }
+    static void CaptureAll(Func<bool> busy) {
         foreach (var g in Library.Games.Where(x => CanCapture(x) && !Has(x.Id)).ToList()) {
             if (busy()) return;
             Capture(g);
@@ -913,6 +943,7 @@ static class Library {
             if (g != null) g.Imported = f[2] == "yes";
             foreach (var hash in f[3].Split(',')) accepted[hash] = f[0];
         }
+        LoadHashes();
         var folders = Config.RomFolders();
         folders.Add(Path.Combine(Config.FulldexDir ?? Config.Here, "roms"));
         foreach (var folder in folders) {
@@ -923,6 +954,8 @@ static class Library {
                 try { Sort(list, file, ext, accepted); } catch { }
             }
         }
+        SaveHashes();
+        foreach (var g in list) ChooseRom(g);
         Games = list;
     }
     // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
@@ -968,19 +1001,53 @@ static class Library {
         string header = HeaderOf(file, ext);
         var g = list.Find(x => x.Header != null && (ext == ".gb" || ext == ".gbc" ? header.StartsWith(x.Header) && x.Gen1 != null : header == x.Header));
         if (g == null) return;
-        if (g.FulldexCode != null && g.FulldexRom == null) g.FulldexRom = file;
-        // nativeplat only takes the exact dumps it was built against, so a game can have it or not depending on the ROM.
-        if (g.Nativeplat != null && g.NativeplatRom == null) {
-            string[] wanted;
-            if (NativeplatDumps.TryGetValue(g.Nativeplat, out wanted) && wanted.Contains(Sha1Of(file))) g.NativeplatRom = file;
-            else if (g.FulldexCode == null) { g.FoundUnsupported = file; g.FoundSha1 = Sha1Of(file); }
-        }
-        if (g.Gen1 != null) {
-            string v;
-            // A clean dump beats anything else with the same header, such as a ROM hack of that game.
-            if (accepted.TryGetValue(Sha1Of(file), out v) && v == g.Gen1) { g.Gen1Rom = file; if (g.FulldexCode != null) g.FulldexRom = file; }
-            else if (g.Gen1Rom == null) { g.FoundUnsupported = file; g.FoundSha1 = Sha1Of(file); }
-        }
+        string sha = Sha1Cached(file), version;
+        string[] wanted;
+        string engineRoms = Path.Combine(Config.FulldexDir ?? Config.Here, "roms") + Path.DirectorySeparatorChar;
+        var rom = new RomFile { File = file, Sha1 = sha, Revision = RevisionOf(file, ext), Added = File.GetCreationTimeUtc(file), Encrypted = NeedsPatch(file), EngineCopy = file.StartsWith(engineRoms, StringComparison.OrdinalIgnoreCase) };
+        rom.Gen1Ok = g.Gen1 != null && accepted.TryGetValue(sha, out version) && version == g.Gen1;
+        rom.NativeplatOk = g.Nativeplat != null && NativeplatDumps.TryGetValue(g.Nativeplat, out wanted) && wanted.Contains(sha);
+        // The same contents twice is one dump: the player's own file, not a copy kept in an engine's folder.
+        int same = g.Roms.FindIndex(x => x.Sha1 == sha);
+        if (same < 0) g.Roms.Add(rom);
+        else if (g.Roms[same].EngineCopy && !rom.EngineCopy) g.Roms[same] = rom;
+    }
+    // A dump an engine has verified comes first, then what's ready to run, then what the player has had longest, so adding
+    // another version of a game never takes over from the one they've been playing.
+    static IEnumerable<RomFile> Ranked(GameEntry g) {
+        return g.Roms.OrderBy(r => r.EngineCopy ? 1 : 0).ThenBy(r => r.Verified ? 0 : 1).ThenBy(r => r.Encrypted ? 1 : 0).ThenBy(r => r.Added).ThenBy(r => r.File, StringComparer.OrdinalIgnoreCase);
+    }
+    static void ChooseRom(GameEntry g) {
+        if (g.Roms.Count == 0) return;
+        string saved = Config.Read("rom-" + g.Id + ".txt", "").Trim();
+        g.Chosen = g.Roms.Find(r => r.Sha1 == saved) ?? Ranked(g).First();
+        // Kept from the first time there's a choice, so moving or adding files can't change it later.
+        if (g.Roms.Count > 1 && g.Chosen.Sha1 != saved) Config.Write("rom-" + g.Id + ".txt", g.Chosen.Sha1);
+        if (g.FulldexCode != null) g.FulldexRom = g.Chosen.File;
+        // An engine with an exact list uses the chosen dump if it's on the list, or its best one that is.
+        if (g.Gen1 != null) { var r = g.Chosen.Gen1Ok ? g.Chosen : Ranked(g).FirstOrDefault(x => x.Gen1Ok); g.Gen1Rom = r != null ? r.File : null; }
+        if (g.Nativeplat != null) { var r = g.Chosen.NativeplatOk ? g.Chosen : Ranked(g).FirstOrDefault(x => x.NativeplatOk); g.NativeplatRom = r != null ? r.File : null; }
+        bool refused = g.Gen1 != null ? g.Gen1Rom == null : g.Nativeplat != null && g.FulldexCode == null && g.NativeplatRom == null;
+        if (refused) { g.FoundUnsupported = g.Chosen.File; g.FoundSha1 = g.Chosen.Sha1; }
+    }
+    static int RevisionOf(string file, string ext) {
+        int at = ext == ".nds" ? 0x1E : ext == ".gba" ? 0xBC : 0x14C;
+        using (var f = File.OpenRead(file)) { if (f.Length <= at) return 0; f.Seek(at, SeekOrigin.Begin); return f.ReadByte(); }
+    }
+    // Reading every dump at each start would be slow on a large folder, so a hash is kept until the file changes.
+    static readonly Dictionary<string, string> hashes = new Dictionary<string, string>();
+    static string HashFile { get { return Path.Combine(Config.State, "rom-hashes.txt"); } }
+    static void LoadHashes() {
+        try { if (File.Exists(HashFile)) foreach (var l in File.ReadAllLines(HashFile)) { int cut = l.LastIndexOf('|'); if (cut > 0) hashes[l.Substring(0, cut)] = l.Substring(cut + 1); } } catch { }
+    }
+    static void SaveHashes() {
+        try { Directory.CreateDirectory(Config.State); File.WriteAllLines(HashFile, hashes.Select(x => x.Key + "|" + x.Value).ToArray()); } catch { }
+    }
+    public static string Sha1Cached(string file) {
+        var info = new FileInfo(file);
+        string key = file + "|" + info.Length + "|" + info.LastWriteTimeUtc.Ticks, sha;
+        if (hashes.TryGetValue(key, out sha)) return sha;
+        return hashes[key] = Sha1Of(file);
     }
     // Whether an .nds ROM still has its secure area encrypted, which stops it loading without a DS BIOS.
     public static bool NeedsPatch(string file) {
@@ -1488,6 +1555,10 @@ class LauncherForm : Form {
             foreach (var it in sp.Items) Sprites.Get(it.Sprite);
             Sprites.Wait(30);
         }
+        if (screen == "roms" || screen == "gamepage") {
+            var which = Library.Games.Find(g => g.Id == previewId);
+            if (which != null) pages.Push(screen == "roms" ? RomsPage(which) : GamePage(which));
+        }
         if (screen == "dex" || screen == "dexlist" || screen == "dexentry") {
             LoadDex();
             int species; if (!(colon > 0 && int.TryParse(previewId, out species))) species = 25;
@@ -1534,6 +1605,13 @@ class LauncherForm : Form {
             p.Dispose();
         }
         return found;
+    }
+    // A wallpaper capture runs an engine too. Whatever the player starts goes first: it stops after this picture, then that carries on.
+    bool AfterCapture(Action then) {
+        if (!GameArt.Capturing) return false;
+        GameArt.StopNow();
+        Busy("Just a moment", delegate { while (GameArt.Capturing) System.Threading.Thread.Sleep(200); return null; }, delegate(string e) { then(); });
+        return true;
     }
     static string RunningGames() {
         var names = new List<string>();
@@ -1671,6 +1749,7 @@ class LauncherForm : Form {
         });
     }
     void StartUpdate() {
+        if (AfterCapture(StartUpdate)) return;
         string running = RunningGames();
         if (running != "") { ShowText("Close your game first", "Already running: " + running + ". Close it, then update.", null); return; }
         string wrong = null;
@@ -2738,6 +2817,7 @@ class LauncherForm : Form {
                 Config.Write("engine-" + g.Id + ".txt", other); pages.Pop(); pages.Push(GamePage(g)); ReplaceMain();
             }) { Icon = '' });
         }
+        if (g.Roms.Count > 1) p.Items.Add(new Item("ROM version: " + g.LabelOf(g.Chosen), "", true, delegate { pages.Push(RomsPage(g)); }) { Icon = '\uE8B7', Info = g.Roms.Count + " different dumps of this game were found. " + Path.GetFileName(g.Chosen.File) + " is in use." });
         p.Items.Add(new Item("Saves", "In use: " + SaveSets.Name(g, SaveSets.Active(g)) + ".", true, delegate { OpenSaves(g); }) { Icon = '\uE896' });
         p.Items.Add(new Item("Game options", GameOptions.Available(g) ? "Volume, text speed, battle style and more." : "Volume, fullscreen and more.", true, delegate { pages.Push(GameOptionsPage(g)); }) { Icon = '\uE8D2' });
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
@@ -2749,6 +2829,38 @@ class LauncherForm : Form {
         if (g.Imported && g.Gen1Rom != null) p.Items.Add(new Item("Prepare again", "Rebuilds the game data from your ROM. Saves are kept.", true, delegate { Import(g, null); }) { Icon = '' });
         if (engine == "fulldex" && Library.NeedsPatch(g.FulldexRom)) p.Items.Add(new Item("Patch this ROM", "It won't load until its secure area is decrypted.", true, delegate { pages.Push(PatchPage(g, false)); }) { Icon = '' });
         return p;
+    }
+    // Which engines can use a dump, in words.
+    string RomEngines(GameEntry g, RomFile r) {
+        var yes = new List<string>(); var no = new List<string>();
+        if (g.FulldexCode != null) { if (r.Encrypted) no.Add("Fulldex until it's patched"); else yes.Add("Fulldex"); }
+        if (g.Port != null) yes.Add("Platinum PC port");
+        if (g.Gen1 != null && !g.IsModified(r)) { if (r.Gen1Ok) yes.Add("Gen1Recomp"); else no.Add("Gen1Recomp"); }
+        if (g.Nativeplat != null) { if (r.NativeplatOk) yes.Add("nativeplat"); else no.Add("nativeplat"); }
+        return (yes.Count > 0 ? "Runs on " + string.Join(", ", yes.ToArray()) + "." : "") + (no.Count > 0 ? " Not on " + string.Join(", ", no.ToArray()) + "." : "");
+    }
+    Page RomsPage(GameEntry g) {
+        var p = new Page { Title = "ROM version: " + g.Title.Replace("Pokemon ", ""), Theme = g.Theme };
+        foreach (var rom in g.Roms.OrderByDescending(r => r.Revision).ThenBy(r => r.File)) {
+            var r = rom; bool now = r == g.Chosen;
+            p.Items.Add(new Item(g.LabelOf(r) + (now ? ": In use" : ""), "", true, delegate { ChooseVersion(g, r); }) { Icon = '\uE8B7', TileHint = Path.GetFileName(r.File), Info = RomEngines(g, r).Trim() + (g.IsModified(r) ? " A romhack or changed copy, not a clean one. It only runs on Fulldex, and has its own save there, separate from this game's. Choose it in Fulldex's game list." : " Your saves stay with this game whichever version you choose.") + (g.IsModified(r) ? "" : r.Verified || !g.CanVerify ? "" : " No engine here has verified this dump: it may be modified."), Records = new[] { "File: " + r.File, "SHA-1: " + r.Sha1 } });
+        }
+        return p;
+    }
+    void ChooseVersion(GameEntry g, RomFile r) {
+        if (r == g.Chosen) { pages.Pop(); return; }
+        if (AfterCapture(delegate { ChooseVersion(g, r); })) return;
+        string running = RunningGames();
+        if (running != "") { ShowText("Close your game first", "Already running: " + running + ". Close it, then change version.", null); return; }
+        Config.Write("rom-" + g.Id + ".txt", r.Sha1);
+        string oldGen1 = g.Gen1Rom; string id = g.Id;
+        pages.Pop();
+        Rescan(delegate {
+            var fresh = Library.Games.Find(x => x.Id == id);
+            if (fresh == null) return;
+            // Gen1Recomp keeps game data made from its ROM, so it's made again, with saves kept. The town picture is the same game's.
+            if (fresh.Imported && fresh.Gen1Rom != null && !string.Equals(oldGen1, fresh.Gen1Rom, StringComparison.OrdinalIgnoreCase)) Import(fresh, null);
+        });
     }
     Page PatchPage(GameEntry g, bool thenPlay) {
         var p = new Page { Title = "Patch " + Path.GetFileName(g.FulldexRom) + "?", Theme = g.Theme };
@@ -2918,7 +3030,7 @@ class LauncherForm : Form {
     internal static string RunCapture(ProcessStartInfo psi, int seconds, out int code) {
         psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
-        using (var p = Process.Start(psi)) {
+        using (var p = Process.Start(psi)) { if (GameArt.OnCaptureThread) GameArt.Watch(p);
             var err = p.StandardError.ReadToEndAsync();
             var o = p.StandardOutput.ReadToEndAsync();
             if (!p.WaitForExit(seconds * 1000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
@@ -3001,6 +3113,7 @@ class LauncherForm : Form {
     }
     // First ask what stands in the way. Anything the player must decide goes on a page; a clean move just happens.
     void MoveNow(GameEntry from, string file, string box, string slot, string name, GameEntry to) {
+        if (AfterCapture(delegate { MoveNow(from, file, box, slot, name, to); })) return;
         string running = RunningGames();
         if (running != "") { ShowText("Close the game first", "Already running: " + running + ". Saves can't change while it plays.", null); return; }
         string plan = null, target = null, why = null; int planCode = 0;
@@ -3140,6 +3253,7 @@ class LauncherForm : Form {
     // ---------- running things ----------
     void Play(GameEntry g) {
         if (g == null || !g.Playable) return;
+        if (AfterCapture(delegate { Play(g); })) return;
         string running = RunningGames();
         if (running != "") {
             waiting = g.Id;
@@ -3198,6 +3312,14 @@ class LauncherForm : Form {
             string roms = Path.Combine(dir, "roms"), copy = Path.Combine(roms, Path.GetFileName(g.FulldexRom));
             Directory.CreateDirectory(roms);
             if (!string.Equals(Path.GetFullPath(g.FulldexRom), Path.GetFullPath(copy), StringComparison.OrdinalIgnoreCase) && !File.Exists(copy)) File.Copy(g.FulldexRom, copy);
+            // It finds a game by its code, so another dump of this game in its folder could be run instead. Only copies go, whose
+            // original is still in the player's own folders.
+            foreach (var other in g.Roms.Where(r => r.EngineCopy && !string.Equals(Path.GetFullPath(r.File), Path.GetFullPath(copy), StringComparison.OrdinalIgnoreCase)).ToList())
+                try { File.Delete(other.File); g.Roms.Remove(other); } catch { }
+            foreach (var mine in g.Roms.Where(r => !r.EngineCopy && r.Sha1 != g.Chosen.Sha1)) {
+                string stale = Path.Combine(roms, Path.GetFileName(mine.File));
+                try { if (File.Exists(stale) && !string.Equals(stale, copy, StringComparison.OrdinalIgnoreCase) && Library.Sha1Cached(stale) == mine.Sha1) File.Delete(stale); } catch { }
+            }
             args = "--game " + g.FulldexCode;
             watchGba = true; gbaPlaying = false; gbaClosed = false;
         }
@@ -3327,7 +3449,12 @@ class LauncherForm : Form {
     public static string NativeplatRomCopy(GameEntry g) {
         string rom = Path.Combine(NativeplatDir, "userdata", "roms", g.Nativeplat + ".nds");
         Directory.CreateDirectory(Path.GetDirectoryName(rom));
-        if (!File.Exists(rom)) { File.Copy(g.NativeplatRom, rom + ".part", true); File.Move(rom + ".part", rom); }
+        // Its copy follows the dump in use, or a change of version would have no effect.
+        if (!File.Exists(rom) || new FileInfo(rom).Length != new FileInfo(g.NativeplatRom).Length || Library.Sha1Cached(rom) != Library.Sha1Cached(g.NativeplatRom)) {
+            File.Copy(g.NativeplatRom, rom + ".part", true);
+            if (File.Exists(rom)) File.Delete(rom);
+            File.Move(rom + ".part", rom);
+        }
         return rom;
     }
     // Everything nativeplat needs before it starts. Throws if it can't be got ready, so a save is never put at risk.
@@ -4578,6 +4705,17 @@ static class NativeMonsLauncher {
         }
         if (argv.Length == 3 && argv[0] == "--extract-nds") {
             try { NdsExtract.Run(argv[1], argv[2]); } catch (Exception x) { File.WriteAllText(Path.Combine(argv[2], "extract-error.txt"), x.ToString()); Environment.ExitCode = 2; }
+            return;
+        }
+        // For tests: --roms <result file> lists what the scan found for every game, and what each engine uses.
+        if (argv.Length == 2 && argv[0] == "--roms") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var o = new List<string>();
+            foreach (var g in Library.Games) {
+                o.Add(g.Id + " found=" + g.Roms.Count + " chosen=" + (g.Chosen != null ? g.Chosen.Label + " " + Path.GetFileName(g.Chosen.File) : "-") + " | fulldex=" + Path.GetFileName(g.FulldexRom ?? "") + " | gen1=" + Path.GetFileName(g.Gen1Rom ?? "") + " | nativeplat=" + Path.GetFileName(g.NativeplatRom ?? "") + " | refused=" + Path.GetFileName(g.FoundUnsupported ?? ""));
+                foreach (var r in g.Roms) o.Add("    " + r.Label + " gen1=" + r.Gen1Ok + " nativeplat=" + r.NativeplatOk + " enc=" + r.Encrypted + " copy=" + r.EngineCopy + " " + r.File);
+            }
+            File.WriteAllLines(argv[1], o.ToArray());
             return;
         }
         // For tests: --update <result file> checks for a release and applies it, with no window.

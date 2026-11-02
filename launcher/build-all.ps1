@@ -71,12 +71,18 @@ else {
 Step "Fulldex $fulldexRelease"
 $fulldex = Join-Path $out 'engines\fulldex'
 $mark = Join-Path $fulldex '.nativemons-version'
-if ((Test-Path -LiteralPath $mark) -and (Get-Content -LiteralPath $mark) -eq $fulldexRelease) { Write-Host 'Already there.' }
+# Upstream replaces this tag's files in place, so the mark holds their digest too. Offline, the tag alone decides.
+$fulldexZip = 'pokemon-ds-wide-pc-windows-x86_64.zip'
+$fulldexDigest = $null
+try { $fulldexDigest = ((Invoke-RestMethod "https://api.github.com/repos/mamesj/pokemon-fulldex/releases/tags/$fulldexRelease").assets | Where-Object { $_.name -eq $fulldexZip }).digest } catch { }
+$fulldexMark = if ($fulldexDigest) { "$fulldexRelease $fulldexDigest" } else { $fulldexRelease }
+$haveMark = if (Test-Path -LiteralPath $mark) { [string](Get-Content -LiteralPath $mark) } else { '' }
+if ($haveMark -eq $fulldexMark -or (-not $fulldexDigest -and $haveMark -like "$fulldexRelease*")) { Write-Host 'Already there.' }
 else {
     $unpacked = Fetch "https://github.com/mamesj/pokemon-fulldex/releases/download/$fulldexRelease/pokemon-ds-wide-pc-windows-x86_64.zip" 'fulldex'
     New-Item -ItemType Directory -Force $fulldex | Out-Null
     Copy-Item -Path (Join-Path $unpacked 'pokemon-ds-wide\*') -Destination $fulldex -Recurse -Force
-    Set-Content -LiteralPath $mark $fulldexRelease
+    Set-Content -LiteralPath $mark $fulldexMark
     Write-Host 'Downloaded.'
 }
 
