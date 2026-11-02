@@ -40,6 +40,7 @@ static class Native {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetShortPathName(string path, StringBuilder shortPath, uint size);
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
 
     // Windows only lets the foreground owner hand the foreground on; joining its input for the call lifts that.
     public static void Front(IntPtr h) {
@@ -2843,7 +2844,7 @@ class LauncherForm : Form {
         var p = new Page { Title = "ROM version: " + g.Title.Replace("Pokemon ", ""), Theme = g.Theme };
         foreach (var rom in g.Roms.OrderByDescending(r => r.Revision).ThenBy(r => r.File)) {
             var r = rom; bool now = r == g.Chosen;
-            p.Items.Add(new Item(g.LabelOf(r) + (now ? ": In use" : ""), "", true, delegate { ChooseVersion(g, r); }) { Icon = '\uE8B7', TileHint = Path.GetFileName(r.File), Info = RomEngines(g, r).Trim() + (g.IsModified(r) ? " A romhack or changed copy, not a clean one. It only runs on Fulldex, and has its own save there, separate from this game's. Choose it in Fulldex's game list." : " Your saves stay with this game whichever version you choose.") + (g.IsModified(r) ? "" : r.Verified || !g.CanVerify ? "" : " No engine here has verified this dump: it may be modified."), Records = new[] { "File: " + r.File, "SHA-1: " + r.Sha1 } });
+            p.Items.Add(new Item(g.LabelOf(r) + (now ? ": In use" : ""), "", true, delegate { ChooseVersion(g, r); }) { Icon = '\uE8B7', TileHint = Path.GetFileName(r.File), Info = RomEngines(g, r).Trim() + (g.IsModified(r) ? " A romhack or changed copy, not a clean one. It only runs on Fulldex, and has its own save there, separate from this game's." : " Your saves stay with this game whichever version you choose.") + (g.IsModified(r) ? "" : r.Verified || !g.CanVerify ? "" : " No engine here has verified this dump: it may be modified."), Records = new[] { "File: " + r.File, "SHA-1: " + r.Sha1 } });
         }
         return p;
     }
@@ -2858,6 +2859,8 @@ class LauncherForm : Form {
         Rescan(delegate {
             var fresh = Library.Games.Find(x => x.Id == id);
             if (fresh == null) return;
+            // A scan makes new game entries, so the page behind this one still holds the old ROM.
+            pages.Pop(); pages.Push(GamePage(fresh));
             // Gen1Recomp keeps game data made from its ROM, so it's made again, with saves kept. The town picture is the same game's.
             if (fresh.Imported && fresh.Gen1Rom != null && !string.Equals(oldGen1, fresh.Gen1Rom, StringComparison.OrdinalIgnoreCase)) Import(fresh, null);
         });
@@ -3322,14 +3325,22 @@ class LauncherForm : Form {
             }
             args = "--game " + g.FulldexCode;
             watchGba = true; gbaPlaying = false; gbaClosed = false;
+            // Fulldex only starts games it knows by themselves. A romhack waits in its list, which opens on the last game played:
+            // so it's made that, and started with one key press.
+            gbaPress = g.IsModified(g.Chosen); gbaPresses = 0; gbaPressAt = DateTime.MinValue;
+            if (gbaPress) try { File.WriteAllText(Path.Combine(dir, "last-game.txt"), dir + "/roms/" + Path.GetFileName(g.FulldexRom) + Environment.NewLine); } catch { gbaPress = false; }
         }
         var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        // Its list can ask to update, with Install selected, and that key press must never answer it. A check that can't connect stays
+        // silent, and Fulldex updates come with nativeMons. Not SSR_UPDATE_TEST: that one installs what it finds.
+        if (gbaPress && !g.IsDs) psi.EnvironmentVariables["FULLDEX_UPDATE_URL"] = "http://127.0.0.1:9/";
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
     }
     // After a GBA game ends, Fulldex's published build opens its own game list instead of exiting, and has no argument
     // to change that. Its list has a window title of its own, and by then the game has finished and saved, so seeing the
     // game's window give way to the list means it's safe to close the program and come straight back here.
-    bool watchGba, gbaPlaying, gbaClosed;
+    bool watchGba, gbaPlaying, gbaClosed, gbaPress;
+    int gbaPresses; DateTime gbaPressAt;
     DateTime gbaWatchedAt;
     void WatchGba() {
         if (!watchGba || job == null || (DateTime.Now - gbaWatchedAt).TotalMilliseconds < 50) return;
@@ -3339,8 +3350,17 @@ class LauncherForm : Form {
             string title = job.MainWindowTitle;
             if (title == "") return;
             bool list = title.IndexOf("Fulldex", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (!list) gbaPlaying = true;
+            if (!list) { gbaPlaying = true; gbaPress = false; }
             else if (gbaPlaying) { gbaClosed = true; watchGba = false; job.Kill(); }
+            else if (gbaPress) {
+                if (gbaPressAt == DateTime.MinValue) gbaPressAt = DateTime.Now.AddSeconds(1.5);
+                else if (DateTime.Now >= gbaPressAt) {
+                    Native.PostMessage(job.MainWindowHandle, 0x100, (IntPtr)0x0D, (IntPtr)0x001C0001);
+                    Native.PostMessage(job.MainWindowHandle, 0x101, (IntPtr)0x0D, (IntPtr)unchecked((int)0xC01C0001));
+                    gbaPressAt = DateTime.Now.AddSeconds(3);
+                    if (++gbaPresses >= 3) gbaPress = false;
+                }
+            }
         } catch { }
     }
     // ---------- the Platinum PC port ----------
