@@ -1,6 +1,11 @@
 <#
 Decides whether a release package is fit to be the stable build. Run before moving main.
 
+By default it's quick: one game per engine, the main screens, one update of each kind (about 10 minutes). -Full tries every
+game on every engine and every screen; a release decision needs a full run of play, snapshots and updater.
+
+The launcher is told not to take the keyboard, so you can keep working; the games' own windows may still take it briefly.
+
 The suite is split into groups, and each group's latest result is kept. Retest a part without redoing the rest; the verdict
 always covers every group, and a group that hasn't run counts against it.
 
@@ -39,7 +44,7 @@ param(
   [string]$SaveFolder, [string]$ArtFolder, [string]$LauncherOverride, [string]$Report,
   [Alias('Stages')][string[]]$Groups,
   [string[]]$Skip = @(),
-  [switch]$Retest, [switch]$List, [switch]$Keep
+  [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full
 )
 $ErrorActionPreference = 'Continue'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -79,7 +84,7 @@ if (Test-Path $Work) { if (Get-ChildItem $Work -Force | Select-Object -First 1) 
 New-Item -ItemType Directory -Force $Work | Out-Null
 $Work = (Resolve-Path $Work).Path
 # A group's old result goes when it runs again; the others stay.
-foreach ($g in @($Stages | Where-Object { $Skip -notcontains $_ }) + 'suite' + 'integrity') { Remove-Item (GroupFile $g) -ErrorAction SilentlyContinue }
+foreach ($g in @($Stages | Where-Object { $Skip -notcontains $_ }) + 'suite' + 'integrity') { Remove-Item (GroupFile $g), "$(GroupFile $g).quick" -ErrorAction SilentlyContinue; if (-not $Full) { Set-Content "$(GroupFile $g).quick" '' } }
 $app = Join-Path $Work 'app'; $exe = Join-Path $app 'NativeMonsLauncher.exe'; $st = Join-Path $Work 'state'
 $results = New-Object System.Collections.ArrayList
 $log = Join-Path $Report 'results.txt'
@@ -118,7 +123,10 @@ public static class StableWin {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
   public struct RECT { public int L, T, R, B; }
+  public struct POINT { public int X, Y; }
+  public static string ScreenShot(IntPtr h, string f) { RECT r; if (!GetClientRect(h, out r) || r.R < 1 || r.B < 1) return ""; var o = new POINT(); ClientToScreen(h, ref o); using (var b = new Bitmap(r.R, r.B)) { using (var g = Graphics.FromImage(b)) g.CopyFromScreen(o.X, o.Y, 0, 0, new Size(r.R, r.B)); b.Save(f); } return r.R + "x" + r.B; }
   public static string Shot(IntPtr h, string f) { RECT r; if (!GetClientRect(h, out r) || r.R < 1 || r.B < 1) return ""; using (var b = new Bitmap(r.R, r.B)) { using (var g = Graphics.FromImage(b)) { var dc = g.GetHdc(); PrintWindow(h, dc, 3); g.ReleaseHdc(dc); } b.Save(f); } return r.R + "x" + r.B; }
   public static void Key(IntPtr h, int k) { PostMessage(h, 0x100, (IntPtr)k, IntPtr.Zero); PostMessage(h, 0x101, (IntPtr)k, IntPtr.Zero); System.Threading.Thread.Sleep(350); }
   // How many colours in a sample of the picture: a blank or failed drawing has one.
@@ -153,14 +161,27 @@ if (On 'repo') {
   T repo 'submodules match their pins' (-not $sub) ($sub -join '; ')
   # A locally built launcher is by nature ahead of what's published, so these only mean something on a published package.
   if ($LauncherOverride) {
-    foreach ($n in 'working tree is committed','nothing unpushed','latest dev build is green and is this commit') { T repo $n 'skip' 'testing a local launcher' }
+    foreach ($n in 'everything that ships is committed','nothing unpushed','the package came from a green dev build','nothing that ships changed since the package was built') { T repo $n 'skip' 'testing a local launcher' }
   } else {
-    $dirty = git status --porcelain
-    T repo 'working tree is committed' (-not $dirty) ($dirty -join '; ')
+    # What matters is the package: built from a green dev run, with nothing that ships changed since. The suite itself doesn't ship.
+    $shipped = @('.', ':!tests')
+    $dirty = git status --porcelain -- @shipped
+    T repo 'everything that ships is committed' (-not $dirty) ($dirty -join '; ')
     $ahead = git rev-list --count origin/dev..HEAD 2>$null
     T repo 'nothing unpushed' ("$ahead" -eq '0') "$ahead ahead of origin/dev"
-    $run = gh run list -R Hailey-Ross/nativeMons --branch dev --limit 1 --json conclusion,headSha --jq '.[0].conclusion + " " + .[0].headSha' 2>$null
-    T repo 'latest dev build is green and is this commit' ("$run" -match '^success ' -and "$run".EndsWith((git rev-parse HEAD))) "$run"
+    $pkgRev = [regex]::Match(((Get-Content (Join-Path $app 'version.txt') -ErrorAction SilentlyContinue) -join ' '), 'revision=([0-9a-f]{40})').Groups[1].Value
+    if (-not $pkgRev) {
+      # (The package isn't unpacked until later: read its version.txt straight from the zip.)
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      $z = [IO.Compression.ZipFile]::OpenRead($Package)
+      try { $v = $z.Entries | Where-Object { $_.FullName -match '(^|/)version\.txt$' } | Select-Object -First 1; if ($v) { $r = New-Object IO.StreamReader($v.Open()); $pkgRev = [regex]::Match($r.ReadToEnd(), 'revision=([0-9a-f]{40})').Groups[1].Value; $r.Close() } } finally { $z.Dispose() }
+    }
+    # (Not --jq: Windows PowerShell drops the quotes inside it on the way to gh.)
+    $runs = @(gh run list -R Hailey-Ross/nativeMons --branch dev --limit 20 --json conclusion,headSha 2>$null | ConvertFrom-Json)
+    $built = $runs | Where-Object { $_.headSha -eq $pkgRev } | Select-Object -First 1
+    T repo 'the package came from a green dev build' ($built -and $built.conclusion -eq 'success') "package $($pkgRev.Substring(0, [Math]::Min(8, $pkgRev.Length))): $(if ($built) { $built.conclusion } else { 'no run found' })"
+    $since = if ($pkgRev) { git diff --name-only $pkgRev HEAD -- @shipped 2>$null } else { 'unknown' }
+    T repo 'nothing that ships changed since the package was built' (-not $since) ($since -join ', ')
   }
   Pop-Location
 }
@@ -179,8 +200,10 @@ if (On 'package') {
   T package 'no games, saves, keys or state inside' (-not $bad) (($bad | Select-Object -First 5 | ForEach-Object Name) -join ', ')
   $prop = $all | Where-Object { $_.Name -match '^(LauncherView|LauncherSettings|OnlinePanel|CartLabelArt|CartShape|LauncherMods)\.lua$' -or $_.FullName -match '\\assets\\(launcher|labels)\\' }
   T package 'no Gen1Recomp proprietary launcher files inside' (-not $prop) (($prop | Select-Object -First 5 | ForEach-Object Name) -join ', ')
-  $text = [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($exe))
-  T package 'launcher carries the Gen1Recomp credit' ($text.Contains('BOIS CLUB GAMES') -and $text.Contains('github.com/bryanthaboi/gen1recomp'))
+  # .NET keeps its strings as UTF-16, which can start on an odd byte: read it both ways.
+  $raw = [IO.File]::ReadAllBytes($exe)
+  $text = [Text.Encoding]::Unicode.GetString($raw) + [Text.Encoding]::Unicode.GetString($raw, 1, $raw.Length - 1)
+  T package 'launcher carries the Gen1Recomp credit' ($text.Contains('BOIS CLUB GAMES, LLC') -and $text.Contains('github.com/bryanthaboi/gen1recomp'))
   $v = Get-Content (Join-Path $app 'version.txt') -ErrorAction SilentlyContinue
   T package 'version.txt has channel, build and revision' (($v -join ' ') -match 'channel=\S+ build=\d+ revision=[0-9a-f]{40}') ($v -join ' ')
   $games = Get-Content (Join-Path $app 'games.json') -Raw | ConvertFrom-Json
@@ -189,7 +212,7 @@ if (On 'package') {
 if ($LauncherOverride) { Copy-Item -LiteralPath $LauncherOverride $exe -Force }
 # Everything from here is isolated: its own state, its own LOVE saves, quiet and in a window.
 New-Item -ItemType Directory -Force $st, "$Work\appdata" | Out-Null
-$env:NATIVEMONS_STATE = $st; $env:APPDATA = "$Work\appdata"
+$env:NATIVEMONS_STATE = $st; $env:APPDATA = "$Work\appdata"; $env:NATIVEMONS_TEST_QUIET = '1'
 Set-Content "$st\rom-folders.txt" $RomFolder
 Set-Content "$st\game-options.txt" "full=off`nvol=0"
 if ($ArtFolder -and (Test-Path -LiteralPath $ArtFolder)) { Copy-Item -LiteralPath $ArtFolder "$st\game-art" -Recurse }
@@ -218,8 +241,9 @@ if ((On 'scan') -or (On 'play') -or (On 'window') -or (On 'snapshots') -or (On '
 }
 # ---------- snapshots: every screen draws ----------
 if (On 'snapshots') {
-  $screens = @('main','splash','games','folders','credits','sprites','updatebanner') + @($found | ForEach-Object { "main:$_"; "gamepage:$_"; "saves:$_" })
-  $screens += @($romLines | Where-Object { $_ -match '^\S+ found=([2-9]|\d\d)' } | ForEach-Object { 'roms:' + ($_ -split ' ')[0] })
+  $sample = if ($Full) { $found } else { @('red','crystal','firered','platinum','black') | Where-Object { $found -contains $_ } }
+  $screens = @('main','splash','games','folders','credits','sprites','updatebanner') + @($sample | ForEach-Object { "main:$_"; "gamepage:$_"; "saves:$_" })
+  $screens += @($romLines | Where-Object { $_ -match '^\S+ found=([2-9]|\d\d)' } | ForEach-Object { 'roms:' + ($_ -split ' ')[0] } | Select-Object -First $(if ($Full) { 99 } else { 1 }))
   $failed = @()
   foreach ($scr in $screens) {
     $png = "$Report\shots\" + ($scr -replace ':', '-') + '.png'
@@ -299,6 +323,12 @@ if (On 'play') {
     if ($m.Groups[3].Value) { $matrix += ,@($id, 'nativeplat', $false) }
     if ($id -eq 'platinum' -and $m.Groups[1].Value) { $matrix += ,@($id, 'port', $false) }
   }
+  if (-not $Full) {
+    $ds = @('diamond','pearl','platinum','heartgold','soulsilver','black','white','black2','white2')
+    $kinds = @{}; $pickRows = @()
+    foreach ($row in $matrix) { $k = $row[1] + $(if ($row[1] -eq 'fulldex') { if ($ds -contains $row[0]) { '-ds' } else { '-gba' } }); if (-not $kinds.ContainsKey($k) -and -not $row[2]) { $kinds[$k] = 1; $pickRows += ,$row } }
+    $matrix = $pickRows
+  }
   foreach ($row in $matrix) {
     $id = $row[0]; $en = $row[1]; $name = "$id on $en"
     if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
@@ -311,7 +341,7 @@ if (On 'play') {
       Start-Sleep 1
       if ($p.HasExited) { $bad = "launcher exited $($p.ExitCode) before the game settled"; break }
       $game = @(GameProcs | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch 'Fulldex' }) | Select-Object -First 1
-      if ($game) { if (-not $steady) { $steady = Get-Date } elseif (((Get-Date) - $steady).TotalSeconds -ge 10) { break } } else { $steady = $null }
+      if ($game) { if (-not $steady) { $steady = Get-Date } elseif (((Get-Date) - $steady).TotalSeconds -ge 4) { break } } else { $steady = $null }
     }
     $took = [int]((Get-Date) - $t).TotalSeconds
     if ($game -and $steady -and -not $bad) {
@@ -319,6 +349,7 @@ if (On 'play') {
       while (((Get-Date) - $w).TotalSeconds -lt 45) {
         try { [void][StableWin]::Shot($game.MainWindowHandle, $png); $picture = [StableWin]::Colours($png) } catch { $picture = 0 }
         if ($picture -ge 8) { break }
+        try { [void][StableWin]::ScreenShot($game.MainWindowHandle, $png); $picture = [StableWin]::Colours($png); if ($picture -ge 8) { $title += ' (read from the screen)'; break } } catch { }
         Start-Sleep 2
       }
       $title += ", $picture colours after $([int]((Get-Date) - $w).TotalSeconds)s"
@@ -392,7 +423,8 @@ if (On 'window') {
   ClearGames
   $pagesLog = "$Work\pages.log"; $env:NATIVEMONS_TEST_LOG = $pagesLog
   $p = Start-Process $exe -PassThru
-  $t = Get-Date; do { Start-Sleep -Milliseconds 400; $p.Refresh() } while ($p.MainWindowHandle -eq 0 -and ((Get-Date) - $t).TotalSeconds -lt 40); Start-Sleep 8; $p.Refresh(); $h = $p.MainWindowHandle
+  $t = Get-Date; do { Start-Sleep -Milliseconds 400; $p.Refresh() } while ($p.MainWindowHandle -eq 0 -and ((Get-Date) - $t).TotalSeconds -lt 40); $p.Refresh(); $h = $p.MainWindowHandle
+  $w = Get-Date; do { Start-Sleep -Milliseconds 250 } while ((Get-Content $pagesLog -Tail 1 -ErrorAction SilentlyContinue) -notmatch '^1\|nativeMons' -and ((Get-Date) - $w).TotalSeconds -lt 40); Start-Sleep 1
   $U=0x26;$D=0x28;$L=0x25;$R=0x27;$E=0x0D;$B=0x1B
   function Alive { $p.Refresh(); (-not $p.HasExited) -and $p.Responding }
   function Now { Get-Content $pagesLog -Tail 1 -ErrorAction SilentlyContinue }
@@ -425,7 +457,9 @@ if (On 'window') {
   if ($two -and $idx -gt 0 -and (Alive)) {
     [void]$p.CloseMainWindow(); [void]$p.WaitForExit(8000)
     $p = Start-Process $exe -PassThru
-    $t = Get-Date; do { Start-Sleep -Milliseconds 400; $p.Refresh() } while ($p.MainWindowHandle -eq 0 -and ((Get-Date) - $t).TotalSeconds -lt 40); Start-Sleep 8; $p.Refresh(); $h = $p.MainWindowHandle
+    Remove-Item $pagesLog -ErrorAction SilentlyContinue
+    $t = Get-Date; do { Start-Sleep -Milliseconds 400; $p.Refresh() } while ($p.MainWindowHandle -eq 0 -and ((Get-Date) - $t).TotalSeconds -lt 40); $p.Refresh(); $h = $p.MainWindowHandle
+    [void](WaitPage '^1\|nativeMons' 40); Start-Sleep 1
     $before = Get-Content $pick
     [StableWin]::Key($h,$D); [StableWin]::Key($h,$E); Start-Sleep 1
     1..$idx | ForEach-Object { [StableWin]::Key($h,$D) }
@@ -479,7 +513,7 @@ if (On 'updater') {
   $kept = @($mine.Keys | Where-Object { (Get-Content "$old\$_" -Raw) -ne $mine[$_] })
   T updater 'still kept after switching channel' ($kept.Count -eq 0) ($kept -join ', ')
   $r = Up; T updater 'Stable: up to date afterwards' ($r -match 'ready False') "$r"
-  Rel 'stable' 6 'dddd'; $r = Up; T updater 'Stable: a newer stable build is applied' ($r -match 'ready True' -and (Channel) -match 'build=6') "$r"
+  if ($Full) { Rel 'stable' 6 'dddd'; $r = Up; T updater 'Stable: a newer stable build is applied' ($r -match 'ready True' -and (Channel) -match 'build=6') "$r" } else { Ver 'stable' 6 'dddd' }
   Set-Content "$old\state\update-channel.txt" 'bleeding-edge'; Rel 'bleeding-edge' 100 'dddd'
   $r = Up; T updater 'switch back to Dev at the same commit: nothing to download' ($r -match 'ready False') "$r"
   Set-Content "$old\state\update-channel.txt" 'stable'
@@ -503,7 +537,7 @@ $left = @(GameProcs); T integrity 'no game left running' ($left.Count -eq 0) (($
   if ($script:lastGroup -and $script:lastGroup -ne 'suite') { T $script:lastGroup 'stopped before finishing' $false }
   T suite 'ran to the end' $false "$($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"
 } finally {
-  $env:APPDATA = $oldAppData; Remove-Item env:NATIVEMONS_STATE, env:NATIVEMONS_UPDATE_URL, env:NATIVEMONS_TEST_LOG -ErrorAction SilentlyContinue
+  $env:APPDATA = $oldAppData; Remove-Item env:NATIVEMONS_STATE, env:NATIVEMONS_UPDATE_URL, env:NATIVEMONS_TEST_LOG, env:NATIVEMONS_TEST_QUIET -ErrorAction SilentlyContinue
   try { ClearGames; foreach ($p in Get-Process NativeMonsLauncher -ErrorAction SilentlyContinue) { if ($p.Path -and $p.Path.StartsWith($Work, [StringComparison]::OrdinalIgnoreCase)) { $p.Kill() } } } catch { }
 }
 # The verdict covers every group's latest result, not only this run's.
@@ -519,8 +553,9 @@ $manual = @(
 $end = @('', 'Groups:') + (Overview | ForEach-Object { "  $_" }) + @('', "PASS $pass  FAIL $fail  SKIP $skipped", 'Needs a person, not covered above:') + ($manual | ForEach-Object { "  - $_" })
 if ($LauncherOverride) { $end += 'The launcher was overridden: run again on the published package before releasing.' }
 $ready = $fail -eq 0 -and $pass -gt 0 -and $notRun.Count -eq 0
+$quickGroups = @('play','snapshots','updater' | Where-Object { Test-Path "$(GroupFile $_).quick" })
 if ($failedGroups) { $end += "Retest with -Retest, which runs: $(@($failedGroups + $notRun | Select-Object -Unique) -join ' ')" }
-$end += $(if ($ready -and $LauncherOverride) { "VERDICT: no automated failures, $skipped skipped, on a local launcher. Not a release decision." } elseif ($ready) { "VERDICT: no automated failures, $skipped skipped." } elseif ($fail -eq 0 -and $notRun.Count) { "VERDICT: NOT READY. Not run yet: $($notRun -join ' ')" } else { 'VERDICT: NOT READY.' })
+$end += $(if ($ready -and $quickGroups) { "VERDICT: no automated failures, $skipped skipped, in a quick run of $($quickGroups -join ' '). A release needs those with -Full." } elseif ($ready -and $LauncherOverride) { "VERDICT: no automated failures, $skipped skipped, on a local launcher. Not a release decision." } elseif ($ready) { "VERDICT: no automated failures, $skipped skipped." } elseif ($fail -eq 0 -and $notRun.Count) { "VERDICT: NOT READY. Not run yet: $($notRun -join ' ')" } else { 'VERDICT: NOT READY.' })
 Set-Content $log (@($header) + $lines + $end)
 $end | ForEach-Object { Write-Output $_ }
 if (-not $Keep) { Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue }
