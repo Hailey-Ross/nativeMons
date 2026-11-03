@@ -4,7 +4,8 @@
 [![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
-through its own engine, and the engines stay forks that keep pulling their upstream updates.
+through its own engine, and the engines stay forks that keep pulling their upstream updates. It also installs and runs
+the fan game Pokémon Infinite Fusion.
 
 Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: **Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).**
 
@@ -26,9 +27,9 @@ GAME FREAK inc. or The Pokémon Company.
 | 4 | Platinum | | ✓ | ✓ | ✓ |
 | 5 | Black, White, Black 2, White 2 | | ✓ | | |
 
-**Not supported yet:** Generation 6 and later (3DS and Switch games).
+Plus **[Pokémon Infinite Fusion](#pokémon-infinite-fusion)**, a PC fan game with no ROM, which the launcher installs and runs as its own program.
 
-**Pokémon Infinite Fusion**, the fan game, can be installed into the launcher from its page in Games: from your own installed folder, from its downloaded zip, or straight from [its GitHub](https://github.com/infinitefusion/infinitefusion-e18) (that one needs Git for Windows). The launcher keeps its copy in `games\infinitefusion`, updates it the way the game's own updater does, and backs up your saves before each session. Its saves stay in `%APPDATA%\infinitefusion`, so installing, updating or uninstalling never touches them. Its Play tile and wallpaper come from its own pictures. Move Pokémon, My Collection and the save tools don't apply to it.
+**Not supported yet:** Generation 6 and later (3DS and Switch games).
 
 **Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them. GBA ROM hacks that keep the original game's code can be chosen there too. They run on Fulldex only, with their own save. Widescreen depends on the hack. Tested: [Pokémon Rocket Edition](https://rocket-edition.com/) FINAL v1.0.2, a FireRed hack, which opens straight into the game and plays with no graphical issues.
 
@@ -64,9 +65,34 @@ Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. n
 - **[Dev](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
 - **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable):** the latest working build, from `main`.
 
-Unzip it anywhere, start `NativeMonsLauncher.exe` and add your ROM folder. Patching `.nds` ROMs needs Python 3.
+Unzip it anywhere (not inside Program Files), start `NativeMonsLauncher.exe` and add your ROM folder under **ROMs**. File names don't matter: games are found by reading each ROM. Patching `.nds` ROMs needs Python 3.
+
+**The first start** after adding ROMs takes about a minute behind the splash screen:
+- Your Game Boy and GBA games are prepared for Gen1Recomp from your ROMs, three at a time.
+- The game the menu opens on gets its title screen and town wallpaper; the other games' pictures are made in the background once the menu is up.
+
+Everything runs out of sight at low priority. Windows Defender scans the many small files preparing writes, which is most of the load during that first start. After that the launcher opens in about a second.
 
 Before a stable release, `tests/stable-check/stable-check.ps1` tests a release package on copies of your ROMs and saves. It runs in groups, so a failed part can be retested with `-Retest`; its header explains the options.
+
+## Using it
+
+The launcher is a phone-sized Pokédex that takes on each game's colours. Its home screen shows the game you played last: its intro plays in the **Play** tile, and one of its towns is the wallpaper, both captured from your own ROM on your PC. Below that are **Games**, **Collection**, **Mods**, **ROMs**, **Move**, **Settings** and **Exit**. While the launcher works on something, such as preparing a game or backing up a save, a spinning Poké Ball shows it's busy.
+
+- **D-pad or left stick:** move. **A:** select. **B:** back.
+- **Keyboard:** arrow keys or WASD, Enter, Esc.
+- **Mouse:** hover to select, click to choose, right-click to go back. The D-pad and buttons on the device can be clicked too, and dragging its shell moves the window.
+
+A game's page in **Games** has Play, its engine, ROM version, saves, game options, mods, backups, export and the PKHeX and OpenHome buttons.
+
+## Pokémon Infinite Fusion
+
+[Pokémon Infinite Fusion](https://github.com/infinitefusion/infinitefusion-e18) is a PC fan game (RPG Maker XP on mkxp-z), not a ROM. Open it in **Games** and choose one of two ways in; both are fine, and you can switch between them later:
+
+- **Import it into the launcher.** From your installed folder, from the game's downloaded zip, or straight from its GitHub (that one needs [Git for Windows](https://git-scm.com)). The launcher keeps the game in `games\infinitefusion` and its saves in `state\saves\infinitefusion`, both inside the launcher's folder. Saves you already have in `%APPDATA%\infinitefusion` are copied in, and the originals stay. **Update** gets the newest release the way the game's own `INSTALL_OR_UPDATE` does. **Uninstall** removes the game's files and keeps its saves.
+- **Add an existing installation.** The launcher runs your own copy where it is and never changes its files, and its saves stay where the game keeps them, in `%APPDATA%\infinitefusion`. Update it with the game's own updater. **Remove from the launcher** only forgets it.
+
+Either way the launcher backs up the save files before each session (newest 30, under `state\save-backups`), and the game keeps backups of its own too. About 5 GB. Its Play tile and wallpaper come from the game's own title screen and region map. Move Pokémon, My Collection, quick start and the save tools don't apply to it.
 
 ## Saves
 
@@ -74,7 +100,7 @@ Before a stable release, `tests/stable-check/stable-check.ps1` tests a release p
 
 **Bringing your saves.** **Settings > Import saves** finds `.sav` files in your ROM folders and any others you add, and works out their game by reading them. The originals aren't changed, and a save that gets replaced is backed up first.
 
-**One save across engines.** FireRed, LeafGreen and Emerald can run on Gen1Recomp or Fulldex, and Platinum on Fulldex or the PC port. Each of these shares one save when your ROM works with both engines. Before and after each game the launcher brings them level:
+**One save across engines.** FireRed, LeafGreen and Emerald can run on Gen1Recomp or Fulldex, and Platinum on Fulldex, nativeplat or the PC port. Each of these shares one save when your ROM works with the engines. Before and after each game the launcher brings them level:
 - A verified backup comes first. Every save that's about to change is copied, and the copy is checked byte for byte.
 - The result has to prove itself: its trainer, party, boxes, Pokédex and bag must match the source, or it's thrown away.
 - If that fails, both saves stay as they were, the game still starts, and it tries again next time.
@@ -95,7 +121,7 @@ Only some of this has been tried on a real 3DS, so back up your 3DS save first.
 
 A caught Pokémon's entry shows its picture, category, types, height, weight, base stats, abilities and the description from a game you caught it in, plus each game that has it. A gold star marks a shiny, and A switches between its shiny and normal pictures. Shinies are counted only while they're in a party or a box, because saves keep no record of the rest.
 
-Entries come from [PokéAPI](https://pokeapi.co) the first time you open them and are kept in `state\pokedex-cache`. **Settings > Download Pokedex** fetches every picture and entry at once for offline use. No game text is included in nativeMons.
+Entries come from [PokéAPI](https://pokeapi.co) the first time you open them and are kept in `state\pokedex-cache`. No game text is included in nativeMons.
 
 **Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there.
 
@@ -103,23 +129,29 @@ Moves with no real transfer between the games use the conversion code from [Open
 
 **Open in PKHeX** and **Open in OpenHome** on a game's page open its save in your own copy of either.
 
-Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher fetches a Pokémon along with its whole evolution line, and works without them. **Settings > Download all sprites** downloads every picture for Generations 1 to 5, normal and shiny, for offline play.
+Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO)) and are kept in `state\sprite-cache`, refreshed after 30 days. The launcher fetches a Pokémon along with its whole evolution line, and works without them. **Settings > Download Pokedex** fetches every picture (Generations 1 to 5, normal and shiny) and every entry at once for offline play; run it again any time, it only fetches what's missing.
+
+## Mods
+
+**Mods** on the home screen, or on a Gen1Recomp game's page, installs and turns on mods for Gen1Recomp games. Choose a mod's `.zip` from any drive; installing a newer version over an old one keeps the old copy until the new one is in place. Mods only apply to games played on Gen1Recomp.
 
 ## Settings
 
-Each engine has its own page of options, stored where its menus keep them, so changes show up on both sides.
+Each engine has its own page of options (**Fulldex**, **Gen1Recomp**), stored where its menus keep them, so changes show up on both sides.
 
-**Updates** checks this project's releases when the launcher starts and every 6 hours while it's open. When a new build is ready, a banner appears for a few seconds and Settings gets a badge; nothing downloads until you choose to. The same page switches between **Stable** and **Dev**. Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data and settings stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
+**Game options** set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
-**Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
+**Quick start** opens games straight at their title screen, past the copyright and intro. On Gen1Recomp (Game Boy, Game Boy Color and GBA games) and nativeplat (Diamond, Pearl, Platinum), the last game you played waits at its title out of sight, silent and paused, while the menu is open, so Play shows it at once; it's used only if its save and options are still what it read. DS games on Fulldex start from a snapshot of their title screen, made in the background from a copy of your save; it's used only while your save is exactly the one it was made from, and the game's clock is set to now. Either is thrown away and made again whenever something it loaded could have changed. Turn it off to start games with their intro. GBA games on Fulldex, the Platinum PC port and Infinite Fusion start as before.
 
-**Quick start** opens games straight at their title screen, past the copyright and intro. On Gen1Recomp (Game Boy, Game Boy Color and GBA games) and nativeplat (Diamond, Pearl, Platinum), the last game you played waits at its title out of sight, silent and paused, while the menu is open, so Play shows it at once; it's used only if its save and options are still what it read. DS games on Fulldex start from a snapshot of their title screen, made in the background from a copy of your save; it's used only while your save is exactly the one it was made from, and the game's clock is set to now. Either is thrown away and made again whenever something it loaded could have changed. Turn it off in Settings to start games with their intro. GBA games on Fulldex and the Platinum PC port start as before.
+**Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game and a timer, with a button others can use to find nativeMons on GitHub, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Gen1Recomp's own Discord status is switched off for games the launcher starts, so only this one shows. Turn it off in Settings.
 
-**Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game and a timer, with a button others can use to find nativeMons on GitHub, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Turn it off in Settings.
+**Updates** checks this project's releases when the launcher starts and every 6 hours while it's open. When a new build is ready, a banner appears for a few seconds and Settings gets a badge; nothing downloads until you choose to. The same page switches between **Stable** and **Dev**. Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data, settings and anything in `games\` stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
+
+**Import saves**, **Export saves**, **Download Pokedex**, **Credits** and **Last session** (how the last game ended) are here too.
 
 ## nativeplat
 
-Diamond, Pearl and Platinum can run on [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, native ports from the pret decompilations. It's the only engine for Diamond and Pearl, and an option for Platinum under **Engine** on the game's page. Packages carry a Windows build made by [our fork's public workflow](https://github.com/Hailey-Ross/gen4recomp), program only: your ROM stays on your PC. It shares one save with the other engines, checked each time it comes back. This is experimental, so keep a backup. nativeMons isn't affiliated with that project, so please report problems here first.
+Diamond, Pearl and Platinum can run on [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, native ports from the pret decompilations. It's the only engine for Diamond and Pearl, and an option for Platinum under **Engine** on the game's page. Packages carry a Windows build made by [our fork's public workflow](https://github.com/Hailey-Ross/gen4recomp), program only: your ROM stays on your PC. Our fork adds the quick start mode. It shares one save with the other engines, checked each time it comes back. This is experimental, so keep a backup. nativeMons isn't affiliated with that project, so please report problems here first.
 
 ## Pokémon Platinum PC port
 
@@ -129,7 +161,7 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 
 | Part | What it adds | Source |
 |---|---|---|
-| `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
+| `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks; our fork adds quick start and keeps the launcher's background jobs out of sight | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
 | `engines/fulldex` | DS and GBA games in widescreen at 60 fps. Packages use its published Windows build | [mamesj/pokemon-fulldex](https://github.com/mamesj/pokemon-fulldex), a fork of [ClickingMaster/ssrecomp](https://github.com/ClickingMaster/ssrecomp), using melonDS and mGBA |
 | Platinum PC port | A native Platinum. Packages carry its published Windows release, program only | [cybervisi0n/pokeplatinum](https://github.com/cybervisi0n/pokeplatinum) |
 | nativeplat | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
@@ -138,11 +170,13 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 | `tools/openhome-bridge` | Converts Pokémon between games that have no real transfer | [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington, run on Node.js |
 | `launcher` | The menu | Window and input code from the steam launcher of [the Skate 3 Rust Engine's hails-additions branch](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) (SK8-ENGINE) |
 
+Pokémon Infinite Fusion isn't part of a package: you import it or add your own installation.
+
 ## Build
 
-Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE, Fulldex's published Windows build, the Platinum PC port's and nativeplat's. With Node, Corepack and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings and saves.
+Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE, Fulldex's published Windows build, the Platinum PC port's and nativeplat's. With Node, Corepack and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings, saves and `games\` folder.
 
-`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `openhome`, `node`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
+`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `infinitefusion`, `openhome`, `node`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
 
 ## Credits
 
@@ -151,13 +185,13 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp) by ClickingMaster, using [melonDS](https://github.com/melonDS-emu/melonDS) and [mGBA](https://github.com/mgba-emu/mgba).
 - [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, from the pret decompilations. Not affiliated with nativeMons.
 - [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr) (MIT), from the [pret](https://github.com/pret/pokeplatinum) decompilation. They aren't affiliated with nativeMons.
+- [Pokémon Infinite Fusion](https://github.com/infinitefusion/infinitefusion-e18) by chardub (Frogman) and its contributors, made with Pokémon Essentials; its custom fusion sprites are by the Infinite Fusion artist community. Not included: imported from your own copy or its GitHub, or run from your own installation. Not affiliated with nativeMons.
 - [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors.
-- [Pokémon Infinite Fusion](https://github.com/infinitefusion/infinitefusion-e18) by chardub (Frogman) and its contributors, made with Pokémon Essentials; its custom fusion sprites are by the Infinite Fusion artist community. Not included: installed from your own copy or its GitHub. Not affiliated with nativeMons.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.
 - [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) by Hails.
 - Pokédex entries from [PokéAPI](https://pokeapi.co).
-- Pokémon pictures served by [hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO) at pogo.hails.app, from the [PokeAPI sprites](https://github.com/PokeAPI/sprites) collection.
+- Pokémon pictures served by [hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO) at pogo.hails.app, from the [PokeAPI sprites](https://github.com/PokeAPI/sprites) collection. The busy Poké Ball is after its "Updating" page.
 - Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
 
 Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company. Pokémon and all related names belong to their owners.
