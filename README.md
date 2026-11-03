@@ -1,7 +1,5 @@
 <p align="center"><img src="assets/banner-title.png" alt="nativeMons" width="100%"></p>
 
-<p align="center"><img src="assets/logo-512.png" alt="nativeMons logo" width="256"></p>
-
 [![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml)
 [![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
 
