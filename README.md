@@ -30,6 +30,8 @@ GAME FREAK inc. or The Pokémon Company.
 
 **Not supported yet:** Generation 6 and later (3DS and Switch games).
 
+**Pokémon Infinite Fusion**, the fan game, can be installed into the launcher from its page in Games: from your own installed folder, from its downloaded zip, or straight from [its GitHub](https://github.com/infinitefusion/infinitefusion-e18) (that one needs Git for Windows). The launcher keeps its copy in `games\infinitefusion`, updates it the way the game's own updater does, and backs up your saves before each session. Its saves stay in `%APPDATA%\infinitefusion`, so installing, updating or uninstalling never touches them. Its Play tile and wallpaper come from its own pictures. Move Pokémon, My Collection and the save tools don't apply to it.
+
 **Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them. GBA ROM hacks that keep the original game's code can be chosen there too. They run on Fulldex only, with their own save. Widescreen depends on the hack. Tested: [Pokémon Rocket Edition](https://rocket-edition.com/) FINAL v1.0.2, a FireRed hack, which opens straight into the game and plays with no graphical issues.
 
 Where a game has more than one engine it starts in Fulldex, and you can switch on its page. Each engine accepts certain versions of a ROM, mostly the US release: the launcher tells you if yours isn't one. Windows only for now.
@@ -113,7 +115,7 @@ Each engine has its own page of options, stored where its menus keep them, so ch
 
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
-**Quick start** opens games straight at their title screen, past the copyright and intro. On Gen1Recomp (Game Boy, Game Boy Color and GBA games), the last game you played waits at its title out of sight, silent and paused, while the menu is open, so Play shows it at once. DS games on Fulldex start from a snapshot of their title screen, made in the background from a copy of your save; it's used only while your save is exactly the one it was made from, and the game's clock is set to now. Either is thrown away and made again whenever something it loaded could have changed. Turn it off in Settings to start games with their intro. GBA games on Fulldex, nativeplat and the Platinum PC port start as before.
+**Quick start** opens games straight at their title screen, past the copyright and intro. On Gen1Recomp (Game Boy, Game Boy Color and GBA games) and nativeplat (Diamond, Pearl, Platinum), the last game you played waits at its title out of sight, silent and paused, while the menu is open, so Play shows it at once; it's used only if its save and options are still what it read. DS games on Fulldex start from a snapshot of their title screen, made in the background from a copy of your save; it's used only while your save is exactly the one it was made from, and the game's clock is set to now. Either is thrown away and made again whenever something it loaded could have changed. Turn it off in Settings to start games with their intro. GBA games on Fulldex and the Platinum PC port start as before.
 
 **Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game and a timer, with a button others can use to find nativeMons on GitHub, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Turn it off in Settings.
 
@@ -152,6 +154,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, from the pret decompilations. Not affiliated with nativeMons.
 - [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr) (MIT), from the [pret](https://github.com/pret/pokeplatinum) decompilation. They aren't affiliated with nativeMons.
 - [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors.
+- [Pokémon Infinite Fusion](https://github.com/infinitefusion/infinitefusion-e18) by chardub (Frogman) and its contributors, made with Pokémon Essentials; its custom fusion sprites are by the Infinite Fusion artist community. Not included: installed from your own copy or its GitHub. Not affiliated with nativeMons.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.
 - [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) by Hails.
