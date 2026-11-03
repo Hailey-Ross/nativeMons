@@ -166,6 +166,8 @@ static class Config {
     public static string OpenHomeTool { get { return Get("openhome", @"tools\openhome\convert.cjs"); } }
     public static string PlatinumPort { get { return Get("pokeplatinum", @"engines\pokeplatinum\main.exe"); } }
     public static string Nativeplat { get { return Get("nativeplat", @"engines\nativeplat\nativeplat.exe"); } }
+    // Games installed into the launcher (PcGames): beside the engines, where an update of the launcher never looks.
+    public static string InfiniteFusion { get { return Get("infinitefusion", @"games\infinitefusion\Game.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string GamesFile { get { return Get("games", "games.json"); } }
@@ -205,6 +207,11 @@ class GameEntry {
     public Theme Theme = Theme.Default;
     public int Dex;   // how many National Dex entries this game has
     public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port, Nativeplat, TownCore;
+    // A game that is a PC program of its own, installed into the launcher (PcGames), such as Infinite Fusion. It has no ROM,
+    // and the save tools, Move Pokemon and My Collection leave it out.
+    public string Pc;
+    public bool OnPc { get { return Pc != null && PcGames.Installed(this); } }
+    public bool SaveTools { get { return Playable && Pc == null; } }
     public int ArtFrame, TownFrame;   // when this game's title screen is up, in frames from power-on
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
     public List<RomFile> Roms = new List<RomFile>();   // every different dump of this game that was found
@@ -223,7 +230,7 @@ class GameEntry {
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
     public bool OnPort { get { return Port != null && FulldexRom != null && File.Exists(Config.PlatinumPort); } }
     public bool OnNativeplat { get { return Nativeplat != null && NativeplatRom != null && File.Exists(Config.Nativeplat); } }
-    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat; } }
+    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat || OnPc; } }
     public bool IsDs { get { return Console == "Nintendo DS"; } }
     public bool HasBoth { get { return OnGen1 && OnFulldex; } }
     // The player's choice where both engines can run it; Fulldex by default (widescreen).
@@ -233,6 +240,7 @@ class GameEntry {
         if (OnGen1) l.Add("gen1");
         if (OnPort) l.Add("port");
         if (OnNativeplat) l.Add("nativeplat");
+        if (OnPc) l.Add("pc");
         // A romhack only runs on Fulldex: the other engines only take clean copies.
         if (Chosen != null && IsModified(Chosen) && l.Contains("fulldex")) return new List<string> { "fulldex" };
         return l;
@@ -243,8 +251,136 @@ class GameEntry {
         string chosen = Config.Read("engine-" + Id + ".txt", l[0]);
         return l.Contains(chosen) ? chosen : l[0];
     }
-    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : "Gen1Recomp (native, with mods)"; }
-    public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : "Gen1Recomp"; }
+    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
+    public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
+}
+
+// Games that are PC programs of their own, installed into the launcher's games folder and kept up to date by it. For
+// now Pokemon Infinite Fusion (RPG Maker XP on mkxp-z): its folder is a git checkout of infinitefusion/infinitefusion-e18,
+// branch "releases", which its own INSTALL_OR_UPDATE.bat updates with a shallow fetch and reset; Update does the same
+// with the git on the PC. Saves live outside the folder, in %APPDATA%\infinitefusion, so installing again or updating
+// never touches them.
+static class PcGames {
+    public const string Repo = "https://github.com/infinitefusion/infinitefusion-e18.git", Branch = "releases";
+    public static string Exe(GameEntry g) { return g.Pc == "infinitefusion" ? Config.InfiniteFusion : null; }
+    public static string Dir(GameEntry g) { string e = Exe(g); return e == null ? null : Path.GetDirectoryName(e); }
+    public static bool Installed(GameEntry g) { string e = Exe(g); return e != null && File.Exists(e); }
+    public static string SaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "infinitefusion"); }
+    static bool Running(GameEntry g) {
+        string exe = Exe(g);
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)))
+            try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) return true; } catch { } finally { p.Dispose(); }
+        return false;
+    }
+    public static bool AnyRunning() { return Library.Games.Any(g => g.Pc != null && Installed(g) && Running(g)); }
+    // The program on the PC, or null: installing and updating use it, as the game's own updater does with its bundled one.
+    public static string Git() {
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
+            try { string f = Path.Combine(dir.Trim(), "git.exe"); if (dir.Trim() != "" && File.Exists(f)) return f; } catch { }
+        string pf = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "cmd", "git.exe");
+        return File.Exists(pf) ? pf : null;
+    }
+    static int RunGit(string args, string dir, Action<string> line) {
+        var psi = new ProcessStartInfo(Git(), args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        if (dir != null) psi.WorkingDirectory = dir;
+        psi.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0";
+        using (var p = new Process { StartInfo = psi }) {
+            DataReceivedEventHandler each = delegate(object s, DataReceivedEventArgs e) { if (e.Data != null && line != null) line(e.Data); };
+            p.OutputDataReceived += each; p.ErrorDataReceived += each;
+            p.Start(); p.BeginOutputReadLine(); p.BeginErrorReadLine();
+            p.WaitForExit();
+            return p.ExitCode;
+        }
+    }
+    // "6.8.2" and the release's own words, from the last commit's subject ("[6.8.2] Safari Zone crash patch").
+    public static string Version(GameEntry g) {
+        if (!Installed(g) || Git() == null || !Directory.Exists(Path.Combine(Dir(g), ".git"))) return null;
+        string subject = null;
+        try { RunGit("log -1 --format=%s", Dir(g), delegate(string l) { if (subject == null) subject = l.Trim(); }); } catch { }
+        return subject;
+    }
+    // From the player's own copy (a folder or the downloaded zip), or straight from the game's GitHub. It goes into a
+    // folder beside the final one and replaces it only once complete, so a stopped install leaves the old one working.
+    public static string Install(GameEntry g, string source, Action<string, float> report) {
+        string target = Dir(g), work = target + ".installing";
+        try {
+            if (Directory.Exists(work)) Directory.Delete(work, true);
+            if (source == null) {
+                if (Git() == null) return "Downloading needs Git for Windows (git-scm.com). Or install from your own copy of the game.";
+                Directory.CreateDirectory(Path.GetDirectoryName(work));
+                report("Downloading Pokemon Infinite Fusion from GitHub (a few GB)", -1);
+                int code = RunGit("clone --depth=1 --branch " + Branch + " --progress " + Repo + " \"" + work + "\"", null, delegate(string l) { report(l, -1); });
+                if (code != 0) return "The download stopped (git said " + code + "). Nothing was changed.";
+            } else if (File.Exists(source)) {
+                using (var zip = System.IO.Compression.ZipFile.OpenRead(source)) {
+                    // The game's own zip has its files at the top; one inside a single folder is unwrapped.
+                    var exe = zip.Entries.Where(e => e.Name.Equals("Game.exe", StringComparison.OrdinalIgnoreCase)).OrderBy(e => e.FullName.Length).FirstOrDefault();
+                    if (exe == null) return "That zip has no Game.exe, so it isn't Pokemon Infinite Fusion.";
+                    string prefix = exe.FullName.Substring(0, exe.FullName.Length - exe.Name.Length);
+                    var files = zip.Entries.Where(e => e.Name != "" && e.FullName.StartsWith(prefix)).ToList();
+                    long total = Math.Max(1, files.Sum(e => e.Length)), done = 0;
+                    if (!Room(target, total)) return "There isn't room for it on that drive: it needs about " + (total >> 30) + " GB.";
+                    foreach (var e in files) {
+                        string to = Path.Combine(work, e.FullName.Substring(prefix.Length).Replace('/', '\\'));
+                        Directory.CreateDirectory(Path.GetDirectoryName(to));
+                        System.IO.Compression.ZipFileExtensions.ExtractToFile(e, to, true);
+                        done += e.Length;
+                        report("Unpacking " + e.FullName.Substring(prefix.Length), (float)done / total);
+                    }
+                }
+            } else if (Directory.Exists(source)) {
+                if (!File.Exists(Path.Combine(source, "Game.exe"))) return "That folder has no Game.exe, so it isn't Pokemon Infinite Fusion.";
+                if (string.Equals(Path.GetFullPath(source).TrimEnd('\\'), Path.GetFullPath(target).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return "That is the launcher's own copy.";
+                var files = Library.FilesUnder(source);
+                long total = Math.Max(1, files.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } })), done = 0;
+                if (!Room(target, total)) return "There isn't room for it on that drive: it needs about " + (total >> 30) + " GB.";
+                foreach (var f in files) {
+                    string rel = f.Substring(source.TrimEnd('\\').Length + 1), to = Path.Combine(work, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(to));
+                    File.Copy(f, to, true);
+                    File.SetAttributes(to, File.GetAttributes(to) & ~FileAttributes.ReadOnly);
+                    try { done += new FileInfo(f).Length; } catch { }
+                    report("Copying " + rel, (float)done / total);
+                }
+            } else return "That file or folder isn't there any more.";
+            if (!File.Exists(Path.Combine(work, "Game.exe"))) return "Game.exe didn't arrive, so nothing was changed.";
+            report("Finishing", 1f);
+            if (Directory.Exists(target)) Remove(target);
+            Directory.Move(work, target);
+            return null;
+        } catch (Exception x) { return "Installing stopped: " + x.Message + " The copy you had (if any) is unchanged."; }
+        finally { try { if (Directory.Exists(work)) Remove(work); } catch { } }
+    }
+    // A shallow fetch of the release branch and a hard reset onto it, as the game's INSTALL_OR_UPDATE.bat does.
+    public static string Update(GameEntry g, Action<string> line) {
+        if (Git() == null) return "Updating needs Git for Windows (git-scm.com).";
+        if (!Directory.Exists(Path.Combine(Dir(g), ".git"))) return "This copy has no update history (.git). Install it again from GitHub to get updates.";
+        try { File.Delete(Path.Combine(Dir(g), ".git", "shallow.lock")); } catch { }
+        RunGit("remote set-url origin " + Repo, Dir(g), null);
+        if (RunGit("fetch --depth=1 --progress origin " + Branch, Dir(g), line) != 0) return "Couldn't reach the game's GitHub. Nothing was changed.";
+        if (RunGit("reset --hard origin/" + Branch, Dir(g), line) != 0) return "The update didn't apply cleanly. Install it again to repair it.";
+        return null;
+    }
+    // Git marks its object files read-only, which Directory.Delete refuses.
+    public static void Remove(string dir) {
+        foreach (var f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) try { File.SetAttributes(f, FileAttributes.Normal); } catch { }
+        Directory.Delete(dir, true);
+    }
+    static bool Room(string target, long bytes) {
+        try { var d = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(target))); return d.AvailableFreeSpace > bytes + (1L << 30); } catch { return true; }
+    }
+    // Before each session: the save files copied aside, newest 30 kept, in state\save-backups\<id>\<time>. The game keeps
+    // backups of its own too, in its save folder.
+    public static void Backup(GameEntry g) {
+        string from = SaveDir(g);
+        if (!Directory.Exists(from)) return;
+        var files = Directory.GetFiles(from, "*.rxdata");
+        if (files.Length == 0) return;
+        string root = Path.Combine(Config.State, "save-backups", g.Id), to = Path.Combine(root, DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(to);
+        foreach (var f in files) File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
+        foreach (var old in Directory.GetDirectories(root).OrderByDescending(x => x, StringComparer.Ordinal).Skip(30)) try { Directory.Delete(old, true); } catch { }
+    }
 }
 
 // One dump of a game. Two files with the same contents are one dump.
@@ -414,7 +550,7 @@ static class GameArt {
         }
     }
     // A game nativeplat can show but doesn't run for the player names its core as townCore: its wallpaper comes from there.
-    public static bool CanCaptureTown(GameEntry g) { return (g.TownFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom)) || g.OnNativeplat || (g.TownCore != null && g.FulldexRom != null && File.Exists(Config.Nativeplat) && !Library.NeedsPatch(g.FulldexRom)) || (g.Gen1 != null && g.Gen1Rom != null); }
+    public static bool CanCaptureTown(GameEntry g) { return g.Pc != null ? g.OnPc : ((g.TownFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom)) || g.OnNativeplat || (g.TownCore != null && g.FulldexRom != null && File.Exists(Config.Nativeplat) && !Library.NeedsPatch(g.FulldexRom)) || (g.Gen1 != null && g.Gen1Rom != null)); }
     // nativeplat's test mode, which uses saves of its own and never the player's. At its furthest camera the whole of Twinleaf
     // fits and the people, the player included, are too far off to be drawn. Diamond and Pearl play a scripted new game (from
     // gen4recomp's tests/dp) until they can walk, then jump to the town. Platinum's save lab makes a save standing there.
@@ -520,6 +656,7 @@ static class GameArt {
     }
     // Always under the throwaway identity: the game has to start a new game to reach a town, and that must never meet a real save.
     public static string CaptureTown(GameEntry g) {
+        if (g.Pc != null) return CapturePcTown(g);
         if (g.TownFrame > 0) return CaptureTownOpening(g);
         if (g.IsDs) return CaptureTownNativeplat(g);
         string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png");
@@ -641,7 +778,57 @@ static class GameArt {
         }
         foreach (var t in thumbs) t.Dispose();
     }
+    // A PC game's title screen and town come from its own pictures, put together here, not from running it.
+    static string PcGraphics(GameEntry g) { return Path.Combine(PcGames.Dir(g), "Graphics"); }
+    static string CapturePc(GameEntry g) {
+        try {
+            string gr = PcGraphics(g);
+            using (var bg = new Bitmap(Path.Combine(gr, "Titles", "gen1_bg_v5.png")))
+            using (var swirl = new Bitmap(Path.Combine(gr, "Titles", "PokemonInfiniteFusionLogo_Back_25.png")))
+            using (var logo = new Bitmap(Path.Combine(gr, "Titles", "PokemonInfiniteFusionLogo_Main_25.png"))) {
+                Directory.CreateDirectory(Folder(g.Id));
+                var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+                var quality = new System.Drawing.Imaging.EncoderParameters(1);
+                quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 88L);
+                int w = bg.Width, h = bg.Height;
+                float lw = w * 0.62f, lh = lw * logo.Height / logo.Width;
+                for (int i = 0; i < Count; i++) {
+                    // Played there and back, so the swirl sways a little behind the logo and the light breathes.
+                    float k = (float)i / (Count - 1), sway = -7f + 14f * k, glow = 0.82f + 0.18f * (float)Math.Sin(k * Math.PI);
+                    using (var frame = new Bitmap(w, h))
+                    using (var f = Graphics.FromImage(frame)) {
+                        f.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        f.DrawImage(bg, 0, 0, w, h);
+                        var st = f.Save();
+                        f.TranslateTransform(w / 2f, h * 0.47f); f.RotateTransform(sway);
+                        var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = glow };
+                        using (var ia = new System.Drawing.Imaging.ImageAttributes()) {
+                            ia.SetColorMatrix(cm);
+                            f.DrawImage(swirl, new Rectangle((int)(-lw * 0.5f), (int)(-lh * 0.5f), (int)lw, (int)lh), 0, 0, swirl.Width, swirl.Height, GraphicsUnit.Pixel, ia);
+                        }
+                        f.Restore(st);
+                        f.DrawImage(logo, (w - lw) / 2f, h * 0.47f - lh / 2f, lw, lh);
+                        frame.Save(FrameFile(g.Id, i), jpeg, quality);
+                    }
+                }
+            }
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
+    static string CapturePcTown(GameEntry g) {
+        try {
+            Directory.CreateDirectory(Folder(g.Id));
+            using (var map = new Bitmap(Path.Combine(PcGraphics(g), "Panoramas", "Kanto_HGSS.png"))) {
+                var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+                var quality = new System.Drawing.Imaging.EncoderParameters(1);
+                quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+                map.Save(TownFile(g.Id), jpeg, quality);
+            }
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
     public static bool CanCapture(GameEntry g) {
+        if (g.Pc != null) return g.OnPc;
         if (g.IsDs && g.FulldexCode == null) return g.OnNativeplat;
         if (g.IsDs) return g.ArtFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && (!Library.NeedsPatch(g.FulldexRom) || File.Exists(Config.Patcher));
         return g.Gen1 != null && (g.Imported || g.Gen1Rom != null);
@@ -734,6 +921,7 @@ static class GameArt {
     }
     // Null when done, or why not. It uses no save, at low priority, and the ROM is only read.
     public static string Capture(GameEntry g) {
+        if (g.Pc != null) return CapturePc(g);
         if (!g.IsDs) return CaptureGen1(g);
         if (g.FulldexCode == null) return CaptureNativeplat(g);
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots"), patched = temp + "-rom";
@@ -1046,7 +1234,7 @@ static class Library {
         var json = new JavaScriptSerializer().Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(Config.GamesFile));
         Func<Dictionary<string, object>, string, string> str = delegate(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; };
         foreach (var d in json) {
-            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat"), TownCore = str(d, "townCore") };
+            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat"), TownCore = str(d, "townCore"), Pc = str(d, "pc") };
             object c, dx;
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
@@ -1100,6 +1288,7 @@ static class Library {
     }
     // Why a game can't start: a ROM with no engine to run it is a different problem from a missing or wrong ROM.
     public static string WhyNotPlayable(GameEntry g) {
+        if (g.Pc != null) return "Not installed yet. Select it to install.";
         string rom = g.FulldexRom ?? g.FoundUnsupported;
         bool canRun = (g.Gen1 != null && Gen1Found) || (g.FulldexCode != null && File.Exists(Config.Fulldex)) || (g.Nativeplat != null && File.Exists(Config.Nativeplat));
         if (rom != null && !canRun) return "Found " + Path.GetFileName(rom) + ", but this copy of nativeMons doesn't have the engine to run it. Use the full download from the Releases page.";
@@ -1760,7 +1949,8 @@ class LauncherForm : Form {
         var names = new List<string>();
         if (PortRunning()) names.Add("the Platinum PC port");
         var native = Process.GetProcessesByName("nativeplat");
-        if (native.Length > 0) names.Add("nativeplat");
+        if (native.Any(p => p.Id != readyPid)) names.Add("nativeplat");
+        if (PcGames.AnyRunning()) names.Add("a PC game");
         foreach (var p in native) p.Dispose();
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
@@ -1862,7 +2052,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Mods", mods ? "Mods for the Gen1Recomp games." : "Needs a Gen1Recomp game.", mods, delegate { pages.Push(ModGamesPage()); }) { Icon = '' });
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
-        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && have > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
+        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.SaveTools) > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
         p.Items.Add(new Item("Settings", "Game options, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
         return p;
@@ -1874,10 +2064,10 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
-        p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
+        p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.SaveTools), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
-        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Game Boy, Game Boy Color and GBA games on Gen1Recomp, and DS games on Fulldex, for now. Select to turn it " + (QuickStart ? "off" : "on") + "." });
+        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, and DS games on Fulldex. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
@@ -2194,6 +2384,8 @@ class LauncherForm : Form {
     string CurrentSave(GameEntry g) { string why; return SaveOf(g, out why); }
     // After a game: back up, check for damage, share. The player hears only when there's something to decide.
     void AfterGame(GameEntry g, int code, Action done) {
+        // A PC game's saves are its own business: backed up before the session, nothing to share or check after.
+        if (g.Pc != null) { done(); return; }
         string damaged = null;
         SyncResult result = null;
         Busy("Checking your save", delegate {
@@ -2492,7 +2684,7 @@ class LauncherForm : Form {
     }
     Page ExportGamesPage() {
         var p = new Page { Title = "Export saves: which game?" };
-        foreach (var game in Library.Games.Where(x => x.Playable)) {
+        foreach (var game in Library.Games.Where(x => x.SaveTools)) {
             var g = game;
             p.Items.Add(new Item(g.Title, "", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898', Theme = g.Theme, Info = "Uses this game's save from " + GameEntry.EngineName(g.Engine()) + "." });
         }
@@ -2805,7 +2997,7 @@ class LauncherForm : Form {
             ReadDexKept();
             if (dexNames.Count == 0) return false;
             var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>(); bool all = true;
-            foreach (var g in Library.Games.Where(x => x.Playable)) {
+            foreach (var g in Library.Games.Where(x => x.SaveTools)) {
                 DexKept k;
                 if (!dexKept.TryGetValue(g.Id, out k) || k.Print != DexPrint(g)) { all = false; continue; }
                 if (k.Dex == null) none.Add(g); else by[g] = k.Dex;
@@ -2825,7 +3017,7 @@ class LauncherForm : Form {
                 foreach (var line in o.Split('\n')) { var f = line.TrimEnd('\r').Split('\t'); int id; if (f.Length == 2 && int.TryParse(f[0], out id)) dexNames[id] = f[1]; }
             }
             bool changed = false;
-            foreach (var g in Library.Games.Where(x => x.Playable).ToList()) {
+            foreach (var g in Library.Games.Where(x => x.SaveTools).ToList()) {
                 if (background && (GameArt.Hold || job != null || RunningGames() != "")) break;
                 string print = DexPrint(g); DexKept k;
                 if (dexKept.TryGetValue(g.Id, out k) && k.Print == print) continue;
@@ -2836,7 +3028,7 @@ class LauncherForm : Form {
             }
             if (changed) SaveDexKept();
             var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>();
-            foreach (var g in Library.Games.Where(x => x.Playable)) { DexKept k; if (!dexKept.TryGetValue(g.Id, out k) || k.Dex == null) none.Add(g); else by[g] = k.Dex; }
+            foreach (var g in Library.Games.Where(x => x.SaveTools)) { DexKept k; if (!dexKept.TryGetValue(g.Id, out k) || k.Dex == null) none.Add(g); else by[g] = k.Dex; }
             dexBy = by; dexNoSave = none;
         }
         return null;
@@ -2875,7 +3067,7 @@ class LauncherForm : Form {
     }
     Page DexEntryPage(int id, int[] order) { return new Page { Title = "#" + id.ToString("000") + " " + DexName(id), DexId = id, DexOrder = order, DexShiny = DexShiny(id) }; }
     Page DexGamesPage() {
-        var games = Library.Games.Where(x => x.Playable).ToList();
+        var games = Library.Games.Where(x => x.SaveTools).ToList();
         var p = new Page { Title = "By game" };
         foreach (var g in games) {
             bool has = dexBy.ContainsKey(g);
@@ -3011,8 +3203,9 @@ class LauncherForm : Form {
         foreach (var game in Library.Games.OrderBy(g => g.Playable ? 0 : 1)) {
             var g = game;
             string why = Library.WhyNotPlayable(g);
-            var it = new Item(g.Title, g.Playable ? "" : why, g.Playable, delegate { pages.Push(GamePage(g)); }) { Icon = '', Theme = g.Theme };
-            it.Info = g.Playable ? g.Console + ". Runs with " + GameEntry.EngineName(g.Engine()) + "." : g.Console + ". " + why;
+            // A PC game not yet installed opens its page, where it's installed.
+            var it = new Item(g.Title, g.Playable ? "" : why, g.Playable || g.Pc != null, delegate { pages.Push(GamePage(g)); }) { Icon = '', Theme = g.Theme };
+            it.Info = g.Pc != null ? (g.Playable ? "A PC game of its own, installed in the launcher." : why) : g.Playable ? g.Console + ". Runs with " + GameEntry.EngineName(g.Engine()) + "." : g.Console + ". " + why;
             it.Records = GameRecords(g);
             p.Items.Add(it);
         }
@@ -3030,6 +3223,7 @@ class LauncherForm : Form {
         return r.ToArray();
     }
     Page GamePage(GameEntry g) {
+        if (g.Pc != null) return PcGamePage(g);
         var p = new Page { Title = g.Title, Theme = g.Theme };
         string engine = g.Engine();
         var play = new Item("Play", "Start with " + GameEntry.EngineName(engine) + ".", g.Playable, delegate { Play(g); }) { Icon = '' };
@@ -3232,6 +3426,7 @@ class LauncherForm : Form {
         return new Page { Title = "Credits", Body = "Pokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
             + "\n\nnativeplat by sohamb117 (github.com/sohamb117/gen4recomp), native Diamond, Pearl and Platinum from the pret decompilations. Not affiliated with nativeMons."
+            + "\n\nPokemon Infinite Fusion by chardub (Frogman) and its contributors (github.com/infinitefusion/infinitefusion-e18), made with Pokemon Essentials on RPG Maker XP. Its custom fusion sprites are by the Infinite Fusion artist community. Installed from your own copy or its GitHub; not included, and not affiliated with nativeMons."
             + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection. Pokedex entries from PokeAPI (pokeapi.co)."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
@@ -3320,7 +3515,7 @@ class LauncherForm : Form {
     }
     Page MoveFromPage() {
         var p = new Page { Title = "Move Pokemon: from which game?" };
-        foreach (var game in Library.Games.Where(x => x.Playable)) {
+        foreach (var game in Library.Games.Where(x => x.SaveTools)) {
             var g = game;
             p.Items.Add(new Item(g.Title, "", true, delegate { OpenBoxes(g); }) { Icon = '', Theme = g.Theme, Info = "Choose a Pokemon from this game's PC boxes. Saves from " + GameEntry.EngineName(g.Engine()) + " are used.", Records = new[] { "Backups: both saves are copied first" } });
         }
@@ -3350,7 +3545,7 @@ class LauncherForm : Form {
     }
     Page MoveToPage(GameEntry from, string file, string box, string slot, string name) {
         var p = new Page { Title = "Move " + name + " to...", Theme = from.Theme };
-        foreach (var game in Library.Games.Where(x => x.Playable && x != from)) {
+        foreach (var game in Library.Games.Where(x => x.SaveTools && x != from)) {
             var g = game;
             p.Items.Add(new Item(g.Title, "", true, delegate { MoveNow(from, file, box, slot, name, g); }) { Icon = '', Theme = g.Theme, Info = "Moves it to the first free PC box slot. If something stands in the way, you'll be asked how to resolve it." });
         }
@@ -3511,6 +3706,7 @@ class LauncherForm : Form {
             return;
         }
         current = g; Config.Write("last-game.txt", g.Id);
+        if (g.Engine() == "pc") { Busy("Backing up your saves", delegate { PcGames.Backup(g); return null; }, delegate(string e) { PlayPc(g); }); return; }
         if (g.Engine() == "fulldex") {
             if (Library.NeedsPatch(g.FulldexRom)) { pages.Push(PatchPage(g, true)); return; }
             BeforeGame(g, delegate { PlayFulldex(g); });
@@ -3604,10 +3800,7 @@ class LauncherForm : Form {
     void PlayGen1(GameEntry g) {
         // The game kept ready is used only if nothing it loaded has changed since: its options, and its save after the
         // backup and sharing that just ran. A GBA game reads its save while it starts.
-        // By id: the library makes new entries when it scans again.
-        if (ready != null && readyUp && readyFor.Id == g.Id && !ready.HasExited && readyOptions == Gen1Options(g) && readySave == SaveGuard.Hash(CurrentSave(g))) {
-            UseReady(g); return;
-        }
+        if (ReadyFor(g)) { UseReady(g, delegate(int code) { Finished(g, code); }); return; }
         if (ready != null) QuickNote("not used for " + g.Id);
         DropReady();
         var psi = Gen1Start(" --game=" + g.Gen1);
@@ -3615,6 +3808,73 @@ class LauncherForm : Form {
         if (options != "") psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = options;
         if (QuickStart) psi.EnvironmentVariables["NATIVEMONS_TO_TITLE"] = "1";
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+    }
+    void PlayPc(GameEntry g) {
+        var psi = new ProcessStartInfo(PcGames.Exe(g)) { UseShellExecute = false, WorkingDirectory = PcGames.Dir(g), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+    }
+    // A PC game installed into the launcher: install it, update it, play it, or take it out again. Its saves aren't here
+    // to manage: they stay in its own save folder, whatever happens to the game's files.
+    Page PcGamePage(GameEntry g) {
+        var p = new Page { Title = g.Title, Theme = g.Theme };
+        if (!g.OnPc) {
+            p.Body = g.Title + " is a PC game of its own. The launcher keeps a copy in its games folder and updates it from the game's GitHub.\n\nInstall it from your own copy (a folder or the downloaded zip), or download it. It takes about 5 GB. Your saves in " + PcGames.SaveDir(g) + " are used as they are.";
+            p.Items.Add(new Item("Install from a folder", "Copies your installed game.", true, delegate { string f = PickFolder("Choose the folder with Game.exe (for example InfiniteFusion)"); if (f != null) InstallPc(g, f); }) { Icon = '' });
+            p.Items.Add(new Item("Install from a zip", "Unpacks the game's download.", true, delegate {
+                using (var d = new OpenFileDialog { Filter = "Zip (*.zip)|*.zip", Title = "Choose InfiniteFusion.zip" }) if (d.ShowDialog(this) == DialogResult.OK) InstallPc(g, d.FileName);
+            }) { Icon = '' });
+            p.Items.Add(new Item("Download", "From the game's GitHub (a few GB). Needs Git for Windows.", PcGames.Git() != null, delegate { InstallPc(g, null); }) { Icon = '' });
+            return p;
+        }
+        string version = PcGames.Version(g);
+        var play = new Item("Play", version != null ? "Version " + version + "." : "Start " + g.Title + ".", true, delegate { Play(g); }) { Icon = '' };
+        play.Records = new[] { "Installed in " + PcGames.Dir(g), "Saves in " + PcGames.SaveDir(g) };
+        p.Items.Add(play);
+        p.Items.Add(new Item("Update", "Gets the newest release from the game's GitHub.", PcGames.Git() != null, delegate { UpdatePc(g); }) { Icon = '', Info = "The same update the game's own INSTALL_OR_UPDATE does. Your saves aren't touched." });
+        p.Items.Add(new Item("Save backups", "Copies made before each session.", true, delegate {
+            string dir = Path.Combine(Config.State, "save-backups", g.Id);
+            Directory.CreateDirectory(dir);
+            try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+        }) { Icon = '', Info = "The launcher copies your save files here before each session, keeping the newest 30. The game also keeps backups of its own in its save folder." });
+        p.Items.Add(new Item("Uninstall", "Removes the game's files. Your saves stay.", true, delegate { pages.Push(PcRemovePage(g)); }) { Icon = '' });
+        return p;
+    }
+    Page PcRemovePage(GameEntry g) {
+        var p = new Page { Title = "Uninstall " + g.Title + "?", Theme = g.Theme };
+        p.Body = "This deletes the launcher's copy in " + PcGames.Dir(g) + ".\n\nYour saves in " + PcGames.SaveDir(g) + " stay, and so does any copy of the game you installed it from.";
+        p.Items.Add(new Item("Uninstall", "", true, delegate {
+            if (AfterCapture(delegate { pages.Pop(); pages.Push(PcRemovePage(g)); })) return;
+            if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
+            Busy("Removing " + g.Title, delegate { PcGames.Remove(PcGames.Dir(g)); return null; }, delegate(string e) {
+                pages.Pop(); pages.Pop();
+                ShowText(e == null ? "Uninstalled" : "Not fully removed", e ?? g.Title + " was removed. Your saves are where they were.", null);
+                ReplaceMain();
+            });
+        }) { Icon = '' });
+        p.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '' });
+        return p;
+    }
+    void InstallPc(GameEntry g, string source) {
+        if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
+        string problem = null;
+        Busy("Installing " + g.Title, delegate {
+            problem = PcGames.Install(g, source, delegate(string what, float at) { BeginInvoke((Action)delegate { if (at >= 0) progress = at; AddLine("nativemons: " + what); dirty = true; }); });
+            return null;
+        }, delegate(string e) {
+            if (e != null || problem != null) { ShowText("Not installed", e ?? problem, null); return; }
+            pages.Pop(); pages.Push(PcGamePage(g));
+            // Its title screen and town, from its own pictures, then the menu shows them.
+            Busy("Making its pictures", delegate { GameArt.Background(delegate { GameArt.Capture(g); GameArt.CaptureTown(g); }); return null; }, delegate(string e2) { ReplaceMain(); });
+        });
+    }
+    void UpdatePc(GameEntry g) {
+        if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
+        string problem = null, before = PcGames.Version(g);
+        Busy("Updating " + g.Title, delegate { problem = PcGames.Update(g, delegate(string l) { BeginInvoke((Action)delegate { AddLine("nativemons: " + l); dirty = true; }); }); return null; }, delegate(string e) {
+            string after = PcGames.Version(g);
+            ShowText(e != null || problem != null ? "Not updated" : "Updated", e ?? problem ?? (after == before ? "You already have the newest release: " + after + "." : "Now on " + after + "."), null);
+            pages.Pop(); pages.Push(PcGamePage(g));
+        });
     }
     static string Gen1Options(GameEntry g) { return string.Join(",", GameOptions.ForGame(g).Select(x => x.Key + "=" + x.Value).ToArray()); }
 
@@ -3627,7 +3887,20 @@ class LauncherForm : Form {
     static volatile int readyPid;
     DateTime menuSince = DateTime.MaxValue;
     static void QuickNote(string what) { if (TestLog != null) try { File.AppendAllText(TestLog, "quick-start: " + what + Environment.NewLine); } catch { } }
-    static bool CanQuickStart(GameEntry g) { return g != null && g.Playable && g.Engine() == "gen1" && g.Imported && g.Gen1 != null; }
+    // Gen1Recomp games, and nativeplat's (its side: NP_QUICK_START in our gen4recomp fork, shell/src/main.c).
+    static bool CanQuickStart(GameEntry g) {
+        if (g == null || !g.Playable) return false;
+        if (g.Engine() == "gen1") return g.Imported && g.Gen1 != null;
+        return g.Engine() == "nativeplat" && g.Nativeplat != null && File.Exists(Config.Nativeplat);
+    }
+    static string NativeplatOptionsFile { get { return Path.Combine(NativeplatDir, "userdata", "options.ini"); } }
+    // What the waiting game read when it started: its options, and its save (both games may read the save while booting).
+    static string QuickOptions(GameEntry g) { return g.Engine() == "nativeplat" ? SaveHash(NativeplatOptionsFile) : Gen1Options(g); }
+    string QuickSave(GameEntry g) { return SaveGuard.Hash(g.Engine() == "nativeplat" ? NativeplatSlot(g) : CurrentSave(g)); }
+    bool ReadyFor(GameEntry g) {
+        return ready != null && readyUp && readyFor.Id == g.Id && !ready.HasExited && readyOptions == QuickOptions(g) && readySave == QuickSave(g);
+    }
+    bool readyStarting;
     void QuickStartTick() {
         bool menu = job == null && !starting && waiting == null && playDirect == null && pages.Count > 0 && pages.Peek().Main;
         if (menu) readyHeld = false;
@@ -3635,20 +3908,36 @@ class LauncherForm : Form {
         SnapshotTick(menu && (DateTime.Now - menuSince).TotalSeconds >= 1.5);
         bool wanted = menu && QuickStart && CanQuickStart(current);
         if (ready != null) {
-            bool stale = current == null || readyFor.Id != current.Id || readyOptions != Gen1Options(current) || ready.HasExited;
+            bool stale = current == null || readyFor.Id != current.Id || readyOptions != QuickOptions(current) || ready.HasExited;
             if ((!wanted && !readyHeld) || stale) DropReady();
             return;
         }
-        if (!wanted || (DateTime.Now - menuSince).TotalSeconds < 1.5 || RunningGames() != "") return;
-        string key = current.Id + "|" + Gen1Options(current) + "|" + current.Gen1Rom;
+        if (readyStarting || !wanted || (DateTime.Now - menuSince).TotalSeconds < 1.5 || RunningGames() != "") return;
+        string key = current.Id + "|" + current.Engine() + "|" + QuickOptions(current) + "|" + (current.Gen1Rom ?? current.FulldexRom);
         if (readyFailed == key) return;
-        StartReady(current, key);
+        var g = current;
+        if (g.Engine() != "nativeplat") { StartReady(g, key); return; }
+        // nativeplat plays a copy of the save in its own slot: put it there first, as Play does, off the window's thread.
+        readyStarting = true;
+        string problem = null;
+        Task.Run(() => { try { PrepareNativeplat(g); } catch (Exception x) { problem = x.Message; } }).ContinueWith(t => BeginInvoke((Action)delegate {
+            readyStarting = false;
+            if (problem != null) { readyFailed = key; QuickNote("failed " + g.Id + ": " + problem); return; }
+            bool still = job == null && pages.Count > 0 && pages.Peek().Main && current != null && current.Id == g.Id && QuickStart && RunningGames() == "";
+            if (still && ready == null) StartReady(g, key);
+        }));
     }
     void StartReady(GameEntry g, string key) {
-        var psi = Gen1Start(" --game=" + g.Gen1);
-        string options = Gen1Options(g);
-        if (options != "") psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = options;
-        psi.EnvironmentVariables["NATIVEMONS_QUICK_START"] = "1";
+        ProcessStartInfo psi;
+        string options = QuickOptions(g);
+        if (g.Engine() == "nativeplat") {
+            psi = new ProcessStartInfo(Config.Nativeplat, "--game " + g.Nativeplat + " --slot " + NativeplatSlotName) { UseShellExecute = false, WorkingDirectory = NativeplatDir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            psi.EnvironmentVariables["NP_QUICK_START"] = "wait";
+        } else {
+            psi = Gen1Start(" --game=" + g.Gen1);
+            if (options != "") psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = options;
+            psi.EnvironmentVariables["NATIVEMONS_QUICK_START"] = "1";
+        }
         psi.RedirectStandardInput = true;
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         DataReceivedEventHandler line = delegate(object s, DataReceivedEventArgs e) {
@@ -3657,7 +3946,7 @@ class LauncherForm : Form {
             BeginInvoke((Action)delegate {
                 if (job == p) { AddLine(text); dirty = true; return; }
                 if (ready != p) return;
-                if (text.Contains("nativemons: quick-start ready")) { readyUp = true; QuickNote("ready " + g.Id); }
+                if (text.Contains("nativemons: quick-start ready") || text.Contains("nativeplat: quick-start ready")) { readyUp = true; QuickNote("ready " + g.Id); }
                 else if (text.Contains("nativemons: quick-start failed")) { readyFailed = key; QuickNote("failed " + g.Id + ": " + text); DropReady(); }
             });
         };
@@ -3668,7 +3957,7 @@ class LauncherForm : Form {
         try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
         p.BeginOutputReadLine(); p.BeginErrorReadLine();
         ready = p; readyPid = p.Id; readyFor = g; readyOptions = options; readyUp = false;
-        readySave = SaveGuard.Hash(CurrentSave(g));
+        readySave = QuickSave(g);
         QuickNote("starting " + g.Id + " pid " + p.Id);
     }
     // Fulldex DS games start from a snapshot of their title screen, made headless in the background from a copy of the save
@@ -3760,13 +4049,14 @@ class LauncherForm : Form {
         if (p == null) return;
         ready = null; readyPid = 0; readyUp = false; readyFor = null;
         QuickNote("dropped");
-        Task.Run(() => { try { p.StandardInput.Close(); if (!p.WaitForExit(3000)) p.Kill(); p.WaitForExit(2000); p.Dispose(); } catch { } });
+        // nativeplat writes its save slot as it closes: it gets longer, so it's never stopped part way through.
+        Task.Run(() => { try { p.StandardInput.Close(); if (!p.WaitForExit(15000)) p.Kill(); p.WaitForExit(2000); p.Dispose(); } catch { } });
     }
-    void UseReady(GameEntry g) {
+    void UseReady(GameEntry g, Action<int> done) {
         var p = ready; ready = null; readyPid = 0; readyUp = false; readyHeld = false;
         try { p.PriorityClass = ProcessPriorityClass.Normal; } catch { }
         log.Clear(); jobTitle = g.Title; jobIsGame = true; jobHid = false; jobStart = DateTime.Now; gameStart = jobStart; progress = -1;
-        jobDone = delegate(int code) { Finished(g, code); };
+        jobDone = done;
         if (!Native.Quiet) Native.AllowSetForegroundWindow(-1);
         job = p;
         DiscordPresence.Playing(g);
@@ -3974,14 +4264,20 @@ class LauncherForm : Form {
         string problem = null;
         Busy("Getting " + g.Title + " ready", delegate { try { PrepareNativeplat(g); } catch (Exception x) { problem = x.Message; } return null; }, delegate(string e) {
             if (e != null || problem != null) { ShowText("Could not start " + g.Title, "Nothing was changed.\n\n" + (e ?? problem), null); return; }
-            var psi = new ProcessStartInfo(Config.Nativeplat, "--game " + g.Nativeplat + " --slot " + NativeplatSlotName) { UseShellExecute = false, WorkingDirectory = NativeplatDir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            RunJob(g.Title, psi, true, delegate(int code) {
+            Action<int> done = delegate(int code) {
                 string note = null;
                 Busy("Saving " + g.Title, delegate { note = SaveFromNativeplat(g); return null; }, delegate(string e2) {
                     if (e2 != null || note != null) noticeAfter = e2 ?? note;
                     Finished(g, code);
                 });
-            });
+            };
+            // The game kept waiting is used only if its slot and options are still what it read while starting.
+            if (ReadyFor(g)) { UseReady(g, done); return; }
+            if (ready != null) QuickNote("not used for " + g.Id);
+            DropReady();
+            var psi = new ProcessStartInfo(Config.Nativeplat, "--game " + g.Nativeplat + " --slot " + NativeplatSlotName) { UseShellExecute = false, WorkingDirectory = NativeplatDir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            if (QuickStart) psi.EnvironmentVariables["NP_QUICK_START"] = "title";
+            RunJob(g.Title, psi, true, done);
         });
     }
     void Finished(GameEntry g, int code) {
@@ -4706,6 +5002,28 @@ class LauncherForm : Form {
         }
     }
     // A generic cartridge in the version's colour, `len` px wide with its top left at (x, y).
+    // The working screen's spinner: a Poke Ball turning once every 2 s while its top half runs through the rainbow in the
+    // same time, after the "Updating" page on pogo.hails.app (hailsDotGO, static/maintenance.html). Drawn on a 64-unit grid
+    // like that page's SVG; its edges are dark here, as this screen is light.
+    static readonly Color[] Rainbow = { Color.FromArgb(255, 0, 0), Color.FromArgb(255, 136, 0), Color.FromArgb(255, 255, 0), Color.FromArgb(0, 204, 0), Color.FromArgb(0, 102, 255), Color.FromArgb(136, 0, 255) };
+    static Color RainbowAt(float t) {
+        float k = (t / 2f % 1f) * Rainbow.Length;
+        int i = (int)k % Rainbow.Length;
+        return Mix(Rainbow[i], Rainbow[(i + 1) % Rainbow.Length], k - (int)k);
+    }
+    static void SpinningBall(Graphics g, float cx, float cy, float size, float t) {
+        var st = g.Save();
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.TranslateTransform(cx, cy); g.RotateTransform(t * 180f % 360f); g.ScaleTransform(size / 64f, size / 64f);
+        var whole = new RectangleF(-30, -30, 60, 60);
+        using (var top = new SolidBrush(Fade(RainbowAt(t), 230))) g.FillPie(top, whole.X, whole.Y, whole.Width, whole.Height, 180, 180);
+        using (var bottom = new SolidBrush(Color.White)) g.FillPie(bottom, whole.X, whole.Y, whole.Width, whole.Height, 0, 180);
+        using (var band = new Pen(Fade(Line, 200), 3f)) g.DrawLine(band, -30, 0, 30, 0);
+        using (var edge = new Pen(Fade(Line, 220), 2f)) g.DrawEllipse(edge, whole);
+        using (var button = new SolidBrush(Color.White)) using (var ring = new Pen(Fade(Line, 200), 2f)) { g.FillEllipse(button, -8, -8, 16, 16); g.DrawEllipse(ring, -8, -8, 16, 16); }
+        using (var dot = new Pen(Fade(Line, 70), 1.5f)) g.DrawEllipse(dot, -4, -4, 8, 8);
+        g.Restore(st);
+    }
     static void Cart(Graphics g, float x, float y, float len, Theme th) {
         var st = g.Save();
         g.TranslateTransform(x, y); g.ScaleTransform(len / 100f, len / 100f);
@@ -5203,8 +5521,8 @@ class LauncherForm : Form {
     void RenderJob(Graphics g, int w, int h, float m, float top, float bottom, float t, Theme th) {
         var accent = Accent(th);
         float y = top + h * 0.1f, cartLen = w * 0.22f;
-        // The game's cartridge going in, or a tool at work.
-        Cart(g, (w - cartLen) / 2, y, cartLen, th);
+        // Working: the spinning Poke Ball, where the cartridge picture was.
+        SpinningBall(g, w / 2f, y + cartLen * 0.47f, cartLen * 0.9f, t);
         y += cartLen * 1.12f;
         var ta = new SizeF(w - 2 * m, titleFont.Height * 1.3f);
         var tf = FitFont(g, jobTitle, ta, titleFont, 0.6f, false);
@@ -5303,6 +5621,15 @@ static class NativeMonsLauncher {
             string result;
             try { result = LauncherForm.ExtractMod(argv[1]); } catch (Exception e) { result = "Could not install it: " + e.Message; }
             File.WriteAllText(argv[2], result);
+            return;
+        }
+        // --install-pc <game id> <folder|zip|download> <result file>: installs a PC game as its page does, then its pictures.
+        if (argv.Length >= 4 && argv[0] == "--install-pc") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var pc = Library.Games.Find(x => x.Id == argv[1] && x.Pc != null);
+            string result = pc == null ? "No such PC game." : PcGames.Install(pc, argv[2] == "download" ? null : argv[2], delegate(string what, float at) { });
+            if (pc != null && result == null) { result = (GameArt.Capture(pc) ?? "title ok") + "; " + (GameArt.CaptureTown(pc) ?? "town ok") + "; version " + PcGames.Version(pc); }
+            File.WriteAllText(argv[3], result ?? "");
             return;
         }
         if (argv.Length >= 4 && argv[0] == "--export") {
