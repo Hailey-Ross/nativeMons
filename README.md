@@ -113,6 +113,8 @@ Each engine has its own page of options, stored where its menus keep them, so ch
 
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
+**Quick start** opens Game Boy, Game Boy Color and GBA games on Gen1Recomp straight at their title screen, past the copyright and intro. While the menu is open, the last game you played waits there out of sight, silent and paused, so Play shows it at once. It's thrown away and made again whenever something it loaded could have changed, such as your save or its options. Turn it off in Settings to start games with their intro. Fulldex, nativeplat and the Platinum PC port aren't covered yet.
+
 **Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game and a timer, with a button others can use to find nativeMons on GitHub, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Turn it off in Settings.
 
 ## nativeplat
