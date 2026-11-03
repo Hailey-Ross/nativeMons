@@ -29,7 +29,9 @@ Plus **[Pokémon Infinite Fusion](#pokémon-infinite-fusion)**, a PC fan game wi
 
 **Not supported yet:** Generation 6 and later (3DS and Switch games).
 
-**Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them. GBA ROM hacks that keep the original game's code can be chosen there too. They run on Fulldex only, with their own save. Widescreen depends on the hack. Tested: [Pokémon Rocket Edition](https://rocket-edition.com/) FINAL v1.0.2, a FireRed hack, which opens straight into the game and plays with no graphical issues.
+**Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them.
+
+**ROM hacks are games of their own.** A hack of a game Fulldex runs (FireRed, LeafGreen and Emerald; Platinum hacks the same way, not yet tried) gets its own place in **Games**, named after its file: `Pokemon_FireRed_Rocket_Edition.gba` shows as "Pokemon FireRed Rocket Edition". **Rename** on its page changes that, and the name stays even if the file is renamed. Whether a ROM is a hack is decided by its contents only: it carries the game's code but isn't one of that game's clean dumps (every clean revision is known). The file name only gives it its name, so a clean copy under any file name stays with its game. It runs on Fulldex only, with saves, backups and save slots of its own, and its saves read as the base game's do, for **Move Pokemon**, **My Collection** and PKHeX. Widescreen depends on the hack. Tested: [Pokémon Rocket Edition](https://rocket-edition.com/) FINAL v1.0.2, a FireRed hack, which opens straight into the game and plays with no graphical issues.
 
 Where a game has more than one engine it starts in Fulldex, and you can switch on its page. Each engine accepts certain versions of a ROM, mostly the US release: the launcher tells you if yours isn't one. Windows only for now.
 
@@ -98,7 +100,12 @@ Either way the launcher backs up the save files before each session (newest 30, 
 
 ## Other PC games
 
-**Add a PC game**, at the end of **Games**, adds any self-contained game with its own program, such as another fan game, with nothing written for it. Choose its `.exe`, then either run it where it is or let the launcher keep its own copy of the game's folder in `games\`. It's named after the program (rename it on its page) and gets a colour of its own.
+**Add a PC game**, at the end of **Games**, adds any self-contained game with its own program, such as another fan game, with nothing written for it. Three ways in:
+- **From its folder:** point to where the game lives. It runs there, and nothing is copied.
+- **From a .zip:** the launcher unpacks it into `games\` and keeps that copy. The zip stays as it is.
+- **Choose its program (.exe):** then run it where it is, or let the launcher copy the game's folder into `games\`.
+
+The launcher finds the game's program itself, leaving out installers and uninstallers, and asks which one when there's more than one. It's named after the program (rename it on its page) and gets a colour of its own.
 
 These games go without the extras: no captured title screen or wallpaper, and no save handling, since the launcher can't know where such a game keeps its saves. The launcher starts the game, shows it on Discord, and waits for it to close; if the program only hands over to another one in its folder and quits, the session lasts until that one closes too. **Remove from the launcher** forgets it, and deletes the launcher's copy if it made one; your own folder and saves are never touched.
 
@@ -114,6 +121,8 @@ These games go without the extras: no captured title screen or wallpaper, and no
 - If that fails, both saves stay as they were, the game still starts, and it tries again next time.
 - If both saves changed, you choose which to keep. The other goes to your backups.
 
+**Everything stays in the launcher's folder.** Saves, settings, mods and prepared games live beside `NativeMonsLauncher.exe`, in `state` and in each engine's folder, so the whole folder can move to another drive or PC. Gen1Recomp kept its own in `%APPDATA%\LOVE\nativemons` before; the first start of a newer launcher copies them into `state\gen1recomp`, checks every file, and leaves the old folder as it was, as a backup you can delete. If that copy can't finish, Gen1Recomp keeps using the old folder and the launcher tries again next time. Pokémon Infinite Fusion, when you add your existing installation, keeps its saves where the game puts them.
+
 A game's page lists its **Save backups** to go back to. After each game the save is checked for corruption, and you're offered a healthy backup if it fails.
 
 **Sending saves back.** **Settings > Export saves**, or a game's page, gives you:
@@ -125,7 +134,7 @@ Only some of this has been tried on a real 3DS, so back up your 3DS save first.
 
 ## Pokémon
 
-**My Collection** is a Pokédex built from all the saves of every game the launcher finds. It has a National list from 001 to 649, a list for each region from Kanto to Unova (by the generation that introduced each Pokémon), and your counts by game. Pokémon you haven't seen show as `???`.
+**My Collection** is a Pokédex built from all the saves of every game the launcher finds. It has a National list from 001 to 649, a list for each region from Kanto to Unova (by the generation that introduced each Pokémon), and your counts by game. Pokémon you haven't seen show as `???`. ROM hacks and fan games such as Infinite Fusion never count toward it: **Romhacks and fan games** lists them apart, each hack with a Pokédex of its own. Infinite Fusion shows there as not read yet, since its saves are in a format nativeMons can't read so far.
 
 A caught Pokémon's entry shows its picture, category, types, height, weight, base stats, abilities and the description from a game you caught it in, plus each game that has it. A gold star marks a shiny, and A switches between its shiny and normal pictures. Shinies are counted only while they're in a party or a box, because saves keep no record of the rest.
 
