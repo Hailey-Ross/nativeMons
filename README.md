@@ -75,7 +75,7 @@ Before a stable release, `tests/stable-check/stable-check.ps1` tests a release p
 
 ## Using it
 
-The launcher is a phone-sized Pokédex that takes on each game's colours. Its home screen shows the game you played last: its intro plays in the **Play** tile, and one of its towns is the wallpaper, both captured from your own ROM on your PC. Below that are **Games**, **Collection**, **Mods**, **ROMs**, **Move**, **Settings** and **Exit**. While the launcher works on something, such as preparing a game or backing up a save, a spinning Poké Ball shows it's busy.
+The launcher is a phone-sized Pokédex that takes on each game's colours. Its home screen shows the game you played last: its intro plays in the **Play** tile, and one of its towns is the wallpaper, both captured from your own ROM on your PC. Below that are **Games**, **Collection**, **Mods**, **ROMs**, **Move**, **Settings** and **Exit**. Whenever the launcher is loading, a rainbow Poké Ball spins: on the splash at start, while it works on something such as preparing a game or backing up a save, while a game's title screen is being made in its Play tile, and while Pokémon pictures and Pokédex entries arrive.
 
 - **D-pad or left stick:** move. **A:** select. **B:** back.
 - **Keyboard:** arrow keys or WASD, Enter, Esc.
@@ -127,7 +127,7 @@ A caught Pokémon's entry shows its picture, category, types, height, weight, ba
 
 Entries come from [PokéAPI](https://pokeapi.co) the first time you open them and are kept in `state\pokedex-cache`. No game text is included in nativeMons.
 
-**Move Pokemon** sends a Pokémon from one game's PC boxes to another's, using [PKHeX.Core](https://github.com/kwsch/PKHeX). Both saves are backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there.
+**Move Pokemon** shows your games' PC boxes the way Pokémon HOME does. The Pokédex unfolds into a tablet for it, smoothly, and folds back into the phone when you leave: two games side by side, each showing one box as a grid of its Pokémon. Drag a Pokémon onto an empty slot of the other game, or of another box in the same game (there it can also swap with one). With a controller or keyboard, A picks it up, A puts it down and B puts it back. ◀ ▶ step through a game's boxes, and holding a dragged Pokémon over them turns the box too; selecting the game's name switches to another game. It uses [PKHeX.Core](https://github.com/kwsch/PKHeX), and both saves are backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there.
 
 Moves with no real transfer between the games use the conversion code from [OpenHome](https://github.com/andrewbenington/OpenHome) (GPL-3.0), and PKHeX checks the result. The result may be flagged as not legal, and its form, ball and origin may change. The original data is kept and comes back when the Pokémon returns to its own generation. This part is experimental: try a moved Pokémon in battle before relying on it.
 

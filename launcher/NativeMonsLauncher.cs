@@ -1131,10 +1131,15 @@ static class GameArt {
         // The game the launcher opens on comes first, so its screen is ready even if the rest is stopped.
         return jobs.OrderBy(j => j.Game == first ? 0 : 1).ToList();
     }
+    // The game whose title screen is being made now, so its Play tile shows the loading Poke Ball meanwhile.
+    public static volatile string Making;
     static string Run(Job j) {
-        string why = j.Town ? CaptureTown(j.Game) : Capture(j.Game);
-        if (why != null && !Hold) NoteFailed(j.Game, j.Town);
-        return why;
+        if (!j.Town) Making = j.Game.Id;
+        try {
+            string why = j.Town ? CaptureTown(j.Game) : Capture(j.Game);
+            if (why != null && !Hold) NoteFailed(j.Game, j.Town);
+            return why;
+        } finally { Making = null; }
     }
     public static void CaptureAtStart(GameEntry first, Action<int, int> progress) {
         Background(delegate {
@@ -1551,10 +1556,13 @@ static class DexInfos {
             if (loaded.TryGetValue(id, out d)) return d;
             if (asked.TryGetValue(id, out when) && (DateTime.Now - when).TotalSeconds < 60) return null;
             asked[id] = DateTime.Now;
+            fetching.Add(id);
         }
-        Task.Run(delegate { try { Fetch(id); } catch { } Sprites.Touch(); });
+        Task.Run(delegate { try { Fetch(id); } catch { } lock (gate) fetching.Remove(id); Sprites.Touch(); });
         return null;
     }
+    static readonly HashSet<int> fetching = new HashSet<int>();
+    public static bool Loading(int id) { lock (gate) return fetching.Contains(id); }
     public static bool Wait(int id, int seconds) {
         for (int i = 0; i < seconds * 10; i++) { if (Get(id) != null) return true; System.Threading.Thread.Sleep(100); }
         return false;
@@ -1754,8 +1762,13 @@ static class Sprites {
             string key;
             lock (gate) { if (queue.Count == 0) { workers--; return; } key = queue.Dequeue(); }
             try { Fetch(key); } catch { }
+            lock (gate) tried.Add(key);
+            Arrived++;
         }
     }
+    // Asked for and still on its way (not here, not given up on): the window shows the loading Poke Ball meanwhile.
+    static readonly HashSet<string> tried = new HashSet<string>();
+    public static bool Loading(string key) { lock (gate) return key != null && asked.Contains(key) && !loaded.ContainsKey(key) && !tried.Contains(key); }
     static void Fetch(string key) {
         Download(key);
         string file = FileOf(key);
@@ -1922,8 +1935,32 @@ class Page {
     public int[] DexOrder;       // what left and right step through on an entry
     public bool DexShiny;        // the entry is showing its shiny picture
     public float DexHeight;      // how tall the entry came out
+    public BoxView Boxes;        // Move Pokemon's box screen
     public bool Main;
     public Theme Theme;
+}
+
+// Move Pokemon as boxes, the way Pokemon HOME shows them: two games, one above the other, each showing one of its PC
+// boxes as a grid of the Pokemon in it. A Pokemon is dragged (or picked up with A and put down with A) into a slot of the
+// other game, or of another box of the same game.
+class BoxMon { public string Species, Nick, Trainer; public int Level, Dex; public bool Shiny; }
+class BoxSide {
+    public GameEntry Game; public string File, Problem;
+    public int Boxes = 1, Slots = 30;
+    public List<string> Names = new List<string>();
+    public Dictionary<int, BoxMon> Mons = new Dictionary<int, BoxMon>();   // box * Slots + slot
+    public BoxMon At(int box, int slot) { BoxMon m; return Mons.TryGetValue(box * Slots + slot, out m) ? m : null; }
+}
+class BoxView {
+    public BoxSide[] Side = new BoxSide[2];
+    public int[] Box = new int[2];
+    public int Pane, Cursor, Col;          // Cursor -1 is the pane's header (game and box)
+    public int HeldPane = -1, HeldBox, HeldSlot;
+    public bool Dragging, Dragged; public PointF Drag, DragStart;
+    public string HoverArrow; public DateTime HoverSince;
+    public bool Wide;                      // side by side (the tablet), not one above the other
+    public string Note;
+    public bool Holding { get { return HeldPane >= 0; } }
 }
 
 class LauncherForm : Form {
@@ -1993,7 +2030,8 @@ class LauncherForm : Form {
 
     string previewId;
     public void Snapshot(string file, string screen, int w, int h) {
-        MakeFonts(w);
+        // A size wider than tall shows the tablet, with the phone's text.
+        if (w > h) { phoneW = h * 60 / 100; tabletK = 1; MakeFonts(phoneW); } else MakeFonts(w);
         try { Library.Scan(Gen1Cli); } catch (Exception e) { Library.Note = e.Message; }
         PickCurrent();
         int colon = screen.IndexOf(':');
@@ -2032,6 +2070,21 @@ class LauncherForm : Form {
             pages.Push(sp);
             foreach (var it in sp.Items) Sprites.Get(it.Sprite);
             Sprites.Wait(30);
+        }
+        // boxes:<top id>,<bottom id> (boxheld: the same, with the cursor's Pokemon picked up): reads the saves only.
+        if (screen == "boxes" || screen == "boxheld") {
+            var ids = (previewId ?? "").Split(',');
+            var a = Library.Games.Find(g => g.Id == ids[0] && g.SaveTools); var b = ids.Length > 1 ? Library.Games.Find(g => g.Id == ids[1] && g.SaveTools) : a;
+            if (a != null && b != null) {
+                Sprites.LoadFamilies(BridgeFamilies);
+                var v = new BoxView(); v.Side[0] = LoadSide(a); v.Side[1] = b.Id == a.Id ? v.Side[0] : LoadSide(b);
+                var first = v.Side[0].Mons.Keys.Where(k => k / v.Side[0].Slots == 0).OrderBy(k => k).FirstOrDefault();
+                v.Cursor = first % v.Side[0].Slots;
+                if (screen == "boxheld" && v.Side[0].At(0, v.Cursor) != null) { v.HeldPane = 0; v.HeldBox = 0; v.HeldSlot = v.Cursor; v.Pane = 1; v.Cursor = 8; }
+                pages.Push(new Page { Title = "Move Pokemon", Boxes = v });
+                for (int i = 0; i < 2; i++) foreach (var mon in v.Side[i].Mons.Where(x => x.Key / v.Side[i].Slots == v.Box[i]).Select(x => x.Value)) Sprites.Get((mon.Shiny ? "shiny/" : "") + mon.Dex);
+                Sprites.Wait(30);
+            }
         }
         if (screen == "roms" || screen == "gamepage") {
             var which = Library.Games.Find(g => g.Id == previewId);
@@ -2201,7 +2254,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Mods", mods ? "Mods for the Gen1Recomp games." : "Needs a Gen1Recomp game.", mods, delegate { pages.Push(ModGamesPage()); }) { Icon = '' });
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
-        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.SaveTools) > 1, delegate { pages.Push(MoveFromPage()); }) { Icon = '\uE8AB' });
+        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.SaveTools) > 1, delegate { OpenBoxView(); }) { Icon = '\uE8AB' });
         p.Items.Add(new Item("Settings", "Game options, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
         return p;
@@ -3250,6 +3303,97 @@ class LauncherForm : Form {
         }
         return null;
     }
+    void RenderBoxes(Graphics g, BoxView v, int w, int h, float m, float y, float bottom, float t, Theme th) {
+        boxHits.Clear();
+        var accent = Accent(th);
+        const int cols = 6;
+        float footH = smallFont.Height * 2.5f, gap = h * 0.008f, hh = itemFont.Height * 2.05f;
+        // On the tablet the two games sit side by side; on the phone, one above the other.
+        v.Wide = w > h * 1.1f;
+        float paneW = v.Wide ? (w - 2 * m - gap * 3) / 2f : w - 2 * m, paneH = v.Wide ? bottom - y - footH - gap : (bottom - y - footH - gap) / 2f;
+        RectangleF cursorRect = RectangleF.Empty; float heldCell = 0;
+        for (int pane = 0; pane < 2; pane++) {
+            var s = v.Side[pane];
+            if (s == null) continue;
+            float px = v.Wide ? m + pane * (paneW + gap * 3) : m, py = v.Wide ? y : y + pane * (paneH + gap);
+            int rows = (s.Slots + cols - 1) / cols;
+            float cell = Math.Min(paneW / cols, (paneH - hh - gap * 0.5f) / rows), gw = cell * cols, gx = px + (paneW - gw) / 2;
+            // The game and box, across its side: arrows step through its boxes, the name changes the game.
+            var head = new RectangleF(px, py, paneW, hh);
+            var gt = s.Game.Theme;
+            Card(g, head, hh * 0.3f, gt.Main, gt.Deep, Color.Empty, 0);
+            if (v.Pane == pane && v.Cursor < 0) using (var ring = Round(head, hh * 0.3f)) using (var pen = new Pen(accent, Math.Max(2.5f, w * 0.007f))) g.DrawPath(pen, ring);
+            float aw = hh * 0.9f;
+            var left = new RectangleF(head.X, head.Y, aw, hh); var right = new RectangleF(head.Right - aw, head.Y, aw, hh);
+            var mid = new RectangleF(head.X + aw, head.Y, head.Width - 2 * aw, hh);
+            Write(g, "◀", itemFont, gt.Ink, left, StringAlignment.Center, StringAlignment.Center, false);
+            Write(g, "▶", itemFont, gt.Ink, right, StringAlignment.Center, StringAlignment.Center, false);
+            string gameName = s.Game.Title.Replace("Pokemon ", "");
+            var nameArea = new RectangleF(mid.X, mid.Y + hh * 0.06f, mid.Width, hh * 0.5f);
+            Write(g, gameName, FitFont(g, gameName, nameArea.Size, itemBold, 0.6f, false), gt.Ink, nameArea, StringAlignment.Center, StringAlignment.Center, false);
+            string boxName = s.Problem != null ? "Can't read its save" : (v.Box[pane] < s.Names.Count ? s.Names[v.Box[pane]] : "Box " + (v.Box[pane] + 1)) + "  ·  " + (v.Box[pane] + 1) + " of " + s.Boxes;
+            var boxArea = new RectangleF(mid.X, mid.Y + hh * 0.5f, mid.Width, hh * 0.42f);
+            Write(g, boxName, FitFont(g, boxName, boxArea.Size, smallFont, 0.6f, false), Fade(gt.Ink, 210), boxArea, StringAlignment.Center, StringAlignment.Center, false);
+            boxHits.Add(new KeyValuePair<RectangleF, string>(left, "l" + pane));
+            boxHits.Add(new KeyValuePair<RectangleF, string>(right, "r" + pane));
+            boxHits.Add(new KeyValuePair<RectangleF, string>(mid, "h" + pane));
+            // The box: one slot per place, its Pokemon's picture in it.
+            float gy = head.Bottom + gap * 0.5f;
+            var well = new RectangleF(gx, gy, gw, cell * rows);
+            Group(g, well, cell * 0.16f);
+            if (s.Problem != null) { Write(g, s.Problem, smallFont, PhoneSub, RectangleF.Inflate(well, -cell * 0.3f, -cell * 0.3f), StringAlignment.Center, StringAlignment.Center, true); continue; }
+            // The slots first, then the Pokemon over them, as their pictures reach past their own slot.
+            for (int i = 0; i < s.Slots; i++) {
+                var r = new RectangleF(gx + (i % cols) * cell, gy + (i / cols) * cell, cell, cell);
+                Card(g, RectangleF.Inflate(r, -cell * 0.06f, -cell * 0.06f), cell * 0.16f, Color.FromArgb(242, 242, 247), Color.FromArgb(232, 232, 238), Color.Empty, 0);
+                boxHits.Add(new KeyValuePair<RectangleF, string>(r, "s" + pane + ":" + i));
+            }
+            for (int i = 0; i < s.Slots; i++) {
+                var r = new RectangleF(gx + (i % cols) * cell, gy + (i / cols) * cell, cell, cell);
+                var inner = RectangleF.Inflate(r, -cell * 0.06f, -cell * 0.06f);
+                var mon = s.At(v.Box[pane], i);
+                bool fromHere = v.Holding && v.Side[v.HeldPane] == s && v.HeldBox == v.Box[pane] && v.HeldSlot == i;
+                if (mon != null && !fromHere) {
+                    string key = (mon.Shiny ? "shiny/" : "") + mon.Dex;
+                    var pic = Sprites.Get(key);
+                    // Sprites carry wide empty margins: drawn larger than the slot, the Pokemon itself fills it.
+                    if (pic != null) DrawSprite(g, pic, RectangleF.Inflate(inner, cell * 0.22f, cell * 0.22f));
+                    else if (Sprites.Loading(key)) { SpinningBall(g, inner.X + inner.Width / 2, inner.Y + inner.Height / 2, inner.Width * 0.55f, t); spinning = true; }
+                    else Write(g, "#" + mon.Dex, smallFont, PhoneSub, inner, StringAlignment.Center, StringAlignment.Center, false);
+                    if (mon.Shiny) Write(g, "★", smallFont, Color.FromArgb(232, 170, 20), new RectangleF(inner.X + cell * 0.04f, inner.Y, inner.Width, smallFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
+                }
+                if (fromHere) using (var ring = Round(inner, cell * 0.16f)) using (var pen = new Pen(Fade(accent, 200), Math.Max(1.5f, cell * 0.04f)) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash }) g.DrawPath(pen, ring);
+                if (v.Pane == pane && v.Cursor == i) {
+                    cursorRect = inner; heldCell = cell;
+                    using (var ring = Round(inner, cell * 0.16f)) using (var pen = new Pen(accent, Math.Max(2.5f, cell * 0.06f))) g.DrawPath(pen, ring);
+                }
+                if (heldCell == 0) heldCell = cell;
+            }
+        }
+        // The Pokemon in hand: under the pointer while dragging, else just above the cursor.
+        BoxMon held = v.Holding ? v.Side[v.HeldPane].At(v.HeldBox, v.HeldSlot) : null;
+        if (held != null) {
+            float size = heldCell * 1.8f;
+            PointF at = v.Dragging ? v.Drag : !cursorRect.IsEmpty ? new PointF(cursorRect.X + cursorRect.Width / 2, cursorRect.Y - size * 0.15f) : PointF.Empty;
+            if (!at.IsEmpty) {
+                var r = new RectangleF(at.X - size / 2, at.Y - size / 2, size, size);
+                using (var shadow = new SolidBrush(Color.FromArgb(60, 0, 0, 0))) g.FillEllipse(shadow, r.X + size * 0.15f, r.Bottom - size * 0.18f, size * 0.7f, size * 0.16f);
+                string key = (held.Shiny ? "shiny/" : "") + held.Dex;
+                var pic = Sprites.Get(key);
+                if (pic != null) DrawSprite(g, pic, r); else { SpinningBall(g, at.X, at.Y, size * 0.5f, t); spinning = true; }
+            }
+        }
+        // What's under the cursor, or what to do; a note when a drop didn't happen.
+        var foot = new RectangleF(m, bottom - footH, w - 2 * m, footH);
+        var side = v.Side[v.Pane];
+        BoxMon under = side != null && v.Cursor >= 0 ? side.At(v.Box[v.Pane], v.Cursor) : null;
+        var show = held ?? under;
+        string first = v.Note ?? (show != null ? (show.Nick != "" && !string.Equals(show.Nick, show.Species, StringComparison.OrdinalIgnoreCase) ? show.Nick + " (" + show.Species + ")" : show.Species) + "   Lv " + show.Level + (show.Shiny ? "   ★ shiny" : "") + "   OT " + show.Trainer : "");
+        string second = v.Holding ? "Drop it on an empty slot. B puts it back." : "Drag a Pokemon, or A picks it up. The name changes the game.";
+        Write(g, first, v.Note != null ? smallBold : smallBold, v.Note != null ? Color.FromArgb(200, 60, 50) : PhoneText, new RectangleF(foot.X, foot.Y, foot.Width, footH * 0.45f), StringAlignment.Center, StringAlignment.Center, false);
+        Write(g, second, smallFont, PhoneSub, new RectangleF(foot.X, foot.Y + footH * 0.45f, foot.Width, footH * 0.55f), StringAlignment.Center, StringAlignment.Center, true);
+        if (v.Dragging) spinning = true;   // keep drawing while the pointer moves
+    }
     void RenderDexEntry(Graphics g, Page p, int w, int h, float m, float y, float bottom, float t, Theme th) {
         int id = p.DexId; bool caught = DexCaught(id);
         var area = new RectangleF(0, y, w, bottom - y);
@@ -3262,14 +3406,17 @@ class LauncherForm : Form {
         // The picture and the facts beside it.
         float pic = width * 0.42f, headH = pic + pad * 0.6f;
         Group(g, new RectangleF(m, cy, width, headH), rad);
-        var sprite = Sprites.Get((p.DexShiny ? "shiny/" : "") + id);
+        string spriteKey = (p.DexShiny ? "shiny/" : "") + id;
+        var sprite = Sprites.Get(spriteKey);
         if (sprite != null) DrawSprite(g, sprite, new RectangleF(m + pad * 0.3f, cy + pad * 0.3f, pic, pic));
+        else if (Sprites.Loading(spriteKey)) { SpinningBall(g, m + pad * 0.3f + pic / 2, cy + pad * 0.3f + pic / 2, pic * 0.32f, t); spinning = true; }
         if (p.DexShiny) Write(g, "\u2605", titleFont, Color.FromArgb(232, 170, 20), new RectangleF(m + pad * 0.6f, cy + pad * 0.4f, pic, titleFont.Height * 1.2f), StringAlignment.Near, StringAlignment.Near, false);
         float fx = m + pic + pad * 0.8f, fw = width - pic - pad * 1.2f, fy = cy + pad;
         if (!caught) {
             Write(g, "Seen, not caught yet.", itemFont, PhoneSub, new RectangleF(fx, fy, fw, headH - 2 * pad), StringAlignment.Near, StringAlignment.Near, true);
         } else if (info == null) {
             Write(g, "Getting this entry. It needs the internet the first time.", smallFont, PhoneSub, new RectangleF(fx, fy, fw, headH - 2 * pad), StringAlignment.Near, StringAlignment.Near, true);
+            if (DexInfos.Loading(id)) { float b = Math.Min(fw, headH) * 0.28f; SpinningBall(g, fx + b * 0.6f, cy + headH - pad - b * 0.6f, b, t); spinning = true; }
         } else {
             Write(g, info.Genus, itemFont, PhoneText, new RectangleF(fx, fy, fw, itemFont.Height * 2.4f), StringAlignment.Near, StringAlignment.Near, true);
             fy += g.MeasureString(info.Genus, itemFont, (int)fw).Height + pad * 0.4f;
@@ -3663,6 +3810,205 @@ class LauncherForm : Form {
         }
         return code == 0 ? null : (o.Trim() != "" ? o.Trim() : "Gen1Recomp could not take the save back.");
     }
+    // ---------- Move Pokemon: the box screen ----------
+    static BoxSide LoadSide(GameEntry g) {
+        var s = new BoxSide { Game = g };
+        string why;
+        s.File = SaveOf(g, out why);
+        if (s.File == null) { s.Problem = why; return s; }
+        int code; string layout = Bridge("layout \"" + s.File + "\"", out code);
+        if (code != 0) { s.Problem = layout.Trim(); return s; }
+        foreach (var row in layout.Split('\n')) {
+            var f = row.TrimEnd('\r').Split('\t');
+            if (f[0] == "boxes" && f.Length >= 3) { s.Boxes = Math.Max(1, int.Parse(f[1])); s.Slots = Math.Max(1, int.Parse(f[2])); }
+            else if (f[0] == "box" && f.Length >= 3) s.Names.Add(f[2]);
+        }
+        string list = Bridge("list \"" + s.File + "\"", out code);
+        if (code != 0) { s.Problem = list.Trim(); return s; }
+        foreach (var row in list.Split('\n')) {
+            var f = row.TrimEnd('\r').Split('\t');
+            if (f.Length < 8) continue;
+            int box, slot, level, dex;
+            if (!int.TryParse(f[0], out box) || !int.TryParse(f[1], out slot)) continue;
+            int.TryParse(f[4], out level); int.TryParse(f[6], out dex);
+            s.Mons[box * s.Slots + slot] = new BoxMon { Species = f[2], Nick = f[3], Level = level, Trainer = f[5], Dex = dex, Shiny = f[7] == "shiny" };
+        }
+        return s;
+    }
+    // Both boxes read again; the same game in both is one save, read once.
+    void LoadBoxes(BoxView v, GameEntry top, GameEntry bottom, Action then) {
+        BoxSide a = null, b = null;
+        Busy("Opening your boxes", delegate {
+            a = LoadSide(top);
+            b = bottom.Id == top.Id ? a : LoadSide(bottom);
+            return null;
+        }, delegate(string e) {
+            if (e != null) { ShowText("Can't open the boxes", e, null); return; }
+            v.Side[0] = a; v.Side[1] = b;
+            for (int i = 0; i < 2; i++) v.Box[i] = Math.Min(v.Box[i], v.Side[i].Boxes - 1);
+            if (then != null) then();
+            Invalidate();
+        });
+    }
+    void OpenBoxView() {
+        var games = Library.Games.Where(x => x.SaveTools).ToList();
+        if (games.Count == 0) return;
+        var top = current != null && current.SaveTools ? current : games[0];
+        var bottom = games.FirstOrDefault(x => x.Id != top.Id) ?? top;
+        var v = new BoxView();
+        LoadBoxes(v, top, bottom, delegate { pages.Push(new Page { Title = "Move Pokemon", Boxes = v }); });
+    }
+    // Another game in one of the two places.
+    void ChooseBoxGame(BoxView v, int pane) {
+        var p = new Page { Title = (pane == 0 ? "Top" : "Bottom") + ": which game?" };
+        foreach (var game in Library.Games.Where(x => x.SaveTools)) {
+            var g = game;
+            p.Items.Add(new Item(g.Title, g.Id == v.Side[pane].Game.Id ? "Showing now." : "", true, delegate {
+                pages.Pop();
+                var other = v.Side[1 - pane].Game;
+                v.Box[pane] = 0; v.HeldPane = -1; v.Cursor = -1; v.Pane = pane;
+                LoadBoxes(v, pane == 0 ? g : other, pane == 0 ? other : g, null);
+            }) { Icon = '', Theme = g.Theme });
+        }
+        pages.Push(p);
+    }
+    // What the box screen's move goes on to: the slot it was dropped on, and back to the boxes afterwards. The list
+    // pages' moves leave these empty.
+    string moveAt; Action moveAfter;
+    void BoxDrop(BoxView v, int toPane, int toSlot) {
+        int fromPane = v.HeldPane, fromBox = v.HeldBox, fromSlot = v.HeldSlot, toBox = v.Box[toPane];
+        v.HeldPane = -1; v.Dragging = false; v.Note = null;
+        var from = v.Side[fromPane]; var to = v.Side[toPane];
+        var mon = from.At(fromBox, fromSlot);
+        if (mon == null) return;
+        if (from.Game.Id == to.Game.Id) {
+            if (fromBox == toBox && fromSlot == toSlot) return;
+            if (AfterCapture(delegate { BoxDrop(v, toPane, toSlot); })) return;
+            string running = RunningGames();
+            if (running != "") { v.Note = "Close " + running + " first: saves can't change while it plays."; return; }
+            string problem = null; var g = from.Game; string file = from.File;
+            Busy("Moving " + mon.Species, delegate {
+                int code; string o = Bridge("relocate \"" + file + "\" " + fromBox + " " + fromSlot + " " + toBox + " " + toSlot + " \"" + Path.Combine(Config.State, "save-backups") + "\"", out code);
+                if (code != 0) { var f = o.Trim().Split('\t'); problem = f.Length > 1 ? f[1] : o.Trim(); return null; }
+                problem = ImportBack(g, file);
+                return null;
+            }, delegate(string e) {
+                if (e != null || problem != null) v.Note = e ?? problem;
+                LoadBoxes(v, v.Side[0].Game, v.Side[1].Game, null);
+            });
+            return;
+        }
+        if (to.At(toBox, toSlot) != null) { v.Note = "That slot is taken. Drop it on an empty one."; return; }
+        moveAt = "at:" + toBox + ":" + toSlot;
+        moveAfter = delegate { LoadBoxes(v, v.Side[0].Game, v.Side[1].Game, null); };
+        MoveNow(from.Game, from.File, fromBox.ToString(), fromSlot.ToString(), mon.Species, to.Game);
+    }
+    void BoxAct(Page p, string a) {
+        var v = p.Boxes; var side = v.Side[v.Pane];
+        const int cols = 6;
+        int count = side.Slots, rows = (count + cols - 1) / cols;
+        if (a == "left" || a == "right") {
+            int d = a == "right" ? 1 : -1;
+            if (v.Cursor < 0) { v.Box[v.Pane] = (v.Box[v.Pane] + d + side.Boxes) % side.Boxes; v.Note = null; }
+            else {
+                int col = v.Cursor % cols + d;
+                if (col >= 0 && col < cols && v.Cursor + d < count) { v.Cursor += d; v.Col = col; }
+                else if (v.Wide && ((d > 0 && v.Pane == 0) || (d < 0 && v.Pane == 1))) {
+                    // Side by side, the edge of one box leads into the other game's, on the same row.
+                    int row = v.Cursor / cols; v.Pane = 1 - v.Pane; var other = v.Side[v.Pane];
+                    int orows = (other.Slots + cols - 1) / cols;
+                    v.Col = d > 0 ? 0 : cols - 1;
+                    v.Cursor = Math.Min(other.Slots - 1, Math.Min(row, orows - 1) * cols + v.Col);
+                }
+            }
+        } else if (v.Wide && (a == "up" || a == "down")) {
+            // Side by side, up and down stay in the one game: the header at the top, its rows below.
+            if (a == "up") { if (v.Cursor >= cols) v.Cursor -= cols; else v.Cursor = -1; }
+            else { if (v.Cursor < 0) v.Cursor = Math.Min(count - 1, v.Col); else if (v.Cursor / cols < rows - 1) v.Cursor = Math.Min(count - 1, v.Cursor + cols); }
+        } else if (a == "up") {
+            if (v.Cursor < 0) { if (v.Pane == 1) { v.Pane = 0; var s0 = v.Side[0]; int r0 = (s0.Slots + cols - 1) / cols; v.Cursor = Math.Min(s0.Slots - 1, (r0 - 1) * cols + v.Col); } }
+            else if (v.Cursor < cols) v.Cursor = -1;
+            else v.Cursor -= cols;
+        } else if (a == "down") {
+            if (v.Cursor < 0) v.Cursor = Math.Min(count - 1, v.Col);
+            else if (v.Cursor / cols < rows - 1) v.Cursor = Math.Min(count - 1, v.Cursor + cols);
+            else if (v.Pane == 0) { v.Pane = 1; v.Cursor = -1; }
+        } else if (a == "ok") {
+            if (v.Cursor < 0) { if (!v.Holding) ChooseBoxGame(v, v.Pane); return; }
+            if (!v.Holding) {
+                if (side.At(v.Box[v.Pane], v.Cursor) != null) { v.HeldPane = v.Pane; v.HeldBox = v.Box[v.Pane]; v.HeldSlot = v.Cursor; v.Note = null; }
+            } else BoxDrop(v, v.Pane, v.Cursor);
+        }
+    }
+    // The box screen's places under the pointer, from the last paint: s<pane>:<slot>, h<pane> (the game), l/r<pane> (boxes).
+    readonly List<KeyValuePair<RectangleF, string>> boxHits = new List<KeyValuePair<RectangleF, string>>();
+    string BoxHitAt(Point pt) {
+        var inside = new PointF(pt.X - screenX, pt.Y - screenY);
+        foreach (var h in boxHits) if (h.Key.Contains(inside)) return h.Value;
+        return null;
+    }
+    BoxView TopBoxes() { return job == null && pages.Count > 0 ? pages.Peek().Boxes : null; }
+    // Pressing on a Pokemon picks it up, to drag; with one already held, pressing on a slot puts it down there.
+    bool BoxMouseDown(MouseEventArgs e) {
+        var v = TopBoxes();
+        if (v == null || e.Button != MouseButtons.Left) return false;
+        string hit = BoxHitAt(e.Location);
+        if (hit == null) return false;
+        if (hit[0] != 's') return true;   // headers act on the click
+        int pane = hit[1] - '0', slot = int.Parse(hit.Substring(3));
+        v.Pane = pane; v.Cursor = slot; v.Col = slot % 6;
+        if (v.Holding) { BoxDrop(v, pane, slot); swallowClick = true; Invalidate(); return true; }
+        if (v.Side[pane].At(v.Box[pane], slot) == null) return true;
+        v.HeldPane = pane; v.HeldBox = v.Box[pane]; v.HeldSlot = slot; v.Note = null;
+        v.Dragging = true; v.Dragged = false; v.DragStart = v.Drag = new PointF(e.X - screenX, e.Y - screenY);
+        swallowClick = true; Invalidate();
+        return true;
+    }
+    bool BoxMouseMove(MouseEventArgs e) {
+        var v = TopBoxes();
+        if (v == null) return false;
+        string hit = BoxHitAt(e.Location);
+        if (v.Dragging) {
+            v.Drag = new PointF(e.X - screenX, e.Y - screenY);
+            if (Math.Abs(v.Drag.X - v.DragStart.X) + Math.Abs(v.Drag.Y - v.DragStart.Y) > 8) v.Dragged = true;
+            // Held over a box arrow, the box turns, as HOME does.
+            string arrow = hit != null && (hit[0] == 'l' || hit[0] == 'r') ? hit : null;
+            if (arrow != v.HoverArrow) { v.HoverArrow = arrow; v.HoverSince = DateTime.Now; }
+            else if (arrow != null && (DateTime.Now - v.HoverSince).TotalSeconds > 0.7) {
+                int pane = arrow[1] - '0'; var s = v.Side[pane];
+                v.Box[pane] = (v.Box[pane] + (arrow[0] == 'r' ? 1 : -1) + s.Boxes) % s.Boxes; v.HoverSince = DateTime.Now;
+            }
+            Invalidate();
+        }
+        if (hit != null && hit[0] == 's') { int pane = hit[1] - '0', slot = int.Parse(hit.Substring(3)); if (v.Pane != pane || v.Cursor != slot) { v.Pane = pane; v.Cursor = slot; v.Col = slot % 6; Invalidate(); } }
+        return true;
+    }
+    bool BoxMouseUp(MouseEventArgs e) {
+        var v = TopBoxes();
+        if (v == null || !v.Dragging) return false;
+        v.Dragging = false; v.HoverArrow = null;
+        string hit = BoxHitAt(e.Location);
+        // A press and release on the same place is a pick-up: the next press puts it down.
+        if (!v.Dragged) { Invalidate(); return true; }
+        if (hit != null && hit[0] == 's') BoxDrop(v, hit[1] - '0', int.Parse(hit.Substring(3)));
+        else v.HeldPane = -1;
+        Invalidate();
+        return true;
+    }
+    bool swallowClick;
+    bool BoxClick(MouseEventArgs e) {
+        var v = TopBoxes();
+        if (v == null) return false;
+        if (swallowClick) { swallowClick = false; return true; }
+        if (e.Button != MouseButtons.Left) return false;
+        string hit = BoxHitAt(e.Location);
+        if (hit == null) return false;
+        int pane = hit[1] - '0'; var s = v.Side[pane];
+        if (hit[0] == 'l' || hit[0] == 'r') { v.Box[pane] = (v.Box[pane] + (hit[0] == 'r' ? 1 : -1) + s.Boxes) % s.Boxes; v.Pane = pane; v.Cursor = -1; v.Note = null; }
+        else if (hit[0] == 'h' && !v.Holding) ChooseBoxGame(v, pane);
+        Invalidate();
+        return true;
+    }
     Page MoveFromPage() {
         var p = new Page { Title = "Move Pokemon: from which game?" };
         foreach (var game in Library.Games.Where(x => x.SaveTools)) {
@@ -3703,7 +4049,11 @@ class LauncherForm : Form {
     }
     // First ask what stands in the way. Anything the player must decide goes on a page; a clean move just happens.
     void MoveNow(GameEntry from, string file, string box, string slot, string name, GameEntry to) {
-        if (AfterCapture(delegate { MoveNow(from, file, box, slot, name, to); })) return;
+        string at = moveAt; Action after = moveAfter; moveAt = null; moveAfter = null;
+        MoveNow(from, file, box, slot, name, to, at, after);
+    }
+    void MoveNow(GameEntry from, string file, string box, string slot, string name, GameEntry to, string at, Action after) {
+        if (AfterCapture(delegate { MoveNow(from, file, box, slot, name, to, at, after); })) return;
         string running = RunningGames();
         if (running != "") { ShowText("Close the game first", "Already running: " + running + ". Saves can't change while it plays.", null); return; }
         string plan = null, target = null, why = null; int planCode = 0;
@@ -3717,12 +4067,12 @@ class LauncherForm : Form {
             var rows = plan.Split('\n').Select(l => l.TrimEnd('\r').Split('\t')).Where(f => f[0] != "").ToList();
             if (planCode != 0) { var n = rows.Find(f => f[0] == "nope"); ShowText("Not moved", n != null && n.Length > 1 ? n[1] : plan.Trim(), null); return; }
             bool forced = rows.Exists(f => f[0] == "forced");
-            if (!forced && !rows.Exists(f => f[0] == "conflict")) { RunMove(from, file, box, slot, name, to, target, ""); return; }
-            pages.Push(ResolvePage(from, file, box, slot, name, to, target, rows, forced));
+            if (!forced && !rows.Exists(f => f[0] == "conflict")) { RunMove(from, file, box, slot, name, to, target, "", at, after); return; }
+            pages.Push(ResolvePage(from, file, box, slot, name, to, target, rows, forced, at, after));
         });
     }
     // A blocked move: the player deletes or changes each conflict, then retries.
-    Page ResolvePage(GameEntry from, string file, string box, string slot, string name, GameEntry to, string target, List<string[]> rows, bool forced) {
+    Page ResolvePage(GameEntry from, string file, string box, string slot, string name, GameEntry to, string target, List<string[]> rows, bool forced, string at, Action after) {
         var p = new Page { Title = name + " to " + to.Title.Replace("Pokemon ", ""), Theme = to.Theme };
         var answers = new Dictionary<string, string>();   // move number -> new id, "0" deletes
         var kept = rows.Count(f => f[0] == "ok");
@@ -3756,7 +4106,7 @@ class LauncherForm : Form {
         retry = new Item("Retry the move", "", false, delegate {
             pages.Pop();
             string opts = string.Join(" ", answers.Select(a => "move:" + a.Key + ":" + a.Value).ToArray()) + (dropItem ? " dropitem" : "");
-            RunMove(from, file, box, slot, name, to, target, opts);
+            RunMove(from, file, box, slot, name, to, target, opts, at, after);
         }) { Icon = '\uE72C' };
         p.Items.Add(retry);
         if (forced) p.Items.Add(new Item("About this move", "", false, null) { Icon = '\uE946', Info = "No real transfer exists here, so OpenHome's converter makes the copy. Its form, ball and origin may change, and PKHeX may flag it as not legal. Its original data is kept, and comes back when it returns to its own generation." });
@@ -3774,18 +4124,26 @@ class LauncherForm : Form {
         }
         return p;
     }
-    void RunMove(GameEntry from, string file, string box, string slot, string name, GameEntry to, string target, string options) {
-        string message = null; bool ok = false;
+    void RunMove(GameEntry from, string file, string box, string slot, string name, GameEntry to, string target, string options, string at, Action after) {
+        string message = null; bool ok = false, notes = false;
         Busy("Moving " + name, delegate {
-            int code; string o = Bridge("move \"" + file + "\" " + box + " " + slot + " \"" + target + "\" \"" + Path.Combine(Config.State, "save-backups") + "\" " + options, out code);
+            int code; string o = Bridge("move \"" + file + "\" " + box + " " + slot + " \"" + target + "\" \"" + Path.Combine(Config.State, "save-backups") + "\" " + options + (at != null ? " " + at : ""), out code);
             var f = o.Trim().Split('\t');
             if (code != 0) { message = f.Length > 1 ? f[1] : o.Trim(); return null; }
             // Destination first: any failure after this duplicates the Pokemon, it never loses it.
             string back = ImportBack(to, target) ?? ImportBack(from, file);
             ok = back == null;
+            notes = ok && f.Length > 2 && (f[2] == "not-legal" || (f.Length > 3 && f[3] == "restored"));
             message = ok ? name + " is now in " + to.Title + "'s PC boxes." + (f.Length > 3 && f[3] == "restored" ? "\n\nIts original data is back: its origin, ball and moves, as they were before it left." : "") + (f.Length > 2 && f[2] == "not-legal" ? "\n\nPKHeX's legality check flags it as not legal, which matters only for online play." + (f.Length > 3 ? "" : " Its original data is kept, and comes back if it returns to its own generation.") : "") : back;
             return null;
         }, delegate(string e) {
+            if (after != null) {
+                // From the box screen: back to it, read again; a word only when there's something to say.
+                while (pages.Count > 1 && pages.Peek().Boxes == null) pages.Pop();
+                after();
+                if (e != null || !ok || notes) ShowText(ok ? "Moved" : "Not moved", e ?? message, null);
+                return;
+            }
             while (pages.Count > 1) pages.Pop();
             ShowText(ok ? "Moved" : "Not moved", e ?? message, null);
         });
@@ -4660,10 +5018,12 @@ class LauncherForm : Form {
             // A launcher left open still finds out.
             if (job == null && (DateTime.Now - updateCheckedAt).TotalHours >= 6) { updateCheckedAt = DateTime.Now; Task.Run(() => Updater.Check()); }
         }
+        // A tablet while Move Pokemon's boxes are anywhere in the page stack, a phone again once they've closed.
+        MorphTowards(pages.Any(pg => pg.Boxes != null));
         if (BannerAge((float)clock.Elapsed.TotalSeconds) >= 0) dirty = true;
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
-        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
+        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
@@ -4705,7 +5065,12 @@ class LauncherForm : Form {
     // No window frame, so dragging the shell moves the device.
     protected override void OnMouseDown(MouseEventArgs e) {
         base.OnMouseDown(e);
+        if (PromptAt(e.Location) == null && BoxMouseDown(e)) return;
         if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
+    }
+    protected override void OnMouseUp(MouseEventArgs e) {
+        base.OnMouseUp(e);
+        BoxMouseUp(e);
     }
     protected override bool ShowWithoutActivation { get { return Native.Quiet; } }
     readonly List<KeyValuePair<RectangleF, string>> promptHits = new List<KeyValuePair<RectangleF, string>>();
@@ -4715,6 +5080,7 @@ class LauncherForm : Form {
         base.OnMouseMove(e);
         string over = PromptAt(e.Location);
         if (over != hoverPrompt) { hoverPrompt = over; Cursor = over != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
+        if (BoxMouseMove(e)) return;
         int i = HitAt(e.Location);
         if (job == null && over != "N" && over != "NX" && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
     }
@@ -4731,6 +5097,7 @@ class LauncherForm : Form {
             return;
         }
         if (e.Button == MouseButtons.Right) { Act("back", false); return; }
+        if (BoxClick(e)) return;
         if (e.Button != MouseButtons.Left) return;
         int i = HitAt(e.Location);
         if (i >= 0 && pages.Count > 0) { pages.Peek().Sel = i; Act("ok", false); }
@@ -4741,9 +5108,14 @@ class LauncherForm : Form {
         lastAction = a; lastFromPad = fromPad; lastActionTime = DateTime.Now;
         if (pages.Count == 0) return;
         var p = pages.Peek();
-        if (a == "back") {
+        if (a == "back" && p.Boxes != null && p.Boxes.Holding) {
+            // B puts a held Pokemon back where it was, before it leaves the boxes.
+            p.Boxes.HeldPane = -1; p.Boxes.Dragging = false;
+        } else if (a == "back") {
             if (p.OnBack != null) p.OnBack(); else pages.Pop();
             if (pages.Count == 0) pages.Push(MainPage());
+        } else if (p.Boxes != null) {
+            BoxAct(p, a);
         } else if (p.DexId > 0) {
             if (a == "up" || a == "down") p.BodyScroll += (a == "down" ? 1 : -1) * bodyFont.Height * 3;
             else if (a == "ok") { if (DexShiny(p.DexId)) p.DexShiny = !p.DexShiny; }
@@ -4790,7 +5162,9 @@ class LauncherForm : Form {
     static readonly Color FootInk = Color.FromArgb(196, 202, 214);
     readonly Stopwatch clock = Stopwatch.StartNew();
 
-    protected override void OnPaint(PaintEventArgs ev) { Render(ev.Graphics, ClientSize.Width, ClientSize.Height); Outro(ev.Graphics, ClientSize.Width, ClientSize.Height); }
+    // Set while a loading Poke Ball is on screen, so the window keeps redrawing and it turns.
+    bool spinning;
+    protected override void OnPaint(PaintEventArgs ev) { spinning = false; Render(ev.Graphics, ClientSize.Width, ClientSize.Height); Outro(ev.Graphics, ClientSize.Width, ClientSize.Height); }
 
     string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
@@ -5320,7 +5694,72 @@ class LauncherForm : Form {
     }
     // The whole window is the device: its shell, top lens, hardware controls, and an inset screen with the menu on it.
     float screenX, screenY;
-    RectangleF ScreenRect(int w, int h) { return new RectangleF(w * 0.06f, h * 0.115f, w * 0.88f, h * 0.665f); }
+    RectangleF ScreenRect(int w, int h) {
+        // Unfolding, the screen grows down into the space the D-pad leaves.
+        float pm = PhoneW(h) * 0.06f, e = TabletEase;
+        return new RectangleF(pm, h * 0.115f, w - 2 * pm, h * (0.665f + 0.18f * e));
+    }
+    // Tablet mode, for Move Pokemon: the device opens out sideways into a tablet Pokedex, one wide screen with no D-pad,
+    // so two games' boxes sit side by side at a size that's easy to see, and folds back to the phone when the boxes close.
+    // It moves smoothly both ways: the case widens from its centre, the screen grows and the controls slide away.
+    // Text stays its phone size; the shell's parts keep the phone's proportions.
+    float tabletK, tabletLast; int phoneW, tabletW, morphCentre;
+    bool tablet { get { return tabletK > 0; } }
+    float TabletEase { get { float k = tabletK; return k * k * (3 - 2 * k); } }
+    int PhoneW(int h) { return phoneW > 0 ? phoneW : h * 60 / 100; }
+    void MorphTowards(bool on) {
+        float target = on ? 1 : 0, now = (float)clock.Elapsed.TotalSeconds;
+        if (tabletK == target) { tabletLast = now; return; }
+        if (phoneW == 0) phoneW = ClientSize.Width;
+        if (tabletK == 0 || tabletK == 1) {
+            // Starting out: where it opens from, and how wide it gets on this screen.
+            morphCentre = Left + Width / 2;
+            var area = Screen.FromControl(this).WorkingArea;
+            tabletW = Math.Max(phoneW, Math.Min(area.Width * 94 / 100, ClientSize.Height * 3 / 2));
+            tabletLast = now - 0.016f;   // the first step counts one tick, so it gets going
+        }
+        float step = Math.Min(0.1f, Math.Max(0f, now - tabletLast)) / 0.35f;
+        tabletLast = now;
+        tabletK = on ? Math.Min(1f, tabletK + step) : Math.Max(0f, tabletK - step);
+        int h = ClientSize.Height, w = (int)Math.Round(phoneW + (tabletW - phoneW) * TabletEase);
+        var area2 = Screen.FromControl(this).WorkingArea;
+        SuspendLayout();
+        ClientSize = new Size(w, h);
+        Location = new Point(Math.Max(area2.Left, Math.Min(area2.Right - Width, morphCentre - Width / 2)), Top);
+        using (var outline = Round(new RectangleF(0, 0, w, h), CornerRadius(phoneW))) Region = new Region(outline);
+        ResumeLayout(false);
+        Invalidate();
+    }
+    void TabletShell(Graphics g, int w, int h, Theme th, float t) {
+        int pw = PhoneW(h);
+        float corner = CornerRadius(pw), edge = Math.Max(3f, pw * 0.008f);
+        var body = new RectangleF(0, 0, w, h);
+        using (var path = Round(body, corner)) using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(body, Mix(th.Main, Color.White, 0.1f), Mix(th.Main, th.Deep, 0.75f), 78f)) g.FillPath(b, path);
+        var lip = new RectangleF(edge, edge, w - 2 * edge, h - 2 * edge);
+        using (var path = Round(lip, corner - edge)) using (var pen = new Pen(Fade(Color.White, 70), Math.Max(1.5f, pw * 0.003f))) g.DrawPath(pen, path);
+        using (var path = Round(new RectangleF(1, 1, w - 2, h - 2), corner)) using (var pen = new Pen(Mix(th.Deep, Color.Black, 0.45f), edge)) g.DrawPath(pen, path);
+        float fold = h * 0.1f;
+        using (var pen = new Pen(Fade(Color.Black, 70), Math.Max(1.5f, h * 0.002f))) g.DrawLine(pen, edge, fold, w - edge, fold);
+        using (var pen = new Pen(Fade(Color.White, 60), Math.Max(1f, h * 0.0012f))) g.DrawLine(pen, edge, fold + Math.Max(2f, h * 0.002f), w - edge, fold + Math.Max(2f, h * 0.002f));
+        float lensR = h * 0.038f, topY = h * 0.056f;
+        Lens(g, pw * 0.06f + lensR * 1.14f, topY, lensR, t, true);
+        var native = g.MeasureString("NATIVE", markFont);
+        float wx = pw * 0.06f + lensR * 2.9f + lensR * 2.2f, wy = topY - native.Height * 0.1f;
+        Write(g, "NATIVE", markFont, th.Ink, new RectangleF(wx, wy, native.Width + 8, native.Height), StringAlignment.Near, StringAlignment.Near, false);
+        Write(g, "MONS", markLight, th.Ink, new RectangleF(wx + native.Width * 0.92f, wy, pw * 0.3f, native.Height), StringAlignment.Near, StringAlignment.Near, false);
+        float key = h * 0.022f, ky = h * 0.02f, kx = w - pw * 0.05f - key;
+        HardKey(g, new RectangleF(kx, ky, key, key), "X", "");
+        HardKey(g, new RectangleF(kx - key * 1.5f, ky, key, key), "M", "");
+        // While it unfolds, the phone's controls slide down out of the case.
+        float e = TabletEase;
+        if (e < 1) {
+            var st = g.Save();
+            using (var clip = Round(lip, corner - edge)) g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+            g.TranslateTransform((w - pw) / 2f, h * 0.3f * e);
+            ShellControls(g, pw, h, th);
+            g.Restore(st);
+        }
+    }
     void Render(Graphics g, int w, int h) {
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
@@ -5328,12 +5767,14 @@ class LauncherForm : Form {
         var th = Cur();
         float t = (float)clock.Elapsed.TotalSeconds;
         g.Clear(Line);
-        Shell(g, w, h, th, t);
+        if (tablet) TabletShell(g, w, h, th, t); else Shell(g, w, h, th, t);
         var s = ScreenRect(w, h);
         screenX = s.X; screenY = s.Y;
-        float rad = w * 0.03f;
+        // Sized by the phone's width, so the tablet's glass sits as the phone's does.
+        int pw = tablet ? PhoneW(h) : w;
+        float rad = pw * 0.03f;
         // A black glass front, set into a recess in the case.
-        float inset = w * 0.016f, rim = inset * 0.45f;
+        float inset = pw * 0.016f, rim = inset * 0.45f;
         var front = new RectangleF(s.X - inset, s.Y - inset, s.Width + 2 * inset, s.Height + 2 * inset);
         var recess = new RectangleF(front.X - rim, front.Y - rim, front.Width + 2 * rim, front.Height + 2 * rim);
         using (var path = Round(recess, rad * 1.6f)) using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(recess, Mix(th.Deep, Color.Black, 0.55f), Mix(th.Main, Color.White, 0.25f), 90f)) g.FillPath(b, path);
@@ -5379,7 +5820,10 @@ class LauncherForm : Form {
         float key = h * 0.022f, ky = h * 0.02f, kx = w - w * 0.05f - key;
         HardKey(g, new RectangleF(kx, ky, key, key), "X", "");
         HardKey(g, new RectangleF(kx - key * 1.5f, ky, key, key), "M", "");
-        // The bottom: D-pad, speaker slots, B and A.
+        ShellControls(g, w, h, th);
+    }
+    // The bottom: D-pad, speaker slots, B and A, across a phone-wide strip.
+    void ShellControls(Graphics g, int w, int h, Theme th) {
         float cy = h * 0.888f, d = h * 0.05f, cx = w * 0.2f;
         using (var b = new SolidBrush(Fade(Color.Black, 70))) g.FillEllipse(b, cx - d * 1.75f, cy - d * 1.75f, d * 3.5f, d * 3.5f);
         float arm = d * 0.62f;
@@ -5529,7 +5973,11 @@ class LauncherForm : Form {
             var st = g.Save();
             g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
             if (intro != null) GameArt.Draw(g, intro, widget);
-            else using (var b = new SolidBrush(th.Deep)) g.FillRectangle(b, widget);
+            else {
+                using (var b = new SolidBrush(th.Deep)) g.FillRectangle(b, widget);
+                // Its title screen is being made right now.
+                if (current != null && GameArt.Making == current.Id) { SpinningBall(g, widget.X + widget.Width / 2, widget.Y + widget.Height * 0.36f, widget.Height * 0.34f, t, true); spinning = true; }
+            }
             var low = new RectangleF(widget.X, widget.Y + widget.Height * 0.45f, widget.Width, widget.Height * 0.55f);
             using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(low.X, low.Y - 1, low.Width, low.Height + 2), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(205, 0, 0, 0), 90f)) g.FillRectangle(b, low);
             g.Restore(st);
@@ -5608,6 +6056,8 @@ class LauncherForm : Form {
         using (var pen = new Pen(accent, Math.Max(2f, h * 0.0035f))) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; g.DrawLines(pen, new[] { new PointF(cx0 + ch * 0.8f, cmid - ch), new PointF(cx0, cmid), new PointF(cx0 + ch * 0.8f, cmid + ch) }); }
         Write(g, "Back", itemFont, accent, new RectangleF(cx0 + ch * 1.4f, back.Y, back.Width, back.Height), StringAlignment.Near, StringAlignment.Center, false);
         float y = back.Bottom;
+        // The boxes take the whole screen under Back: their headers already say what they are.
+        if (p.Boxes != null) { RenderBoxes(g, p.Boxes, w, h, m, y + h * 0.004f, bottom, t, th); return; }
         var titleArea = new SizeF(w - 2 * m, titleFont.Height * 1.3f);
         var tf = FitFont(g, p.Title, titleArea, titleFont, 0.6f, false);
         Write(g, p.Title, tf, PhoneText, new RectangleF(m, y, titleArea.Width, titleArea.Height), StringAlignment.Near, StringAlignment.Center, false);
@@ -5702,6 +6152,7 @@ class LauncherForm : Form {
         var ib = new RectangleF(ix, iy, icon, icon);
         var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
         if (pic != null) DrawSprite(g, pic, new RectangleF(ib.X - icon * 0.15f, ib.Y - icon * 0.15f, icon * 1.3f, icon * 1.3f));
+        else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, ib.X + icon / 2, ib.Y + icon / 2, icon * 0.8f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
         else if (it.Theme != null) Cart(g, ib.X + icon * 0.1f, ib.Y, icon, it.Theme);
         else {
             Color tint = it.On ? RowColors[it.Icon % RowColors.Length] : Text3;
