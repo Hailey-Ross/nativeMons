@@ -13,6 +13,8 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
 
+<p align="center"><img src="https://assets.hails.cc/nativeMons/early-preview.gif" alt="An early preview of the nativeMons launcher" width="360"></p>
+
 ## Supported games
 
 | Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat |
@@ -111,7 +113,7 @@ Each engine has its own page of options, stored where its menus keep them, so ch
 
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
 
-**Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game, the engine and a timer, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Turn it off in Settings.
+**Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game and a timer, with a button others can use to find nativeMons on GitHub, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Turn it off in Settings.
 
 ## nativeplat
 

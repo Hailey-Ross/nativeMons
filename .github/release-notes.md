@@ -38,7 +38,7 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **Settings** for both engines in one place, including **Download Pokedex** for offline play.
 - **Updates:** the launcher checks this project's releases, shows a short banner when a build is ready, and can update itself and every engine from one checked download, leaving your saves and settings alone. Choose **Stable** or **Dev** on the Updates page.
 - **Several copies of a game:** if your folders hold more than one version, a game's page lets you choose which to use. GBA ROM hacks can be chosen too: they run on Fulldex only, with their own save.
-- **Discord status:** while you play, Discord shows the game and that it's played through nativeMons, with a play timer. It clears when the game closes. Turn it off in Settings.
+- **Discord status:** while you play, Discord shows "Playing nativeMons" with the game, a play timer and a button to nativeMons on GitHub. It clears when the game closes. Turn it off in Settings.
 - **Mods** for Gen1Recomp games, and **hails.nds-Patcher** for `.nds` ROMs that won't load.
 
 ## Testing and reports
