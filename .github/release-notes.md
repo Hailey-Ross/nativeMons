@@ -2,7 +2,7 @@
 
 1. **You need** Windows 10 or 11 (64-bit) and your own ROMs. No games are included. `.nds` ROMs that need patching also need [Python 3](https://www.python.org/downloads/).
 2. **Download** the zip above and extract it to a folder of its own (not inside Program Files).
-3. **Start** `NativeMonsLauncher.exe`. Choose **ROM folders** and add the folder with your `.gb`, `.gbc`, `.gba` and `.nds` files. File names don't matter: games are found by reading each ROM.
+3. **Start** `NativeMonsLauncher.exe`. Choose **ROM folders** and add the folder with your `.gb`, `.gbc`, `.gba` and `.nds` files, or drop it onto the window. Single ROMs and `.zip` files can be dropped too. File names don't matter: games are found by reading each ROM.
 4. **Your saves:** **Settings > Import saves** brings in saves from other emulators. The originals aren't changed.
 
 The launcher prepares your Game Boy and GBA games for Gen1Recomp from your ROMs while it starts, so they open straight away when you press Play. It also makes the title screen and town wallpaper of the game it opens on, so Play shows that game straight away; the other games' pictures are made in the background once the menu is up. All of this runs out of sight at low priority. The first start after adding ROMs takes longer, about a minute for a full set; after that it opens in about a second. Windows Defender scans the many small files preparing writes, which is most of the load during that first start.
@@ -23,6 +23,7 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **D-pad or left stick:** move. **A:** select. **B:** back.
 - **Keyboard:** arrow keys or WASD, Enter, Esc.
 - **Mouse:** hover to select, click to choose, right-click to go back. The D-pad and buttons on the device can be clicked too, and dragging its shell moves the window.
+- **In a game:** **Settings > Controls** lists each engine's keys, such as saving, fast forward, snapshots and screenshots.
 
 ## What's in it
 
@@ -42,6 +43,8 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **Add a PC game:** any other self-contained game with its own program can be added from Games, run where it is or copied into the launcher. No extras: the launcher starts it and leaves its saves to the game.
 - **Quick start:** games open straight at their title screen. On Gen1Recomp and nativeplat the last game you played waits there while the menu is open, so Play starts it at once; DS games on Fulldex start from a title-screen snapshot, used only while your save is exactly the one it was made from. Turn it off in Settings.
 - **Discord status:** while you play, Discord shows "Playing nativeMons" with the game, a play timer and a button to nativeMons on GitHub. It clears when the game closes. Turn it off in Settings.
+- **Drop files on the window:** ROM folders, single ROMs, `.zip` files of ROMs (copied out, the zip unchanged) and `.sav` saves. A page says what each ROM turned out to be.
+- **Shortcuts:** `NativeMonsLauncher.exe --game <id> [--slot <save>] [--launcher]` starts a game, optionally on a chosen save, or opens its page. If the launcher is already open, it takes the request.
 - **Mods** for Gen1Recomp games, and **hails.nds-Patcher** for `.nds` ROMs that won't load.
 
 ## Testing and reports
