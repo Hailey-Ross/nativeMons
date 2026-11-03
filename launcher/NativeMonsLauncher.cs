@@ -210,6 +210,7 @@ class Theme {
     }
     public static readonly Theme Default = Make("#D6302B", "#8E1712", "#F2665C", "plain");
     public static Theme[] Parade = new[] { Default };
+    public Theme Copy() { return (Theme)MemberwiseClone(); }
 }
 class GameEntry {
     public Theme Theme = Theme.Default;
@@ -234,6 +235,11 @@ class GameEntry {
         return r.Label + " (" + r.Sha1.Substring(0, 6) + ")";
     }
     public bool Imported;
+    // A romhack of a game in games.json: a game of its own, made from its base game's entry (Library.Hacks). It runs on
+    // Fulldex only, with its own save, and reads as its base game's saves do.
+    public string BaseId;
+    public bool IsHack { get { return BaseId != null; } }
+    public GameEntry CopyOf() { return (GameEntry)MemberwiseClone(); }
     public bool OnGen1 { get { return Gen1 != null && (Imported || Gen1Rom != null); } }
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
     public bool OnPort { get { return Port != null && FulldexRom != null && File.Exists(Config.PlatinumPort); } }
@@ -469,7 +475,9 @@ static class PcGames {
 // removed with it) or runs the player's where it is. They have none of the extras (captured title, wallpaper, save
 // handling): the launcher can't know where such a game keeps its saves, so it leaves them to the game.
 static class CustomGames {
-    public class Entry { public string id, title, exe; public bool copy; }
+    // exe: the program (run where it is), or what the copy came from. rel: the program inside the launcher's copy, when it
+    // isn't at the top of it (a zip's game in a subfolder); older entries have none and keep their program at the top.
+    public class Entry { public string id, title, exe, rel; public bool copy; }
     static string File_ { get { return Path.Combine(Config.State, "pc-games.json"); } }
     public static List<Entry> All() {
         try { return File.Exists(File_) ? new JavaScriptSerializer().Deserialize<List<Entry>>(File.ReadAllText(File_)) ?? new List<Entry>() : new List<Entry>(); }
@@ -488,20 +496,82 @@ static class CustomGames {
         return g;
     }
     public static string Dir(Entry e) { return e.copy ? Path.Combine(Config.Here, "games", e.id) : Path.GetDirectoryName(e.exe); }
-    public static string Exe(Entry e) { return e.copy ? Path.Combine(Dir(e), Path.GetFileName(e.exe)) : e.exe; }
+    public static string Exe(Entry e) { return e.copy ? Path.Combine(Dir(e), string.IsNullOrEmpty(e.rel) ? Path.GetFileName(e.exe) : e.rel) : e.exe; }
+    // A folder's programs, the likeliest game first: nearest the top, then by name, leaving out installers, uninstallers,
+    // crash reporters and runtimes.
+    static readonly string[] NotTheGame = { "unins", "setup", "install", "crash", "redist", "vcredist", "dxsetup", "dotnet", "update", "launcherhelper", "notification_helper" };
+    public static List<string> Programs(string dir) {
+        string root = dir.TrimEnd('\\');
+        return Library.FilesUnder(root).Where(f => Path.GetExtension(f).ToLowerInvariant() == ".exe")
+            .Where(f => { string n = Path.GetFileNameWithoutExtension(f).ToLowerInvariant().Replace(" ", "").Replace("_", ""); return !NotTheGame.Any(n.Contains); })
+            .OrderBy(f => f.Substring(root.Length).Count(c => c == '\\')).ThenBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+    // A .zip unpacked into games\<id>: its files only, never outside that folder. A zip holding one folder is unpacked from
+    // inside it. Then the program to run is chosen from it (choose: null keeps it all and lets the player pick).
+    public static string Unpack(string zip, Action<string, float> report, out string work, out List<string> programs) {
+        work = null; programs = null;
+        if (!File.Exists(zip)) return "That zip isn't there.";
+        // One left by a choice that was never made (the page closed with Back) goes first.
+        try { if (Directory.Exists(Path.Combine(Config.Here, "games"))) foreach (var old in Directory.GetDirectories(Path.Combine(Config.Here, "games"), "unpacking-*")) PcGames.Remove(old); } catch { }
+        string stage = Path.Combine(Config.Here, "games", "unpacking-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        try {
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(zip)) {
+                var files = archive.Entries.Where(x => x.Name != "").ToList();
+                if (files.Count == 0) return "That zip is empty.";
+                string top = null;
+                var firsts = files.Select(x => x.FullName.Replace('\\', '/').Split('/')).ToList();
+                if (firsts.All(s => s.Length > 1) && firsts.Select(s => s[0]).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1) top = firsts[0][0] + "/";
+                long total = Math.Max(1, files.Sum(x => x.Length)), done = 0;
+                string full = Path.GetFullPath(stage) + "\\";
+                foreach (var entry in files) {
+                    string name = entry.FullName.Replace('\\', '/');
+                    if (top != null) name = name.Substring(top.Length);
+                    string target = Path.GetFullPath(Path.Combine(stage, name.Replace('/', '\\')));
+                    if (!target.StartsWith(full, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("It holds a file meant for outside its folder (" + entry.FullName + ").");
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    System.IO.Compression.ZipFileExtensions.ExtractToFile(entry, target, true);
+                    done += entry.Length;
+                    report("Unpacking " + name, (float)done / total);
+                }
+            }
+            programs = Programs(stage);
+            if (programs.Count == 0) { PcGames.Remove(stage); return "That zip has no program (.exe) in it, so there's nothing to start. Nothing was added."; }
+            work = stage;
+            return null;
+        } catch (Exception x) {
+            try { if (Directory.Exists(stage)) PcGames.Remove(stage); } catch { }
+            return "Unpacking stopped: " + x.Message + " Nothing was added.";
+        }
+    }
+    // The unpacked zip becomes the game's own folder in games\, running the chosen program.
+    public static string AddUnpacked(string zip, string work, string program, out Entry added) {
+        added = null;
+        try {
+            var e = NewEntry(program, Path.GetFileNameWithoutExtension(zip));
+            e.exe = Path.GetFullPath(zip); e.copy = true; e.rel = program.Substring(work.TrimEnd('\\').Length + 1);
+            Directory.Move(work, Dir(e));
+            var all = All(); all.Add(e); Save(all); added = e;
+            return null;
+        } catch (Exception x) { try { if (Directory.Exists(work)) PcGames.Remove(work); } catch { } return "Adding stopped: " + x.Message + " Nothing was added."; }
+    }
+    // An id and a name: the program's own product name, else the fallback (its folder's, or the zip's).
+    static Entry NewEntry(string exe, string fallback) {
+        string title = null;
+        try { title = FileVersionInfo.GetVersionInfo(exe).ProductName; } catch { }
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 40) title = fallback;
+        string slug = System.Text.RegularExpressions.Regex.Replace(title.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        if (slug == "") slug = "game";
+        var all = All();
+        string id = "pc-" + slug; for (int i = 2; all.Any(x => x.id == id) || Library.Games.Any(x => x.Id == id); i++) id = "pc-" + slug + "-" + i;
+        return new Entry { id = id, title = title, exe = Path.GetFullPath(exe) };
+    }
     // A new game: copied into the launcher, or run where it is. Its name comes from the program's own product name, else
     // its folder's.
     public static string Add(string exe, bool copy, Action<string, float> report, out Entry added) {
         added = null;
         if (!File.Exists(exe)) return "That program isn't there.";
-        string title = null;
-        try { title = FileVersionInfo.GetVersionInfo(exe).ProductName; } catch { }
-        if (string.IsNullOrWhiteSpace(title) || title.Length > 40) title = new DirectoryInfo(Path.GetDirectoryName(exe)).Name;
-        string slug = System.Text.RegularExpressions.Regex.Replace(title.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
-        if (slug == "") slug = "game";
         var all = All();
-        string id = "pc-" + slug; for (int i = 2; all.Any(x => x.id == id) || Library.Games.Any(x => x.Id == id); i++) id = "pc-" + slug + "-" + i;
-        var e = new Entry { id = id, title = title, exe = Path.GetFullPath(exe), copy = copy };
+        var e = NewEntry(exe, new DirectoryInfo(Path.GetDirectoryName(exe)).Name); e.copy = copy;
         if (copy) {
             string from = Path.GetDirectoryName(e.exe), to = Dir(e), work = to + ".adding";
             if (Path.GetPathRoot(from).TrimEnd('\\') == from.TrimEnd('\\')) return "That program sits at the top of a drive, so its folder can't be copied. Add it where it is instead.";
@@ -811,12 +881,11 @@ static class GameArt {
         if (g.TownFrame > 0) return CaptureTownOpening(g);
         if (g.IsDs) return CaptureTownNativeplat(g);
         string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png");
-        string identityFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", ArtIdentity);
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(shot));
             if (File.Exists(shot)) File.Delete(shot);
             var import = LauncherForm.Gen1Start("");
-            import.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+            LauncherForm.UseArtIdentity(import, ArtIdentity);
             import.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
             import.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
             int code;
@@ -826,7 +895,7 @@ static class GameArt {
             }
             if (code != 0) return "Could not prepare the game for its picture.";
             var psi = LauncherForm.Gen1Start("");
-            psi.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+            LauncherForm.UseArtIdentity(psi, ArtIdentity);
             psi.EnvironmentVariables["POKEPORT_VERSION"] = g.Gen1;
             psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TownArt.lua";
@@ -837,7 +906,7 @@ static class GameArt {
         } catch (Exception x) { return x.Message; }
         finally {
             try { if (File.Exists(shot)) File.Delete(shot); } catch { }
-            try { if (Directory.Exists(identityFolder)) Directory.Delete(identityFolder, true); } catch { }
+            LauncherForm.RemoveArtData(ArtIdentity);
         }
     }
     static void Load(string id) {
@@ -993,11 +1062,10 @@ static class GameArt {
     static string CaptureGen1(GameEntry g) {
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
         bool throwaway = !g.Imported;
-        string identityFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", ArtIdentity);
         try {
             if (throwaway) {
                 var import = LauncherForm.Gen1Start("");
-                import.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+                LauncherForm.UseArtIdentity(import, ArtIdentity);
                 import.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
                 import.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
                 using (var rom = new LauncherForm.PlainPath(g.Gen1Rom)) {
@@ -1009,7 +1077,7 @@ static class GameArt {
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             Directory.CreateDirectory(temp);
             var psi = LauncherForm.Gen1Start("");
-            if (throwaway) psi.EnvironmentVariables["POKEPORT_IDENTITY"] = ArtIdentity;
+            if (throwaway) LauncherForm.UseArtIdentity(psi, ArtIdentity);
             psi.EnvironmentVariables["POKEPORT_VERSION"] = g.Gen1;
             psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TitleArt.lua";
@@ -1040,7 +1108,7 @@ static class GameArt {
         } catch (Exception x) { return x.Message; }
         finally {
             try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { }
-            try { if (throwaway && Directory.Exists(identityFolder)) Directory.Delete(identityFolder, true); } catch { }
+            if (throwaway) LauncherForm.RemoveArtData(ArtIdentity);
         }
     }
     // A game only nativeplat runs: its test mode shows the title screen with no window or sound and keeps no save.
@@ -1430,8 +1498,72 @@ static class Library {
             try { Sort(list, file, Path.GetExtension(file).ToLowerInvariant(), accepted); } catch { }
         }
         SaveHashes();
+        list = Hacks(list);
         foreach (var g in list) ChooseRom(g);
         Games = list;
+    }
+    // Romhacks become games of their own, each listed after its base game. A hack keeps its base game's code in its header,
+    // so it's sorted there first; it's told apart by its contents alone: it isn't one of the clean dumps an engine accepts
+    // for that game (every clean revision of it; other regions have other codes). Its file name only names it, once it's
+    // known to be a hack (user, 2026-11-03). Only games Fulldex runs, since the other engines take clean copies only, and
+    // only where the clean dumps are known (Gen1Recomp found, or nativeplat's list). A DS dump with its secure area still
+    // encrypted is a clean one with another SHA-1, so it stays with its game.
+    static List<GameEntry> Hacks(List<GameEntry> list) {
+        var result = new List<GameEntry>();
+        foreach (var g in list) {
+            result.Add(g);
+            if (g.FulldexCode == null || !g.CanVerify || g.Pc != null || (g.Gen1 != null && !Gen1Found)) continue;
+            foreach (var r in g.Roms.Where(r => !r.Verified && !r.Encrypted).ToList()) {
+                g.Roms.Remove(r);
+                result.Add(HackOf(g, r, list.Concat(result)));
+            }
+        }
+        return result;
+    }
+    // What a file's name says besides its base game: "Rocket Edition" from "Pokemon_FireRed_Rocket_Edition.gba", nothing from
+    // "Pokemon - FireRed Version (USA, Europe) (Rev 1).gba". Bracketed tags, region and version words don't count.
+    static readonly string[] PlainWords = { "pokemon", "pokémon", "version", "usa", "europe", "eur", "us", "u", "e", "j", "en", "rev", "v1", "v0", "rom", "the" };
+    public static string HackWords(GameEntry g, string file) {
+        string name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file), @"[\(\[\{][^\)\]\}]*[\)\]\}]", " ");
+        var baseWords = new HashSet<string>(g.Title.ToLowerInvariant().Split(' ').Concat(new[] { g.Id }));
+        var words = System.Text.RegularExpressions.Regex.Split(name, @"[^\p{L}\p{N}']+").Where(w => w != "").ToList();
+        var kept = words.Where(w => !PlainWords.Contains(w.ToLowerInvariant()) && !baseWords.Contains(w.ToLowerInvariant()) && !System.Text.RegularExpressions.Regex.IsMatch(w, @"^\d+$")).ToList();
+        return string.Join(" ", kept.ToArray());
+    }
+    static string HackNamesFile { get { return Path.Combine(Config.State, "hack-names.txt"); } }
+    // The player's names for hacks, by SHA-1: a hack keeps its name whatever its file is called.
+    public static Dictionary<string, string> HackNames() {
+        var d = new Dictionary<string, string>();
+        try { if (File.Exists(HackNamesFile)) foreach (var l in File.ReadAllLines(HackNamesFile)) { var f = l.Split('\t'); if (f.Length == 2 && f[1].Trim() != "") d[f[0]] = f[1].Trim(); } } catch { }
+        return d;
+    }
+    public static void RenameHack(string sha1, string name) {
+        var d = HackNames(); d[sha1] = name;
+        Directory.CreateDirectory(Config.State);
+        File.WriteAllLines(HackNamesFile, d.Select(x => x.Key + "\t" + x.Value).ToArray());
+    }
+    // Fulldex names a GBA game's save after its ROM file: lower case, every run of other characters one dash.
+    public static string FulldexKey(string file) {
+        return System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file).ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+    }
+    static GameEntry HackOf(GameEntry b, RomFile r, IEnumerable<GameEntry> taken) {
+        var h = b.CopyOf();
+        string words = HackWords(b, r.File), own;
+        string title = words != "" ? b.Title + " " + words : b.Title + " (modified " + r.Sha1.Substring(0, 6) + ")";
+        if (HackNames().TryGetValue(r.Sha1, out own)) title = own;
+        // The id comes from the file's name, as the game's save does, so neither changes when it's renamed here.
+        string slug = System.Text.RegularExpressions.Regex.Replace((words != "" ? words : r.Sha1.Substring(0, 8)).ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        string id = b.Id + "-" + (slug == "" ? r.Sha1.Substring(0, 8) : slug);
+        var used = taken.Select(x => x.Id).ToList();
+        for (int i = 2; used.Contains(id); i++) id = b.Id + "-" + slug + "-" + i;
+        h.Id = id; h.Title = title; h.BaseId = b.Id;
+        h.Gen1 = null; h.Nativeplat = null; h.Port = null; h.Pc = null; h.Imported = false;
+        h.Gen1Rom = null; h.FulldexRom = null; h.NativeplatRom = null; h.FoundUnsupported = null; h.FoundSha1 = null; h.Chosen = null;
+        h.Roms = new List<RomFile> { r };
+        // Its save is the one Fulldex already gives it (a GBA game's is named after its file), so nothing moves.
+        h.Save = b.IsDs ? id + ".sav" : FulldexKey(r.File) + ".sav";
+        h.Theme = b.Theme.Copy(); h.Theme.GameId = id;
+        return h;
     }
     public static bool IsRom(string file) { string ext = Path.GetExtension(file).ToLowerInvariant(); return ext == ".nds" || ext == ".gb" || ext == ".gbc" || ext == ".gba"; }
     // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
@@ -1942,6 +2074,7 @@ class Page {
     public int DexId;            // a Pokedex entry: this species
     public int[] DexOrder;       // what left and right step through on an entry
     public bool DexShiny;        // the entry is showing its shiny picture
+    public GameEntry DexOnly;    // a list or entry of one game's own Pokedex (a romhack's), not the collection's
     public float DexHeight;      // how tall the entry came out
     public BoxView Boxes;        // Move Pokemon's box screen
     public bool Main;
@@ -2075,7 +2208,7 @@ class LauncherForm : Form {
         if (screen == "controls") pages.Push(ControlsPage());
         if (screen == "screenshots") pages.Push(ScreenshotsPage());
         if (screen.StartsWith("controls-")) { int n = int.Parse(screen.Substring(9)); pages.Push(ControlsPage()); pages.Push(new Page { Title = ControlSheets[n][0] + " controls", Body = ControlSheets[n][2] }); }
-        var sample = Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
+        var sample = (previewId != null ? Library.Games.Find(g => g.Id == previewId) : null) ?? Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
         if (screen == "mods") { var m = Library.Games.Find(g => g.OnGen1); if (m != null) pages.Push(ModsPage(m)); }
         if (screen == "sprites") {
@@ -2106,6 +2239,8 @@ class LauncherForm : Form {
             var which = Library.Games.Find(g => g.Id == previewId);
             if (which != null) pages.Push(screen == "roms" ? RomsPage(which) : GamePage(which));
         }
+        if (screen == "dexother") { LoadDex(); pages.Push(DexHomePage()); pages.Push(DexOtherPage()); }
+        if (screen == "dexgame") { LoadDex(); var one = Library.Games.Find(g => g.Id == previewId); if (one != null) { pages.Push(DexOtherPage()); pages.Push(DexListPage(one.Title, 1, 151, one)); } }
         if (screen == "dex" || screen == "dexlist" || screen == "dexentry") {
             LoadDex();
             int species; if (!(colon > 0 && int.TryParse(previewId, out species))) species = 25;
@@ -2125,11 +2260,87 @@ class LauncherForm : Form {
     }
 
     // ---------- the engines ----------
+    // Gen1Recomp's data (saves, options, mods, exports and its ROM cache) is in state\gen1recomp, which it's told with
+    // NATIVEMONS_DATA_DIR (portable mode in its SaveData), so it moves with the launcher's folder. Before 2026-11-03 it
+    // was in %APPDATA%\LOVE\nativemons: that folder is copied over once, every file checked, and then left as it was, as
+    // a backup. LOVE still keeps a folder under %APPDATA%\LOVE for the few caches that don't follow portable mode; it
+    // gets another name, so the old folder is never read or changed again.
+    public static string Gen1Data { get { return Path.Combine(Config.State, "gen1recomp"); } }
+    // LOVE's folder follows APPDATA, so the launcher reads it the same way (and a test can point both elsewhere).
+    static string LoveRoot { get { return Path.Combine(Environment.GetEnvironmentVariable("APPDATA") ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE"); } }
+    public static string OldGen1Data { get { return Path.Combine(LoveRoot, Identity); } }
+    // Where its saves are now: the old folder only while the move hasn't happened.
+    public static string Gen1Root { get { return Directory.Exists(Gen1Data) ? Gen1Data : OldGen1Data; } }
+    const string DataIdentity = "nativemons-portable";
+    public static bool Gen1DataMoveNeeded { get { return !Directory.Exists(Gen1Data) && Directory.Exists(OldGen1Data); } }
+    static readonly object gen1DataLock = new object();
+    static string gen1DataProblem;
+    // Null once the folder is there. A move that fails leaves nothing half done, and is tried again at the next start.
+    public static string EnsureGen1Data() {
+        lock (gen1DataLock) {
+            if (Directory.Exists(Gen1Data)) return null;
+            if (gen1DataProblem != null) return gen1DataProblem;
+            string part = Gen1Data + ".part";
+            try {
+                if (Directory.Exists(part)) Directory.Delete(part, true);
+                Directory.CreateDirectory(part);
+                int files = 0;
+                if (Directory.Exists(OldGen1Data)) files = CopyChecked(OldGen1Data, part);
+                File.WriteAllText(Path.Combine(part, "nativemons-moved.txt"), Directory.Exists(OldGen1Data)
+                    ? "Copied from " + OldGen1Data + " on " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ", " + files + " files, each checked. The old folder was left as it was.\r\n"
+                    : "Started here on " + DateTime.Now.ToString("yyyy-MM-dd HH:mm") + ".\r\n");
+                Directory.Move(part, Gen1Data);
+                return null;
+            } catch (Exception x) {
+                try { if (Directory.Exists(part)) Directory.Delete(part, true); } catch { }
+                gen1DataProblem = "Gen1Recomp's saves couldn't be moved beside the launcher, so they stay where they were, in " + OldGen1Data + ". It'll try again next time. " + x.Message;
+                return gen1DataProblem;
+            }
+        }
+    }
+    // Every file copied, then read back: same length and the same SHA-1, or the whole move is off.
+    static int CopyChecked(string from, string to) {
+        int n = 0;
+        foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(to, dir.Substring(from.Length).TrimStart('\\')));
+        foreach (var file in Directory.GetFiles(from, "*", SearchOption.AllDirectories)) {
+            string copy = Path.Combine(to, file.Substring(from.Length).TrimStart('\\'));
+            File.Copy(file, copy, true);
+            if (new FileInfo(copy).Length != new FileInfo(file).Length || SaveGuard.Hash(copy) != SaveGuard.Hash(file))
+                throw new IOException("A copy didn't match: " + file);
+            n++;
+        }
+        return n;
+    }
+    // A folder path any program reads correctly from an environment variable: its short form when it isn't plain ASCII.
+    static string PlainDir(string dir) {
+        if (dir.All(c => c < 128)) return dir;
+        var s = new StringBuilder(600);
+        return Native.GetShortPathName(dir, s, 600) > 0 ? s.ToString() : dir;
+    }
+    // The picture jobs' throwaway Gen1Recomp, apart from the player's: its own name and, when the player's data is beside
+    // the launcher, its own folder there too.
+    static string Gen1ArtData { get { return Path.Combine(Config.State, "gen1recomp-art"); } }
+    public static void UseArtIdentity(ProcessStartInfo psi, string identity) {
+        psi.EnvironmentVariables["POKEPORT_IDENTITY"] = identity;
+        if (psi.EnvironmentVariables.ContainsKey("NATIVEMONS_DATA_DIR")) {
+            Directory.CreateDirectory(Gen1ArtData);
+            psi.EnvironmentVariables["NATIVEMONS_DATA_DIR"] = PlainDir(Gen1ArtData);
+        }
+    }
+    public static void RemoveArtData(string identity) {
+        foreach (var d in new[] { Gen1ArtData, Path.Combine(LoveRoot, identity) })
+            try { if (Directory.Exists(d)) Directory.Delete(d, true); } catch { }
+    }
     public static ProcessStartInfo Gen1Start(string args) {
         var psi = new ProcessStartInfo(Config.Love, "\"" + Config.Gen1 + "\"" + args) {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Config.Gen1,
             RedirectStandardOutput = true, RedirectStandardError = true };
-        psi.EnvironmentVariables["POKEPORT_IDENTITY"] = Identity;
+        // Its data is beside the launcher once it's there; until then (a move that couldn't finish), where it always was.
+        if (EnsureGen1Data() == null) {
+            psi.EnvironmentVariables["POKEPORT_IDENTITY"] = DataIdentity;
+            psi.EnvironmentVariables["NATIVEMONS_DATA_DIR"] = PlainDir(Gen1Data);
+        } else psi.EnvironmentVariables["POKEPORT_IDENTITY"] = Identity;
         // The launcher shows its own Discord status (DiscordPresence), so Gen1Recomp's isn't shown beside it, nor by a
         // game quick start keeps waiting.
         psi.EnvironmentVariables["POKEPORT_NO_DISCORD"] = "1";
@@ -2185,6 +2396,8 @@ class LauncherForm : Form {
         starting = true; startSince = DateTime.Now; startStage = "Looking for your games"; Invalidate();
         Task.Run(() => {
             string err = null;
+            // Once: Gen1Recomp's saves come beside the launcher (EnsureGen1Data), before anything asks it about them.
+            if (Gen1DataMoveNeeded) { startStage = "Moving Gen1Recomp's saves beside the launcher"; err = EnsureGen1Data(); startStage = "Looking for your games"; }
             try { Library.Scan(Gen1Cli); RecoverSwitches(); } catch (Exception e) { err = e.Message; }
             try { PrepareAll(); } catch { }
             // A shortcut straight to a game doesn't wait for pictures; they're made in the background instead.
@@ -3056,7 +3269,7 @@ class LauncherForm : Form {
         string[] kinds;
         var named = GameByName(file);
         if (!SaveKinds.TryGetValue(f[1], out kinds)) return new FoundSave { File = file, Note = "This is a " + f[1] + " save, and no game here can use it." };
-        if (named != null && kinds.Contains(named.Id)) return new FoundSave { File = file, Game = named };
+        if (named != null && kinds.Contains(named.BaseId ?? named.Id)) return new FoundSave { File = file, Game = named };
         var game = kinds.Select(id => Library.Games.Find(g => g.Id == id)).FirstOrDefault(g => g != null && g.Playable) ?? Library.Games.Find(g => g.Id == kinds[0]);
         var save = new FoundSave { File = file, Game = game };
         if (named != null) save.Note = "It's named for " + named.Title + ", but it's really a " + (game != null ? game.Title : f[1]) + " save.";
@@ -3216,9 +3429,19 @@ class LauncherForm : Form {
     HashSet<GameEntry> dexNoSave = new HashSet<GameEntry>();
     readonly Dictionary<int, string> dexNames = new Dictionary<int, string>();
     string DexName(int id) { string n; return dexNames.TryGetValue(id, out n) ? n : "#" + id; }
-    bool DexCaught(int id) { return dexBy.Values.Any(d => d.Caught.Contains(id)); }
-    bool DexSeen(int id) { return dexBy.Values.Any(d => d.Seen.Contains(id) || d.Caught.Contains(id)); }
-    bool DexShiny(int id) { return dexBy.Values.Any(d => d.Shiny.Contains(id)); }
+    // The collection counts the games themselves only. Romhacks and fan games such as Infinite Fusion never count toward
+    // it: they have a section of their own, each with its own Pokedex (user, 2026-11-03).
+    static bool CountsInCollection(GameEntry g) { return !g.IsHack && g.Pc == null; }
+    IEnumerable<DexGame> DexOf(GameEntry only) {
+        if (only != null) { DexGame d; return dexBy.TryGetValue(only, out d) ? new[] { d } : new DexGame[0]; }
+        return dexBy.Where(x => CountsInCollection(x.Key)).Select(x => x.Value);
+    }
+    bool DexCaught(int id) { return DexCaught(id, null); }
+    bool DexSeen(int id) { return DexSeen(id, null); }
+    bool DexShiny(int id) { return DexShiny(id, null); }
+    bool DexCaught(int id, GameEntry only) { return DexOf(only).Any(d => d.Caught.Contains(id)); }
+    bool DexSeen(int id, GameEntry only) { return DexOf(only).Any(d => d.Seen.Contains(id) || d.Caught.Contains(id)); }
+    bool DexShiny(int id, GameEntry only) { return DexOf(only).Any(d => d.Shiny.Contains(id)); }
     // What a game's Pokedex was read from, cheaply: when this changes, it's read again, and otherwise never.
     static string DexPrint(GameEntry g) {
         var o = new StringBuilder(g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
@@ -3226,7 +3449,7 @@ class LauncherForm : Form {
         Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
         if (g.Save != null) file(MasterOf(g));
         folder(Path.Combine(Config.State, "save-sets", g.Id));
-        if (g.Gen1 != null) folder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE", "nativemons", "saves", g.Gen1));
+        if (g.Gen1 != null) folder(Path.Combine(Gen1Root, "saves", g.Gen1));
         return o.ToString();
     }
     class DexKept { public string Print; public DexGame Dex; }
@@ -3315,23 +3538,45 @@ class LauncherForm : Form {
             p.Items.Add(new Item(name + ": " + DexCount(a, b), "", true, delegate { pages.Push(DexListPage(name, a, b)); }) { Icon = '\uE707', Info = "Numbers " + a.ToString("000") + " to " + b.ToString("000") + ", the Pokemon introduced in " + name + "." });
         }
         p.Items.Add(new Item("By game", "", true, delegate { pages.Push(DexGamesPage()); }) { Icon = '\uE7FC', Info = "How many each of your games has caught." });
+        if (Library.Games.Any(OwnSection))
+            p.Items.Add(new Item("Romhacks and fan games", "", true, delegate { pages.Push(DexOtherPage()); }) { Icon = '\uE734', Info = "Each with a Pokedex of its own. They never count toward your collection above." });
         return p;
     }
-    Page DexListPage(string title, int from, int to) {
-        var p = new Page { Title = title, Jump = 10 };
-        var order = Enumerable.Range(from, to - from + 1).Where(DexSeen).ToArray();
-        for (int n = from; n <= to; n++) {
-            int id = n; bool caught = DexCaught(id), seen = DexSeen(id);
-            string label = "#" + id.ToString("000") + " " + (seen ? DexName(id) : "???");
-            if (DexShiny(id)) label += ": \u2605";
-            else if (caught) label += ": Caught";
-            p.Items.Add(new Item(label, seen ? "" : "Not seen yet", seen, delegate { pages.Push(DexEntryPage(id, order)); }) { Icon = '\uE9CE', Sprite = seen ? id.ToString() : null, Info = caught ? "Caught." : seen ? "Seen, not caught." : "Not seen yet." });
+    // Romhacks you have, and Infinite Fusion once it's installed.
+    static bool OwnSection(GameEntry g) { return (g.IsHack && g.Playable) || (g.Pc == "infinitefusion" && g.OnPc); }
+    Page DexOtherPage() {
+        var p = new Page { Title = "Romhacks and fan games" };
+        foreach (var game in Library.Games.Where(OwnSection)) {
+            var g = game;
+            if (g.Pc != null) {
+                p.Items.Add(new Item(g.Title + ": not read yet", "", false, null) { Icon = '\uE7FC', Theme = g.Theme, Info = "Its saves are in a format of its own, which nativeMons can't read yet. It never counts toward your collection." });
+                continue;
+            }
+            bool has = dexBy.ContainsKey(g);
+            int last = Math.Min(g.Dex > 0 ? g.Dex : DexRegionStart[DexRegions.Length] - 1, DexRegionStart[DexRegions.Length] - 1);
+            p.Items.Add(new Item(g.Title + ": " + (has ? dexBy[g].Caught.Count + " caught" : "no save"), "", has, delegate { pages.Push(DexListPage(g.Title, 1, last, g)); }) {
+                Icon = '\uE7FC', Theme = g.Theme,
+                Info = has ? "Its own Pokedex, read from its saves as " + (Library.Games.Where(x => x.Id == g.BaseId).Select(x => x.Title).FirstOrDefault() ?? "its base game") + "'s. It doesn't count toward your collection." : "No save to read yet. Play and save once." });
         }
         return p;
     }
-    Page DexEntryPage(int id, int[] order) { return new Page { Title = "#" + id.ToString("000") + " " + DexName(id), DexId = id, DexOrder = order, DexShiny = DexShiny(id) }; }
+    Page DexListPage(string title, int from, int to) { return DexListPage(title, from, to, null); }
+    Page DexListPage(string title, int from, int to, GameEntry only) {
+        var p = new Page { Title = title, Jump = 10, DexOnly = only };
+        var order = Enumerable.Range(from, to - from + 1).Where(x => DexSeen(x, only)).ToArray();
+        for (int n = from; n <= to; n++) {
+            int id = n; bool caught = DexCaught(id, only), seen = DexSeen(id, only);
+            string label = "#" + id.ToString("000") + " " + (seen ? DexName(id) : "???");
+            if (DexShiny(id, only)) label += ": \u2605";
+            else if (caught) label += ": Caught";
+            p.Items.Add(new Item(label, seen ? "" : "Not seen yet", seen, delegate { pages.Push(DexEntryPage(id, order, only)); }) { Icon = '\uE9CE', Sprite = seen ? id.ToString() : null, Info = caught ? "Caught." : seen ? "Seen, not caught." : "Not seen yet." });
+        }
+        return p;
+    }
+    Page DexEntryPage(int id, int[] order) { return DexEntryPage(id, order, null); }
+    Page DexEntryPage(int id, int[] order, GameEntry only) { return new Page { Title = "#" + id.ToString("000") + " " + DexName(id), DexId = id, DexOrder = order, DexShiny = DexShiny(id, only), DexOnly = only }; }
     Page DexGamesPage() {
-        var games = Library.Games.Where(x => x.SaveTools).ToList();
+        var games = Library.Games.Where(x => x.SaveTools && CountsInCollection(x)).ToList();
         var p = new Page { Title = "By game" };
         foreach (var g in games) {
             bool has = dexBy.ContainsKey(g);
@@ -3339,7 +3584,7 @@ class LauncherForm : Form {
             int saveCount = SaveSets.All(g).Count;
             it.Info = has ? (saveCount > 1 ? "Different Pokemon caught across your " + saveCount + " saves" : "Caught in this save") + ", out of the " + g.Dex + " entries in this game." : "No save to read yet. Play and save once.";
             if (has) {
-                int only = dexBy[g].Caught.Count(n => !dexBy.Where(o => o.Key != g).Any(o => o.Value.Caught.Contains(n)));
+                int only = dexBy[g].Caught.Count(n => !dexBy.Where(o => o.Key != g && CountsInCollection(o.Key)).Any(o => o.Value.Caught.Contains(n)));
                 it.Records = new[] { "Only here: " + only };
             }
             p.Items.Add(it);
@@ -3360,7 +3605,7 @@ class LauncherForm : Form {
         var mine = dexBy.Where(x => x.Value.Caught.Contains(id)).Select(x => x.Key).ToList();
         mine.AddRange(Library.Games.AsEnumerable().Reverse());
         foreach (var g in mine) {
-            string key = g.Id == "black2" ? "black-2" : g.Id == "white2" ? "white-2" : g.Id, text;
+            string gid = g.BaseId ?? g.Id, key = gid == "black2" ? "black-2" : gid == "white2" ? "white-2" : gid, text;
             if (info.Flavor.TryGetValue(key, out text)) { from = g.Title; return text; }
         }
         return null;
@@ -3457,7 +3702,7 @@ class LauncherForm : Form {
         if (v.Dragging) spinning = true;   // keep drawing while the pointer moves
     }
     void RenderDexEntry(Graphics g, Page p, int w, int h, float m, float y, float bottom, float t, Theme th) {
-        int id = p.DexId; bool caught = DexCaught(id);
+        int id = p.DexId; bool caught = DexCaught(id, p.DexOnly);
         var area = new RectangleF(0, y, w, bottom - y);
         float view = area.Height, width = w - 2 * m, pad = w * 0.04f, rad = w * 0.04f, gap = h * 0.016f;
         p.BodyScroll = Math.Max(0, Math.Min(p.BodyScroll, Math.Max(0, p.DexHeight - view)));
@@ -3534,7 +3779,7 @@ class LauncherForm : Form {
             cy += abH + gap;
         }
         // Where you have it.
-        var rows = dexBy.Where(x => x.Value.Caught.Contains(id) || x.Value.Seen.Contains(id)).OrderBy(x => x.Value.Caught.Contains(id) ? 0 : 1).ToList();
+        var rows = dexBy.Where(x => (p.DexOnly != null ? x.Key == p.DexOnly : CountsInCollection(x.Key)) && (x.Value.Caught.Contains(id) || x.Value.Seen.Contains(id))).OrderBy(x => x.Value.Caught.Contains(id) ? 0 : 1).ToList();
         float gameH = h * 0.068f;
         if (rows.Count > 0) {
             Group(g, new RectangleF(m, cy, width, gameH * rows.Count), rad);
@@ -3568,7 +3813,7 @@ class LauncherForm : Form {
             p.Items.Add(it);
         }
         if (p.Items.Count == 0) p.Items.Add(new Item("No games listed", Library.Note, false, null));
-        p.Items.Add(new Item("Add a PC game", "Any game with its own program, such as a fan game.", true, delegate { AddPcGame(); }) { Icon = '', Info = "Choose the game's .exe. It's run as it is, with no extras: the launcher starts it and shows it on Discord, and leaves its saves to the game." });
+        p.Items.Add(new Item("Add a PC game", "Any game with its own program, such as a fan game.", true, delegate { AddPcGame(); }) { Icon = '', Info = "From its folder (run where it is), its .zip (unpacked into the launcher) or its .exe. It's run as it is, with no extras: the launcher starts it and shows it on Discord, and leaves its saves to the game." });
         return p;
     }
     string[] GameRecords(GameEntry g) {
@@ -3596,6 +3841,17 @@ class LauncherForm : Form {
             }) { Icon = '' });
         }
         if (g.Roms.Count > 1) p.Items.Add(new Item("ROM version: " + g.LabelOf(g.Chosen), "", true, delegate { pages.Push(RomsPage(g)); }) { Icon = '\uE8B7', Info = g.Roms.Count + " different dumps of this game were found. " + Path.GetFileName(g.Chosen.File) + " is in use." });
+        if (g.IsHack) {
+            var baseGame = Library.Games.Find(x => x.Id == g.BaseId);
+            string of = baseGame != null ? baseGame.Title : g.BaseId;
+            p.Items.Add(new Item("Rename", "Shown as " + g.Title + ".", g.Chosen != null, delegate {
+                string name = AskText("Rename", "Name for this game:", g.Title);
+                if (string.IsNullOrWhiteSpace(name)) return;
+                Library.RenameHack(g.Chosen.Sha1, name.Trim());
+                string id = g.Id;
+                Rescan(delegate { pages.Pop(); var fresh = Library.Games.Find(x => x.Id == id); if (fresh != null) pages.Push(GamePage(fresh)); ReplaceMain(); });
+            }) { Icon = '\uE70F', Info = "A romhack of " + of + ", named after its file" + (g.Chosen != null ? " (" + Path.GetFileName(g.Chosen.File) + ")" : "") + ". It runs on Fulldex, with a save of its own, and its saves read as " + of + "'s do: for Move Pokemon, My Collection and PKHeX." });
+        }
         p.Items.Add(new Item("Saves", "In use: " + SaveSets.Name(g, SaveSets.Active(g)) + ".", true, delegate { OpenSaves(g); }) { Icon = '\uE896' });
         p.Items.Add(new Item("Game options", GameOptions.Available(g) ? "Volume, text speed, battle style and more." : "Volume, fullscreen and more.", true, delegate { pages.Push(GameOptionsPage(g)); }) { Icon = '\uE8D2' });
         if (g.OnGen1) p.Items.Add(new Item("Mods", "Mods for " + g.Title + ".", true, delegate { Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(g)); }); }) { Icon = '' });
@@ -4610,7 +4866,66 @@ class LauncherForm : Form {
     // A PC game: imported into the launcher (its files and saves in the launcher's folders, updated by it), or an existing
     // installation added as it is (run in place, saves where the game keeps them). Either can become the other.
     // ---------- PC games the player adds (CustomGames) ----------
+    // Three ways in: its folder (run where it is, nothing copied), its .zip (unpacked into games\, which the launcher then
+    // keeps), or its program, either way.
     void AddPcGame() {
+        var p = new Page { Title = "Add a PC game", Body = "Any game with its own program, such as a fan game. It runs as it is, with no extras, and keeps its saves wherever it always does." };
+        p.Items.Add(new Item("From its folder", "Runs where it is. Nothing is copied.", true, delegate {
+            string dir = PickFolder("Choose the game's folder");
+            if (dir == null) return;
+            var programs = CustomGames.Programs(dir);
+            if (programs.Count == 0) { ShowText("No program there", "There's no .exe in " + dir + " or its folders, so there's nothing to start.", null); return; }
+            pages.Pop();
+            ChooseProgram(programs, dir, delegate(string exe) { AddCustom(delegate(Action<string, float> report, out CustomGames.Entry added) { return CustomGames.Add(exe, false, report, out added); }, "Adding the game"); }, null);
+        }) { Icon = '\uE8B7', Info = "Point to the folder the game lives in. The launcher finds its program and leaves every file where it is." });
+        p.Items.Add(new Item("From a .zip", "Unpacked into the launcher's games folder.", true, delegate {
+            string zip;
+            using (var d = new OpenFileDialog { Filter = "Zip (*.zip)|*.zip", Title = "Choose the game's .zip" }) { if (d.ShowDialog(this) != DialogResult.OK) return; zip = d.FileName; }
+            pages.Pop();
+            string work = null, problem = null; List<string> programs = null;
+            Busy("Unpacking the game", delegate {
+                problem = CustomGames.Unpack(zip, delegate(string what, float at) { BeginInvoke((Action)delegate { progress = at; AddLine("nativemons: " + what); dirty = true; }); }, out work, out programs);
+                return null;
+            }, delegate(string e) {
+                if (e != null || problem != null) { ShowText("Not added", e ?? problem, null); return; }
+                string w = work;
+                ChooseProgram(programs, w, delegate(string exe) { AddCustom(delegate(Action<string, float> report, out CustomGames.Entry added) { return CustomGames.AddUnpacked(zip, w, exe, out added); }, "Adding the game"); },
+                    delegate { try { PcGames.Remove(w); } catch { } });
+            });
+        }) { Icon = '\uE7B8', Info = "The launcher unpacks the zip into games\\, finds the game's program and keeps the copy, removed again with the game. The zip stays as it is." });
+        p.Items.Add(new Item("Choose its program (.exe)", "Then run it where it is, or copy its folder.", true, delegate { pages.Pop(); AddPcGameExe(); }) { Icon = '\uE7FC' });
+        p.Items.Add(new Item("Cancel", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
+        pages.Push(p);
+    }
+    // One program goes ahead; several are listed, the likeliest first. cancelled: what to undo if none is chosen.
+    void ChooseProgram(List<string> programs, string root, Action<string> chosen, Action cancelled) {
+        if (programs.Count == 1) { chosen(programs[0]); return; }
+        var p = new Page { Title = "Which one starts the game?", Body = "This folder has more than one program." };
+        foreach (var exe in programs.Take(12)) {
+            string e = exe;
+            p.Items.Add(new Item(Path.GetFileName(e), "", true, delegate { pages.Pop(); chosen(e); }) { Icon = '\uE7FC', Info = e.Substring(root.TrimEnd('\\').Length + 1) });
+        }
+        p.Items.Add(new Item("Cancel", cancelled != null ? "Nothing is added, and the unpacked files are deleted." : "", true, delegate { pages.Pop(); if (cancelled != null) cancelled(); }) { Icon = '\uE711' });
+        pages.Push(p);
+    }
+    delegate string CustomAdd(Action<string, float> report, out CustomGames.Entry added);
+    void AddCustom(CustomAdd work, string title) {
+        CustomGames.Entry added = null; string problem = null;
+        Busy(title, delegate {
+            problem = work(delegate(string what, float at) { BeginInvoke((Action)delegate { progress = at; AddLine("nativemons: " + what); dirty = true; }); }, out added);
+            return null;
+        }, delegate(string e) {
+            if (e != null || problem != null) { ShowText("Not added", e ?? problem, null); return; }
+            string id = added.id;
+            Rescan(delegate {
+                while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+                pages.Push(GamesPage());
+                var g = Library.Games.Find(x => x.Id == id);
+                if (g != null) pages.Push(GamePage(g));
+            });
+        });
+    }
+    void AddPcGameExe() {
         string exe;
         using (var d = new OpenFileDialog { Filter = "Programs (*.exe)|*.exe", Title = "Choose the game's program (.exe)" }) {
             if (d.ShowDialog(this) != DialogResult.OK) return;
@@ -4977,7 +5292,7 @@ class LauncherForm : Form {
             watchGba = true; gbaPlaying = false; gbaClosed = false;
             // Fulldex only starts games it knows by themselves. A romhack waits in its list, which opens on the last game played:
             // so it's made that, and started with one key press.
-            gbaPress = g.IsModified(g.Chosen); gbaPresses = 0; gbaPressAt = DateTime.MinValue;
+            gbaPress = g.IsHack || g.IsModified(g.Chosen); gbaPresses = 0; gbaPressAt = DateTime.MinValue;
             if (gbaPress) try { File.WriteAllText(Path.Combine(dir, "last-game.txt"), dir + "/roms/" + Path.GetFileName(g.FulldexRom) + Environment.NewLine); } catch { gbaPress = false; }
         }
         var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
@@ -5390,11 +5705,11 @@ class LauncherForm : Form {
             BoxAct(p, a);
         } else if (p.DexId > 0) {
             if (a == "up" || a == "down") p.BodyScroll += (a == "down" ? 1 : -1) * bodyFont.Height * 3;
-            else if (a == "ok") { if (DexShiny(p.DexId)) p.DexShiny = !p.DexShiny; }
+            else if (a == "ok") { if (DexShiny(p.DexId, p.DexOnly)) p.DexShiny = !p.DexShiny; }
             else if ((a == "left" || a == "right") && p.DexOrder != null && p.DexOrder.Length > 0) {
                 // The next Pokemon you've met, as the games' Pokedex steps through them.
                 int at = Array.IndexOf(p.DexOrder, p.DexId), next = at + (a == "right" ? 1 : -1);
-                if (at >= 0 && next >= 0 && next < p.DexOrder.Length) { pages.Pop(); pages.Push(DexEntryPage(p.DexOrder[next], p.DexOrder)); }
+                if (at >= 0 && next >= 0 && next < p.DexOrder.Length) { pages.Pop(); pages.Push(DexEntryPage(p.DexOrder[next], p.DexOrder, p.DexOnly)); }
             }
         } else if (p.Items.Count > 0) {
             if (a == "ok") { var it = p.Items[p.Sel]; if (it.On && it.Run != null) it.Run(); }
@@ -6552,6 +6867,25 @@ static class NativeMonsLauncher {
             var added = new List<string>(); var notes = new List<string>();
             LauncherForm.AddPaths(paths.Where(Directory.Exists).ToList(), paths.Where(x => File.Exists(x) && Library.IsRom(x)).ToList(), paths.Where(x => File.Exists(x) && x.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList(), added, notes);
             File.WriteAllLines(argv[1], added.Select(f => f + "\t" + LauncherForm.WhatRomIs(f)).Concat(notes).ToArray());
+            return;
+        }
+        // --add-pc <result file> folder|zip <path> [program number]: Games > Add a PC game from its folder or .zip, without the
+        // window. With several programs and no number, it lists them and adds nothing.
+        if (argv.Length >= 4 && argv[0] == "--add-pc") {
+            var o = new List<string>(); CustomGames.Entry e = null; string problem = null, work = null;
+            List<string> programs;
+            if (argv[2] == "zip") problem = CustomGames.Unpack(argv[3], delegate { }, out work, out programs);
+            else programs = CustomGames.Programs(argv[3]);
+            if (problem == null && programs.Count == 0) problem = "no program";
+            int pick = 0;
+            if (problem == null && programs.Count > 1 && !(argv.Length > 4 && int.TryParse(argv[4], out pick))) {
+                for (int i = 0; i < programs.Count; i++) o.Add("program " + i + "\t" + programs[i]);
+                if (work != null) PcGames.Remove(work);
+                problem = "choose";
+            }
+            if (problem == null) problem = argv[2] == "zip" ? CustomGames.AddUnpacked(argv[3], work, programs[pick], out e) : CustomGames.Add(programs[pick], false, delegate { }, out e);
+            o.Insert(0, problem == null ? "added\t" + e.id + "\t" + e.title + "\t" + CustomGames.Exe(e) + "\tcopy=" + e.copy : "not added\t" + problem);
+            File.WriteAllLines(argv[1], o.ToArray());
             return;
         }
         if (argv.Length >= 3 && argv[0] == "--sync") {
