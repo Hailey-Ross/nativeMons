@@ -13,7 +13,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
 
-<p align="center"><img src="https://assets.hails.cc/nativeMons/early-preview.gif" alt="An early preview of the nativeMons launcher" width="360"></p>
+<p align="center"><a href="https://assets.hails.cc/nativeMons/early-preview.gif"><img src="assets/early-preview.gif" alt="An early preview of the nativeMons launcher. Select it for the full-size version." width="360"></a></p>
 
 ## Supported games
 
