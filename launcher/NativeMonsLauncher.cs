@@ -262,10 +262,61 @@ class GameEntry {
 // never touches them.
 static class PcGames {
     public const string Repo = "https://github.com/infinitefusion/infinitefusion-e18.git", Branch = "releases";
-    public static string Exe(GameEntry g) { return g.Pc == "infinitefusion" ? Config.InfiniteFusion : null; }
+    // Two ways in, both valid. Imported: a copy in the launcher's games folder that the launcher updates, with its saves in
+    // the launcher's state folder too. Existing: the player's own installation, run where it is and never changed, with
+    // its saves where the game keeps them (%APPDATA%\infinitefusion). state\pc-<id>.txt names an existing one.
+    static string ExistingFile(GameEntry g) { return Path.Combine(Config.State, "pc-" + g.Id + ".txt"); }
+    public static string Existing(GameEntry g) { string d = Config.Read("pc-" + g.Id + ".txt", "").Trim(); return d != "" ? d : null; }
+    public static bool IsExisting(GameEntry g) { return Existing(g) != null; }
+    static string OwnExe(GameEntry g) { return g.Pc == "infinitefusion" ? Config.InfiniteFusion : null; }
+    public static string Exe(GameEntry g) { string e = Existing(g); return e != null ? Path.Combine(e, "Game.exe") : OwnExe(g); }
     public static string Dir(GameEntry g) { string e = Exe(g); return e == null ? null : Path.GetDirectoryName(e); }
+    public static string OwnDir(GameEntry g) { string e = OwnExe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static bool Installed(GameEntry g) { string e = Exe(g); return e != null && File.Exists(e); }
-    public static string SaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "infinitefusion"); }
+    public static string GameSaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "infinitefusion"); }
+    public static string SaveDir(GameEntry g) { return IsExisting(g) ? GameSaveDir(g) : Path.Combine(Config.State, "saves", g.Id); }
+    // mkxp-z puts saves under %APPDATA% with no setting for elsewhere, and every save path in the game's scripts comes from
+    // System.data_directory. An imported copy gets an mkxp.json naming a preload script that answers that with the
+    // launcher's folder, only when the launcher passes it (NATIVEMONS_SAVE_DIR): Game.exe started by hand behaves as
+    // usual. Git doesn't track either file, so the game's own update leaves them in place; they're written again anyway
+    // before each session.
+    const string PreloadName = "nativemons-saves.rb";
+    const string Preload = "# nativeMons: when the launcher starts this copy, its saves go in the launcher's folder.\n"
+        + "if ENV['NATIVEMONS_SAVE_DIR'] && !ENV['NATIVEMONS_SAVE_DIR'].empty?\n"
+        + "  module System\n"
+        + "    def self.data_directory\n"
+        + "      ENV['NATIVEMONS_SAVE_DIR'].tr('\\\\', '/')\n"
+        + "    end\n"
+        + "  end\n"
+        + "end\n";
+    public static void PrepareSaves(GameEntry g, ProcessStartInfo psi) {
+        if (IsExisting(g)) return;
+        string dir = OwnDir(g), saves = SaveDir(g);
+        Directory.CreateDirectory(saves);   // the game falls back to its own folder when this doesn't exist
+        File.WriteAllText(Path.Combine(dir, PreloadName), Preload);
+        string json = Path.Combine(dir, "mkxp.json");
+        if (!File.Exists(json) || !File.ReadAllText(json).Contains(PreloadName)) File.WriteAllText(json, "{\n  \"preloadScript\": [\"" + PreloadName + "\"]\n}\n");
+        psi.EnvironmentVariables["NATIVEMONS_SAVE_DIR"] = saves;
+    }
+    // Imported with saves already in the game's usual folder: they're copied in, so the player carries on. The
+    // originals stay where they are.
+    static string BringSaves(GameEntry g) {
+        string from = GameSaveDir(g), to = SaveDir(g);
+        Directory.CreateDirectory(to);
+        if (!Directory.Exists(from) || Directory.GetFiles(to, "*.rxdata").Length > 0) return null;
+        var files = Directory.GetFiles(from, "*.rxdata");
+        foreach (var f in files) File.Copy(f, Path.Combine(to, Path.GetFileName(f)));
+        return files.Length > 0 ? files.Length + (files.Length == 1 ? " save was" : " saves were") + " copied in from " + from + "; the originals are still there." : null;
+    }
+    public static string AddExisting(GameEntry g, string folder) {
+        if (!File.Exists(Path.Combine(folder, "Game.exe"))) return "That folder has no Game.exe, so it isn't Pokemon Infinite Fusion.";
+        if (string.Equals(Path.GetFullPath(folder).TrimEnd('\\'), Path.GetFullPath(OwnDir(g)).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return "That is the launcher's own copy.";
+        Directory.CreateDirectory(Config.State);
+        File.WriteAllText(ExistingFile(g), Path.GetFullPath(folder));
+        return null;
+    }
+    // Forgets an existing installation; nothing of it is deleted.
+    public static void Forget(GameEntry g) { try { File.Delete(ExistingFile(g)); } catch { } }
     static bool Running(GameEntry g) {
         string exe = Exe(g);
         foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)))
@@ -301,8 +352,11 @@ static class PcGames {
     }
     // From the player's own copy (a folder or the downloaded zip), or straight from the game's GitHub. It goes into a
     // folder beside the final one and replaces it only once complete, so a stopped install leaves the old one working.
+    // What the last install did with the player's saves, for its message.
+    public static string Saved;
     public static string Install(GameEntry g, string source, Action<string, float> report) {
-        string target = Dir(g), work = target + ".installing";
+        Saved = null;
+        string target = OwnDir(g), work = target + ".installing";
         try {
             if (Directory.Exists(work)) Directory.Delete(work, true);
             if (source == null) {
@@ -347,18 +401,24 @@ static class PcGames {
             report("Finishing", 1f);
             if (Directory.Exists(target)) Remove(target);
             Directory.Move(work, target);
+            // From now on the launcher's copy is the one played, with its saves in the launcher's folder.
+            Forget(g);
+            Saved = BringSaves(g);
             return null;
         } catch (Exception x) { return "Installing stopped: " + x.Message + " The copy you had (if any) is unchanged."; }
         finally { try { if (Directory.Exists(work)) Remove(work); } catch { } }
     }
     // A shallow fetch of the release branch and a hard reset onto it, as the game's INSTALL_OR_UPDATE.bat does.
+    // Only the launcher's own copy: an existing installation is the player's, updated by its own updater.
     public static string Update(GameEntry g, Action<string> line) {
+        if (IsExisting(g)) return "This is your own installation, so the launcher leaves it alone. Use the game's INSTALL_OR_UPDATE, or import a copy into the launcher.";
+        string dir = OwnDir(g);
         if (Git() == null) return "Updating needs Git for Windows (git-scm.com).";
-        if (!Directory.Exists(Path.Combine(Dir(g), ".git"))) return "This copy has no update history (.git). Install it again from GitHub to get updates.";
-        try { File.Delete(Path.Combine(Dir(g), ".git", "shallow.lock")); } catch { }
-        RunGit("remote set-url origin " + Repo, Dir(g), null);
-        if (RunGit("fetch --depth=1 --progress origin " + Branch, Dir(g), line) != 0) return "Couldn't reach the game's GitHub. Nothing was changed.";
-        if (RunGit("reset --hard origin/" + Branch, Dir(g), line) != 0) return "The update didn't apply cleanly. Install it again to repair it.";
+        if (!Directory.Exists(Path.Combine(dir, ".git"))) return "This copy has no update history (.git). Install it again from GitHub to get updates.";
+        try { File.Delete(Path.Combine(dir, ".git", "shallow.lock")); } catch { }
+        RunGit("remote set-url origin " + Repo, dir, null);
+        if (RunGit("fetch --depth=1 --progress origin " + Branch, dir, line) != 0) return "Couldn't reach the game's GitHub. Nothing was changed.";
+        if (RunGit("reset --hard origin/" + Branch, dir, line) != 0) return "The update didn't apply cleanly. Install it again to repair it.";
         return null;
     }
     // Git marks its object files read-only, which Directory.Delete refuses.
@@ -3811,43 +3871,73 @@ class LauncherForm : Form {
     }
     void PlayPc(GameEntry g) {
         var psi = new ProcessStartInfo(PcGames.Exe(g)) { UseShellExecute = false, WorkingDirectory = PcGames.Dir(g), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+        try { PcGames.PrepareSaves(g, psi); } catch (Exception x) { ShowText("Could not start " + g.Title, "Its save folder couldn't be set up: " + x.Message, null); return; }
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
     }
-    // A PC game installed into the launcher: install it, update it, play it, or take it out again. Its saves aren't here
-    // to manage: they stay in its own save folder, whatever happens to the game's files.
+    // A PC game: imported into the launcher (its files and saves in the launcher's folders, updated by it), or an existing
+    // installation added as it is (run in place, saves where the game keeps them). Either can become the other.
     Page PcGamePage(GameEntry g) {
         var p = new Page { Title = g.Title, Theme = g.Theme };
-        if (!g.OnPc) {
-            p.Body = g.Title + " is a PC game of its own. The launcher keeps a copy in its games folder and updates it from the game's GitHub.\n\nInstall it from your own copy (a folder or the downloaded zip), or download it. It takes about 5 GB. Your saves in " + PcGames.SaveDir(g) + " are used as they are.";
-            p.Items.Add(new Item("Install from a folder", "Copies your installed game.", true, delegate { string f = PickFolder("Choose the folder with Game.exe (for example InfiniteFusion)"); if (f != null) InstallPc(g, f); }) { Icon = '' });
-            p.Items.Add(new Item("Install from a zip", "Unpacks the game's download.", true, delegate {
+        Action pickExisting = delegate {
+            string f = PickFolder("Choose your installation's folder, the one with Game.exe");
+            if (f == null) return;
+            string problem = PcGames.AddExisting(g, f);
+            if (problem != null) { ShowText("Not added", problem, null); return; }
+            pages.Pop(); pages.Push(PcGamePage(g));
+            Busy("Making its pictures", delegate { GameArt.Background(delegate { GameArt.Capture(g); GameArt.CaptureTown(g); }); return null; }, delegate(string e) { ReplaceMain(); });
+        };
+        Action<Page> importItems = delegate(Page into) {
+            into.Items.Add(new Item("Import from a folder", "Copies your installation into the launcher.", true, delegate { string f = PickFolder("Choose the folder with Game.exe (for example InfiniteFusion)"); if (f != null) InstallPc(g, f); }) { Icon = '' });
+            into.Items.Add(new Item("Import from a zip", "Unpacks the game's download into the launcher.", true, delegate {
                 using (var d = new OpenFileDialog { Filter = "Zip (*.zip)|*.zip", Title = "Choose InfiniteFusion.zip" }) if (d.ShowDialog(this) == DialogResult.OK) InstallPc(g, d.FileName);
             }) { Icon = '' });
-            p.Items.Add(new Item("Download", "From the game's GitHub (a few GB). Needs Git for Windows.", PcGames.Git() != null, delegate { InstallPc(g, null); }) { Icon = '' });
+            into.Items.Add(new Item("Download", "From the game's GitHub (a few GB). Needs Git for Windows.", PcGames.Git() != null, delegate { InstallPc(g, null); }) { Icon = '' });
+        };
+        if (!g.OnPc) {
+            p.Body = g.Title + " is a PC game of its own, about 5 GB.\n\nImport it, and the launcher keeps the game and its saves in its own folders and updates it from the game's GitHub. Saves you already have are copied in.\n\nOr add your existing installation: it runs where it is, unchanged, with its saves where the game keeps them (" + PcGames.GameSaveDir(g) + ").";
+            importItems(p);
+            p.Items.Add(new Item("Add an existing installation", "Runs your own copy where it is.", true, pickExisting) { Icon = '' });
             return p;
         }
+        bool existing = PcGames.IsExisting(g);
         string version = PcGames.Version(g);
         var play = new Item("Play", version != null ? "Version " + version + "." : "Start " + g.Title + ".", true, delegate { Play(g); }) { Icon = '' };
-        play.Records = new[] { "Installed in " + PcGames.Dir(g), "Saves in " + PcGames.SaveDir(g) };
+        play.Records = new[] { (existing ? "Your installation: " : "Imported into the launcher: ") + PcGames.Dir(g), "Saves in " + PcGames.SaveDir(g) };
         p.Items.Add(play);
-        p.Items.Add(new Item("Update", "Gets the newest release from the game's GitHub.", PcGames.Git() != null, delegate { UpdatePc(g); }) { Icon = '', Info = "The same update the game's own INSTALL_OR_UPDATE does. Your saves aren't touched." });
+        if (!existing) p.Items.Add(new Item("Update", "Gets the newest release from the game's GitHub.", PcGames.Git() != null, delegate { UpdatePc(g); }) { Icon = '', Info = "The same update the game's own INSTALL_OR_UPDATE does. Your saves aren't touched." });
+        p.Items.Add(new Item("Saves folder", existing ? "Where the game keeps them." : "In the launcher's folder.", true, delegate {
+            string dir = PcGames.SaveDir(g);
+            Directory.CreateDirectory(dir);
+            try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+        }) { Icon = '', Info = PcGames.SaveDir(g) });
         p.Items.Add(new Item("Save backups", "Copies made before each session.", true, delegate {
             string dir = Path.Combine(Config.State, "save-backups", g.Id);
             Directory.CreateDirectory(dir);
             try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
         }) { Icon = '', Info = "The launcher copies your save files here before each session, keeping the newest 30. The game also keeps backups of its own in its save folder." });
-        p.Items.Add(new Item("Uninstall", "Removes the game's files. Your saves stay.", true, delegate { pages.Push(PcRemovePage(g)); }) { Icon = '' });
+        if (existing) {
+            p.Items.Add(new Item("Import into the launcher", "A copy the launcher keeps and updates.", true, delegate {
+                var sub = new Page { Title = "Import " + g.Title, Theme = g.Theme, Body = "The launcher makes its own copy, with its own saves (yours are copied in), and updates it. Your installation stays as it is." };
+                sub.Items.Add(new Item("Import this installation", "Copies " + PcGames.Dir(g) + ".", true, delegate { InstallPc(g, PcGames.Dir(g)); }) { Icon = '' });
+                importItems(sub);
+                pages.Push(sub);
+            }) { Icon = '' });
+            p.Items.Add(new Item("Remove from the launcher", "Forgets it. Nothing is deleted.", true, delegate { PcGames.Forget(g); pages.Pop(); ShowText("Removed", g.Title + " is no longer in the launcher. Your installation and saves are where they were.", null); ReplaceMain(); }) { Icon = '' });
+        } else {
+            p.Items.Add(new Item("Use an existing installation", "Plays your own copy instead.", true, pickExisting) { Icon = '', Info = "This copy and its saves in the launcher's folder stay; switching back is a matter of importing again." });
+            p.Items.Add(new Item("Uninstall", "Removes the launcher's copy. Saves stay.", true, delegate { pages.Push(PcRemovePage(g)); }) { Icon = '' });
+        }
         return p;
     }
     Page PcRemovePage(GameEntry g) {
         var p = new Page { Title = "Uninstall " + g.Title + "?", Theme = g.Theme };
-        p.Body = "This deletes the launcher's copy in " + PcGames.Dir(g) + ".\n\nYour saves in " + PcGames.SaveDir(g) + " stay, and so does any copy of the game you installed it from.";
+        p.Body = "This deletes the launcher's copy in " + PcGames.OwnDir(g) + ".\n\nIts saves in " + PcGames.SaveDir(g) + " stay, and so does any copy of the game you imported it from.";
         p.Items.Add(new Item("Uninstall", "", true, delegate {
             if (AfterCapture(delegate { pages.Pop(); pages.Push(PcRemovePage(g)); })) return;
             if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
-            Busy("Removing " + g.Title, delegate { PcGames.Remove(PcGames.Dir(g)); return null; }, delegate(string e) {
+            Busy("Removing " + g.Title, delegate { PcGames.Remove(PcGames.OwnDir(g)); return null; }, delegate(string e) {
                 pages.Pop(); pages.Pop();
-                ShowText(e == null ? "Uninstalled" : "Not fully removed", e ?? g.Title + " was removed. Your saves are where they were.", null);
+                ShowText(e == null ? "Uninstalled" : "Not fully removed", e ?? g.Title + " was removed. Its saves are where they were.", null);
                 ReplaceMain();
             });
         }) { Icon = '' });
@@ -3857,12 +3947,14 @@ class LauncherForm : Form {
     void InstallPc(GameEntry g, string source) {
         if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
         string problem = null;
-        Busy("Installing " + g.Title, delegate {
+        Busy("Importing " + g.Title, delegate {
             problem = PcGames.Install(g, source, delegate(string what, float at) { BeginInvoke((Action)delegate { if (at >= 0) progress = at; AddLine("nativemons: " + what); dirty = true; }); });
             return null;
         }, delegate(string e) {
-            if (e != null || problem != null) { ShowText("Not installed", e ?? problem, null); return; }
-            pages.Pop(); pages.Push(PcGamePage(g));
+            if (e != null || problem != null) { ShowText("Not imported", e ?? problem, null); return; }
+            while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+            pages.Push(GamesPage()); pages.Push(PcGamePage(g));
+            if (PcGames.Saved != null) ShowText("Imported", g.Title + " is in the launcher. " + PcGames.Saved, null);
             // Its title screen and town, from its own pictures, then the menu shows them.
             Busy("Making its pictures", delegate { GameArt.Background(delegate { GameArt.Capture(g); GameArt.CaptureTown(g); }); return null; }, delegate(string e2) { ReplaceMain(); });
         });
