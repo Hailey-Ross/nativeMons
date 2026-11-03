@@ -1614,7 +1614,7 @@ class LauncherForm : Form {
         Text = "nativeMons";
         // The exe's own icon, for the taskbar and Alt+Tab.
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-        FormClosing += delegate { DropReady(); };
+        FormClosing += delegate { DropReady(); StopSnapshot(); };
         // A device standing upright: no window frame, the window's own outline is the shell's.
         var area = Screen.PrimaryScreen.WorkingArea;
         int h = area.Height * 94 / 100;
@@ -1765,7 +1765,7 @@ class LauncherForm : Form {
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
             // The game quick start keeps waiting isn't running for the player.
-            if (found.Any(p => p.Id != readyPid)) names.Add(n);
+            if (found.Any(p => p.Id != readyPid && p.Id != snapPid)) names.Add(n);
             foreach (var p in found) p.Dispose();
         }
         return string.Join(", ", names.ToArray());
@@ -1877,7 +1877,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
-        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Game Boy, Game Boy Color and GBA games on Gen1Recomp for now. Select to turn it " + (QuickStart ? "off" : "on") + "." });
+        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Game Boy, Game Boy Color and GBA games on Gen1Recomp, and DS games on Fulldex, for now. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
@@ -3501,6 +3501,8 @@ class LauncherForm : Form {
         // The waiting game is kept through everything before it starts (a picture job finishing, the backup and sharing);
         // PlayGen1 decides whether it's still good.
         if (ready != null && readyFor.Id == g.Id) readyHeld = true;
+        // A snapshot still being made can't be used now, and the game gets the PC.
+        StopSnapshot();
         if (AfterCapture(delegate { Play(g); })) return;
         string running = RunningGames();
         if (running != "") {
@@ -3630,6 +3632,7 @@ class LauncherForm : Form {
         bool menu = job == null && !starting && waiting == null && playDirect == null && pages.Count > 0 && pages.Peek().Main;
         if (menu) readyHeld = false;
         if (!menu) menuSince = DateTime.MaxValue; else if (menuSince == DateTime.MaxValue) menuSince = DateTime.Now;
+        SnapshotTick(menu && (DateTime.Now - menuSince).TotalSeconds >= 1.5);
         bool wanted = menu && QuickStart && CanQuickStart(current);
         if (ready != null) {
             bool stale = current == null || readyFor.Id != current.Id || readyOptions != Gen1Options(current) || ready.HasExited;
@@ -3668,6 +3671,89 @@ class LauncherForm : Form {
         readySave = SaveGuard.Hash(CurrentSave(g));
         QuickNote("starting " + g.Id + " pid " + p.Id);
     }
+    // Fulldex DS games start from a snapshot of their title screen, made headless in the background from a copy of the save
+    // (about 6 s). A snapshot holds the cartridge save, and loading one writes it to the save file: so it's used only while
+    // the save is byte for byte the one it was made from, with the same ROM, Fulldex and settings. Fulldex sets the clock
+    // to now after loading one. Remade when anything differs, so after most sessions.
+    static string SnapDir { get { return Path.Combine(Config.State, "quick-start"); } }
+    static string SnapFile(GameEntry g) { return Path.Combine(SnapDir, g.Id + ".snap"); }
+    static string SnapInfo(GameEntry g) { return Path.Combine(SnapDir, g.Id + ".txt"); }
+    static string FulldexSave(GameEntry g) { return Path.Combine(Config.FulldexDir, "saves", g.Save); }
+    static string FulldexFuncs(GameEntry g) { return g.FulldexCode == "IPGE" || g.FulldexCode == "IPKE" ? null : Path.Combine(Config.FulldexDir, "data", "funcs", g.FulldexCode + ".txt"); }
+    static bool CanSnapshot(GameEntry g) {
+        return g != null && g.Playable && g.Engine() == "fulldex" && g.IsDs && g.ArtFrame > 0 && g.FulldexRom != null && g.FulldexCode != null
+            && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom);
+    }
+    static string FileKey(string path) { try { var f = new FileInfo(path); return f.Exists ? path + "|" + f.Length + "|" + f.LastWriteTimeUtc.Ticks : path + "|none"; } catch { return path + "|?"; } }
+    static string SnapKey(GameEntry g) {
+        return string.Join("\n", new[] { FileKey(g.FulldexRom), FileKey(Config.Fulldex), SaveGuard.Hash(Path.Combine(Config.FulldexDir, "settings.cfg")), FulldexFuncs(g) ?? "", g.ArtFrame.ToString() });
+    }
+    // The save's hash, worked out again only when the file changes: this is asked several times a second.
+    static readonly Dictionary<string, KeyValuePair<string, string>> hashes = new Dictionary<string, KeyValuePair<string, string>>();
+    static string SaveHash(string path) {
+        string at = FileKey(path);
+        KeyValuePair<string, string> known;
+        lock (hashes) if (hashes.TryGetValue(path, out known) && known.Key == at) return known.Value;
+        string h = SaveGuard.Hash(path);
+        lock (hashes) hashes[path] = new KeyValuePair<string, string>(at, h);
+        return h;
+    }
+    static bool SnapshotGood(GameEntry g) {
+        try {
+            if (!CanSnapshot(g) || !File.Exists(SnapFile(g)) || !File.Exists(SnapInfo(g))) return false;
+            var info = File.ReadAllText(SnapInfo(g)).Split(new[] { "\n--\n" }, StringSplitOptions.None);
+            return info.Length == 2 && info[0] == SnapKey(g) && info[1] == SaveHash(FulldexSave(g));
+        } catch { return false; }
+    }
+    Process snapping; string snapFailed;
+    static volatile int snapPid;
+    bool snapStopped;
+    void StopSnapshot() { var p = snapping; if (p == null) return; snapStopped = true; try { p.Kill(); } catch { } }
+    void SnapshotTick(bool menuIdle) {
+        // Never beside a game: the player's game gets the PC.
+        if (snapping != null) { if (job != null && jobIsGame) StopSnapshot(); return; }
+        if (!menuIdle || !QuickStart || !CanSnapshot(current) || SnapshotGood(current) || RunningGames() != "") return;
+        var g = current;
+        string key = SnapKey(g), save = FulldexSave(g), saveHash = SaveHash(save);
+        if (snapFailed == key + saveHash) return;
+        string work = Path.Combine(SnapDir, g.Id + "-making"), copy = Path.Combine(work, "source.sav"), made = Path.Combine(work, "title.snap");
+        try {
+            if (Directory.Exists(work)) Directory.Delete(work, true);
+            Directory.CreateDirectory(work);
+            if (File.Exists(save)) { File.Copy(save, copy); File.SetAttributes(copy, FileAttributes.Normal); }
+            // The copy must be the save that was hashed; if the player's save moved on meanwhile, try again later.
+            if (SaveGuard.Hash(copy) != saveHash) { Directory.Delete(work, true); return; }
+        } catch { return; }
+        string dir = Config.FulldexDir, funcs = FulldexFuncs(g);
+        string args = "\"" + g.FulldexRom + "\" --save \"" + copy + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --keep-settings --jit"
+            + (funcs != null ? " --funcs \"" + funcs + "\"" : "") + " --headless --frames " + (g.ArtFrame + 5) + " --state-save \"" + made + "\" --state-at " + g.ArtFrame;
+        var p = new Process { StartInfo = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true } };
+        try { p.Start(); } catch { snapFailed = key + saveHash; return; }
+        try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+        snapping = p; snapPid = p.Id;
+        QuickNote("snapshot making " + g.Id);
+        Task.Run(() => {
+            bool ok = false;
+            try {
+                p.StandardOutput.ReadToEndAsync(); p.StandardError.ReadToEndAsync();
+                if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } }
+                else if (p.ExitCode == 0 && File.Exists(made) && SnapKey(g) == key) {
+                    if (File.Exists(SnapFile(g))) File.Delete(SnapFile(g));
+                    File.Move(made, SnapFile(g));
+                    File.WriteAllText(SnapInfo(g), key + "\n--\n" + saveHash);
+                    ok = true;
+                }
+            } catch { }
+            try { Directory.Delete(work, true); } catch { }
+            BeginInvoke((Action)delegate {
+                // Stopped for a game isn't a failure: it's made again later.
+                bool stopped = snapStopped;
+                snapping = null; snapPid = 0; snapStopped = false;
+                if (!ok && !stopped) snapFailed = key + saveHash;
+                QuickNote(ok ? "snapshot ready " + g.Id : "snapshot failed " + g.Id);
+            });
+        });
+    }
     // Ends the waiting game: closing its input tells it to quit, and it's stopped if it doesn't.
     void DropReady() {
         var p = ready;
@@ -3697,6 +3783,9 @@ class LauncherForm : Form {
             args = "\"" + g.FulldexRom + "\" --save \"" + Path.Combine(saves, g.Save) + "\" --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit";
             // SoulSilver and HeartGold use the program's own tables and must not be given a function table.
             if (g.FulldexCode != "IPGE" && g.FulldexCode != "IPKE") args += " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
+            // Quick start: from the title-screen snapshot, only while the save is exactly the one it was made from.
+            if (QuickStart && SnapshotGood(g)) { args += " --state-load \"" + SnapFile(g) + "\""; QuickNote("snapshot used " + g.Id); }
+            else if (QuickStart && CanSnapshot(g)) QuickNote("snapshot not used " + g.Id);
         } else {
             // GBA games are only found in Fulldex's roms folder. A copy goes there, the original stays put.
             string roms = Path.Combine(dir, "roms"), copy = Path.Combine(roms, Path.GetFileName(g.FulldexRom));
