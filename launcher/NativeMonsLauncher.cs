@@ -1,15 +1,5 @@
-// nativeMons launcher: one menu for native Pokemon ports on PC, for the controller, keyboard or mouse.
-//   D-pad / left stick = move, A = select, B = back. Arrows / Enter / Esc work too.
-//
-// The window, splash, tiles and detail panel come from the steam launcher of the Skate 3 Rust engine's
-// hails-additions branch (github.com/Hailey-Ross/rusty-trucks, tools/steam-launcher, GPL-3.0). The games run as
-// separate programs, so nothing from either engine is built into this one.
-//
-// Licensed under the GNU GPL v3 or later (see LICENSE).
-// Build (build.bat): the C# compiler that ships with Windows, C# 5, so no string interpolation or ?.
-//   NativeMonsLauncher.exe --play <game id> starts one game and closes afterwards (shortcuts, Steam).
-//   NativeMonsLauncher.exe --snapshot <out.png> [main[:<game id>]|games|game|mods|folders|credits|job|splash|sprites] [<w>x<h>]
-//   draws one screen and exits.
+// nativeMons launcher: one menu for native Pokemon ports on PC. Licensed under the GNU GPL v3 or later (see LICENSE).
+// Built with Windows' own C# 5 compiler (build.bat). Design, credits and command line: notes/launcher.md.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -55,13 +45,9 @@ static class Native {
     }
 }
 
-// Where everything is. Each path can be changed in state\nativemons.cfg (key=value).
-// Discord Rich Presence: while a game runs, the player's Discord status shows which one, played through nativeMons. It speaks
-// Discord's local pipe protocol (a handshake, then SET_ACTIVITY) with no library. Closing the pipe clears the status. Nothing
-// happens when Discord isn't running, when no application ID is set, or when the player turns it off in Settings.
+// Discord Rich Presence over Discord's local pipe, with no library (notes/launcher.md, Discord).
 static class DiscordPresence {
-    // The application registered at discord.com/developers. Its name is what Discord shows as "Playing ...". A file in state
-    // overrides it, for testing another application.
+    // Registered at discord.com/developers. A file in state overrides it, for testing.
     const string AppId = "1566980838325747914";
     const string ImageKey = "nativemons", Home = "https://github.com/Hailey-Ross/nativeMons";
     static readonly object gate = new object();
@@ -80,8 +66,7 @@ static class DiscordPresence {
             try {
                 var p = Connect(id);
                 if (p == null) return;
-                // The game, and a button to the project's GitHub page; the picture and the game's name lead there too. Discord
-                // shows the button to everyone but the player.
+                // The game, and a button to the project's GitHub page.
                 var activity = new Dictionary<string, object> {
                     { "details", title.StartsWith("Pokemon ") ? "Pokémon " + title.Substring(8) : title },
                     { "details_url", Home },
@@ -166,10 +151,11 @@ static class Config {
     public static string OpenHomeTool { get { return Get("openhome", @"tools\openhome\convert.cjs"); } }
     public static string PlatinumPort { get { return Get("pokeplatinum", @"engines\pokeplatinum\main.exe"); } }
     public static string Nativeplat { get { return Get("nativeplat", @"engines\nativeplat\nativeplat.exe"); } }
-    // Games installed into the launcher (PcGames): beside the engines, where an update of the launcher never looks.
+    // Installed PC games live beside the engines, where a launcher update never looks.
     public static string InfiniteFusion { get { return Get("infinitefusion", @"games\infinitefusion\Game.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
+    public static string MgbaCore { get { return Get("mgbacore", @"tools\mgba\mgba_libretro.dll"); } }
     public static string GamesFile { get { return Get("games", "games.json"); } }
     public static string Python { get { string v; return values.TryGetValue("python", out v) ? v : "python"; } }
     public static string FulldexDir { get { return Path.GetDirectoryName(Fulldex); } }
@@ -179,13 +165,13 @@ static class Config {
         return l;
     }
     public static void SaveRomFolders(List<string> folders) { File.WriteAllLines(Path.Combine(State, "rom-folders.txt"), folders.ToArray()); }
-    // ROMs added one at a time (dropped on the window or picked): used where they are.
+    // ROMs added one at a time, used where they are.
     public static List<string> RomFiles() {
         string f = Path.Combine(State, "rom-files.txt");
         return File.Exists(f) ? File.ReadAllLines(f).Where(x => x.Trim() != "").Distinct(StringComparer.OrdinalIgnoreCase).ToList() : new List<string>();
     }
     public static void SaveRomFiles(List<string> files) { File.WriteAllLines(Path.Combine(State, "rom-files.txt"), files.ToArray()); }
-    // ROMs taken out of a .zip: our own copies, one folder per zip. Always searched.
+    // ROMs from a .zip: our own copies, one folder per zip.
     public static string Unzipped { get { return Path.Combine(State, "roms"); } }
     public static string Read(string name, string fallback) {
         try { string f = Path.Combine(State, name); return File.Exists(f) ? File.ReadAllText(f).Trim() : fallback; } catch { return fallback; }
@@ -193,10 +179,10 @@ static class Config {
     public static void Write(string name, string text) { try { File.WriteAllText(Path.Combine(State, name), text); } catch { } }
 }
 
-// A version's colours, from games.json: main, deep, light, and a finish (plain or a scene: crystal, gold, silver, flame, tide, bolt).
+// A version's colours from games.json, and its finish: plain or a scene.
 class Theme {
     public Color Main, Deep, Light, Ink; public string Finish = "plain";
-    public string GameId;   // whose title screen to show, once it has been captured (see GameArt)
+    public string GameId;   // whose captured title screen to show
     // Gold, silver and crystal surfaces have no single colour to use for text on cream.
     public bool Plain { get { return Finish != "gold" && Finish != "silver" && Finish != "crystal"; } }
     // Text in the version's colour on a cream box, unless that colour is too light to read there.
@@ -216,14 +202,13 @@ class GameEntry {
     public Theme Theme = Theme.Default;
     public int Dex;   // how many National Dex entries this game has
     public string Id, Title, Console, Gen1, FulldexCode, Header, Save, Port, Nativeplat, TownCore;
-    // A game that is a PC program of its own, installed into the launcher (PcGames), such as Infinite Fusion. It has no ROM,
-    // and the save tools, Move Pokemon and My Collection leave it out.
+    // A PC program of its own (PcGames), with no ROM. Save tools, Move and Collection leave it out.
     public string Pc;
     public bool OnPc { get { return Pc != null && PcGames.Installed(this); } }
     public bool SaveTools { get { return Playable && Pc == null; } }
-    public int ArtFrame, TownFrame;   // when this game's title screen is up, in frames from power-on
+    public int ArtFrame, TownFrame;   // frames from power-on to the title screen
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
-    public List<RomFile> Roms = new List<RomFile>();   // every different dump of this game that was found
+    public List<RomFile> Roms = new List<RomFile>();   // every distinct dump found
     public RomFile Chosen;
     public bool CanVerify { get { return Gen1 != null || Nativeplat != null; } }
     // Two dumps can share a revision, such as a clean one and a hack. They must not read the same.
@@ -235,9 +220,10 @@ class GameEntry {
         return r.Label + " (" + r.Sha1.Substring(0, 6) + ")";
     }
     public bool Imported;
-    // A romhack of a game in games.json: a game of its own, made from its base game's entry (Library.Hacks). It runs on
-    // Fulldex only, with its own save, and reads as its base game's saves do.
+    // A romhack (Library.Hacks): a game of its own on Fulldex, with its own save.
     public string BaseId;
+    // Known patched builds of this game, by SHA-1: { id, title } (games.json "hacks").
+    public Dictionary<string, string[]> KnownHacks = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
     public bool IsHack { get { return BaseId != null; } }
     public GameEntry CopyOf() { return (GameEntry)MemberwiseClone(); }
     public bool OnGen1 { get { return Gen1 != null && (Imported || Gen1Rom != null); } }
@@ -269,16 +255,10 @@ class GameEntry {
     public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
 }
 
-// Games that are PC programs of their own, installed into the launcher's games folder and kept up to date by it. For
-// now Pokemon Infinite Fusion (RPG Maker XP on mkxp-z): its folder is a git checkout of infinitefusion/infinitefusion-e18,
-// branch "releases", which its own INSTALL_OR_UPDATE.bat updates with a shallow fetch and reset; Update does the same
-// with the git on the PC. Saves live outside the folder, in %APPDATA%\infinitefusion, so installing again or updating
-// never touches them.
+// Games that are PC programs of their own, such as Infinite Fusion (notes/launcher.md, PC games).
 static class PcGames {
     public const string Repo = "https://github.com/infinitefusion/infinitefusion-e18.git", Branch = "releases";
-    // Two ways in, both valid. Imported: a copy in the launcher's games folder that the launcher updates, with its saves in
-    // the launcher's state folder too. Existing: the player's own installation, run where it is and never changed, with
-    // its saves where the game keeps them (%APPDATA%\infinitefusion). state\pc-<id>.txt names an existing one.
+    // Imported (the launcher's copy) or existing (the player's, run in place). state\pc-<id>.txt names an existing one.
     static string ExistingFile(GameEntry g) { return Path.Combine(Config.State, "pc-" + g.Id + ".txt"); }
     public static string Existing(GameEntry g) { string d = Config.Read("pc-" + g.Id + ".txt", "").Trim(); return d != "" ? d : null; }
     public static bool IsExisting(GameEntry g) { return Existing(g) != null; }
@@ -293,11 +273,7 @@ static class PcGames {
     public static bool Installed(GameEntry g) { string e = Exe(g); return e != null && File.Exists(e); }
     public static string GameSaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "infinitefusion"); }
     public static string SaveDir(GameEntry g) { return IsExisting(g) ? GameSaveDir(g) : Path.Combine(Config.State, "saves", g.Id); }
-    // mkxp-z puts saves under %APPDATA% with no setting for elsewhere, and every save path in the game's scripts comes from
-    // System.data_directory. An imported copy gets an mkxp.json naming a preload script that answers that with the
-    // launcher's folder, only when the launcher passes it (NATIVEMONS_SAVE_DIR): Game.exe started by hand behaves as
-    // usual. Git doesn't track either file, so the game's own update leaves them in place; they're written again anyway
-    // before each session.
+    // Keeps an imported copy's saves beside the launcher (notes/launcher.md, PC games).
     const string PreloadName = "nativemons-saves.rb";
     const string Preload = "# nativeMons: when the launcher starts this copy, its saves go in the launcher's folder.\n"
         + "if ENV['NATIVEMONS_SAVE_DIR'] && !ENV['NATIVEMONS_SAVE_DIR'].empty?\n"
@@ -316,8 +292,7 @@ static class PcGames {
         if (!File.Exists(json) || !File.ReadAllText(json).Contains(PreloadName)) File.WriteAllText(json, "{\n  \"preloadScript\": [\"" + PreloadName + "\"]\n}\n");
         psi.EnvironmentVariables["NATIVEMONS_SAVE_DIR"] = saves;
     }
-    // Imported with saves already in the game's usual folder: they're copied in, so the player carries on. The
-    // originals stay where they are.
+    // Saves already in the game's usual folder are copied in; the originals stay.
     static string BringSaves(GameEntry g) {
         string from = GameSaveDir(g), to = SaveDir(g);
         Directory.CreateDirectory(to);
@@ -341,7 +316,6 @@ static class PcGames {
             try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) return true; } catch { } finally { p.Dispose(); }
         return false;
     }
-    // Any program running from inside that folder.
     public static bool RunningFrom(string dir) {
         string root = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
         foreach (var p in Process.GetProcesses())
@@ -349,7 +323,7 @@ static class PcGames {
         return false;
     }
     public static bool AnyRunning() { return Library.Games.Any(g => g.Pc != null && Installed(g) && Running(g)); }
-    // The program on the PC, or null: installing and updating use it, as the game's own updater does with its bundled one.
+    // Git on the PC, or null.
     public static string Git() {
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
             try { string f = Path.Combine(dir.Trim(), "git.exe"); if (dir.Trim() != "" && File.Exists(f)) return f; } catch { }
@@ -376,8 +350,7 @@ static class PcGames {
         try { RunGit("log -1 --format=%s", Dir(g), delegate(string l) { if (subject == null) subject = l.Trim(); }); } catch { }
         return subject;
     }
-    // From the player's own copy (a folder or the downloaded zip), or straight from the game's GitHub. It goes into a
-    // folder beside the final one and replaces it only once complete, so a stopped install leaves the old one working.
+    // An install replaces the old folder only once it's complete.
     // What the last install did with the player's saves, for its message.
     public static string Saved;
     public static string Install(GameEntry g, string source, Action<string, float> report) {
@@ -434,8 +407,7 @@ static class PcGames {
         } catch (Exception x) { return "Installing stopped: " + x.Message + " The copy you had (if any) is unchanged."; }
         finally { try { if (Directory.Exists(work)) Remove(work); } catch { } }
     }
-    // A shallow fetch of the release branch and a hard reset onto it, as the game's INSTALL_OR_UPDATE.bat does.
-    // Only the launcher's own copy: an existing installation is the player's, updated by its own updater.
+    // A shallow fetch and hard reset, as the game's own updater does. Only the launcher's own copy.
     public static string Update(GameEntry g, Action<string> line) {
         if (IsExisting(g)) return "This is your own installation, so the launcher leaves it alone. Use the game's INSTALL_OR_UPDATE, or import a copy into the launcher.";
         string dir = OwnDir(g);
@@ -455,8 +427,7 @@ static class PcGames {
     static bool Room(string target, long bytes) {
         try { var d = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(target))); return d.AvailableFreeSpace > bytes + (1L << 30); } catch { return true; }
     }
-    // Before each session: the save files copied aside, newest 30 kept, in state\save-backups\<id>\<time>. The game keeps
-    // backups of its own too, in its save folder.
+    // Before each session: the save files copied to state\save-backups\<id>\<time>, newest 30 kept.
     public static void Backup(GameEntry g) {
         if (IsCustom(g)) return;   // where an added game keeps its saves is its own business
         string from = SaveDir(g);
@@ -470,13 +441,9 @@ static class PcGames {
     }
 }
 
-// PC games the player adds themselves: any self-contained game with its own .exe, no support written for it. They
-// are kept in state\pc-games.json: a name, the program, and whether the launcher holds its own copy (in games\<id>,
-// removed with it) or runs the player's where it is. They have none of the extras (captured title, wallpaper, save
-// handling): the launcher can't know where such a game keeps its saves, so it leaves them to the game.
+// PC games the player adds, kept in state\pc-games.json (notes/launcher.md, PC games).
 static class CustomGames {
-    // exe: the program (run where it is), or what the copy came from. rel: the program inside the launcher's copy, when it
-    // isn't at the top of it (a zip's game in a subfolder); older entries have none and keep their program at the top.
+    // exe: the program run in place, or what the copy came from. rel: its program inside the copy, when not at the top.
     public class Entry { public string id, title, exe, rel; public bool copy; }
     static string File_ { get { return Path.Combine(Config.State, "pc-games.json"); } }
     public static List<Entry> All() {
@@ -497,8 +464,7 @@ static class CustomGames {
     }
     public static string Dir(Entry e) { return e.copy ? Path.Combine(Config.Here, "games", e.id) : Path.GetDirectoryName(e.exe); }
     public static string Exe(Entry e) { return e.copy ? Path.Combine(Dir(e), string.IsNullOrEmpty(e.rel) ? Path.GetFileName(e.exe) : e.rel) : e.exe; }
-    // A folder's programs, the likeliest game first: nearest the top, then by name, leaving out installers, uninstallers,
-    // crash reporters and runtimes.
+    // A folder's programs, likeliest first, leaving out installers, crash reporters and runtimes.
     static readonly string[] NotTheGame = { "unins", "setup", "install", "crash", "redist", "vcredist", "dxsetup", "dotnet", "update", "launcherhelper", "notification_helper" };
     public static List<string> Programs(string dir) {
         string root = dir.TrimEnd('\\');
@@ -506,8 +472,7 @@ static class CustomGames {
             .Where(f => { string n = Path.GetFileNameWithoutExtension(f).ToLowerInvariant().Replace(" ", "").Replace("_", ""); return !NotTheGame.Any(n.Contains); })
             .OrderBy(f => f.Substring(root.Length).Count(c => c == '\\')).ThenBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
     }
-    // A .zip unpacked into games\<id>: its files only, never outside that folder. A zip holding one folder is unpacked from
-    // inside it. Then the program to run is chosen from it (choose: null keeps it all and lets the player pick).
+    // Unpacks a .zip into games\<id>, never outside it. choose: null keeps it all for the player to pick.
     public static string Unpack(string zip, Action<string, float> report, out string work, out List<string> programs) {
         work = null; programs = null;
         if (!File.Exists(zip)) return "That zip isn't there.";
@@ -565,8 +530,7 @@ static class CustomGames {
         string id = "pc-" + slug; for (int i = 2; all.Any(x => x.id == id) || Library.Games.Any(x => x.Id == id); i++) id = "pc-" + slug + "-" + i;
         return new Entry { id = id, title = title, exe = Path.GetFullPath(exe) };
     }
-    // A new game: copied into the launcher, or run where it is. Its name comes from the program's own product name, else
-    // its folder's.
+    // Copied into the launcher, or run where it is. Named after the program's product name, else its folder.
     public static string Add(string exe, bool copy, Action<string, float> report, out Entry added) {
         added = null;
         if (!File.Exists(exe)) return "That program isn't there.";
@@ -604,6 +568,346 @@ static class CustomGames {
     }
 }
 
+// Read-only Ruby Marshal 4.8, as RPG Maker saves use. Anything unknown stops it (notes/launcher.md, PC games).
+sealed class RSym {
+    public readonly string Name;
+    public RSym(string n) { Name = n; }
+    public override bool Equals(object o) { var r = o as RSym; return r != null && r.Name == Name; }
+    public override int GetHashCode() { return Name.GetHashCode(); }
+    public override string ToString() { return ":" + Name; }
+}
+sealed class RObj {
+    public string Class; public Dictionary<string, object> Ivars = new Dictionary<string, object>();
+    public object this[string ivar] { get { object v; return Ivars.TryGetValue(ivar, out v) ? v : null; } }
+}
+sealed class RubyMarshal {
+    readonly byte[] b; int p = 2;
+    readonly List<RSym> syms = new List<RSym>(); readonly List<object> objs = new List<object>();
+    RubyMarshal(byte[] data) { b = data; }
+    public static object Load(byte[] data) {
+        if (data.Length < 2 || data[0] != 4 || data[1] != 8) throw new InvalidDataException("Not Ruby Marshal 4.8 data.");
+        return new RubyMarshal(data).Read();
+    }
+    byte Byte() { if (p >= b.Length) throw new InvalidDataException("Marshal data cut short."); return b[p++]; }
+    long Long() {
+        int c = (sbyte)Byte();
+        if (c == 0) return 0;
+        if (c > 4) return c - 5;
+        if (c < -4) return c + 5;
+        long v = 0;
+        if (c > 0) { for (int i = 0; i < c; i++) v |= (long)Byte() << (8 * i); return v; }
+        v = -1;
+        for (int i = 0; i < -c; i++) { v &= ~(0xFFL << (8 * i)); v |= (long)Byte() << (8 * i); }
+        return v;
+    }
+    byte[] Bytes() { int n = (int)Long(); if (n < 0 || p + n > b.Length) throw new InvalidDataException("Marshal data cut short."); var v = new byte[n]; Array.Copy(b, p, v, 0, n); p += n; return v; }
+    RSym Sym() {
+        char t = (char)Byte();
+        if (t == ':') { var s = new RSym(Encoding.UTF8.GetString(Bytes())); syms.Add(s); return s; }
+        if (t == ';') return syms[(int)Long()];
+        if (t == 'I') { var s = Sym(); long n = Long(); for (long i = 0; i < n; i++) { Sym(); Read(); } return s; }
+        throw new InvalidDataException("Marshal: a symbol was expected.");
+    }
+    object Read() {
+        char t = (char)Byte();
+        switch (t) {
+            case '0': return null;
+            case 'T': return true;
+            case 'F': return false;
+            case 'i': return Long();
+            case ':': case ';': p--; return Sym();
+            case '@': return objs[(int)Long()];
+            case 'I': { var v = Read(); long n = Long(); for (long i = 0; i < n; i++) { Sym(); Read(); } return v; }
+            case '"': { var v = Encoding.UTF8.GetString(Bytes()); objs.Add(v); return v; }
+            case 'f': { var txt = Encoding.ASCII.GetString(Bytes()); double d; object v = double.TryParse(txt, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d) ? d : 0.0; objs.Add(v); return v; }
+            case 'l': { Byte(); int n = (int)Long() * 2; p += n; objs.Add(0L); return 0L; }   // a big number: skipped
+            case '[': { var a = new List<object>(); objs.Add(a); long n = Long(); for (long i = 0; i < n; i++) a.Add(Read()); return a; }
+            case '{': case '}': {
+                var h = new Dictionary<object, object>(); objs.Add(h); long n = Long();
+                for (long i = 0; i < n; i++) { var k = Read(); var v = Read(); if (k != null) h[k] = v; }
+                if (t == '}') Read();
+                return h;
+            }
+            case 'o': case 'S': {
+                var o = new RObj { Class = Sym().Name }; objs.Add(o); long n = Long();
+                for (long i = 0; i < n; i++) { var k = Sym().Name; o.Ivars[k] = Read(); }
+                return o;
+            }
+            case 'u': { var o = new RObj { Class = Sym().Name }; o.Ivars["_dump"] = Bytes(); objs.Add(o); return o; }
+            case 'U': { var o = new RObj { Class = Sym().Name }; objs.Add(o); o.Ivars["_data"] = Read(); return o; }
+            case 'e': case 'C': Sym(); return Read();
+            case 'c': case 'm': { var v = Encoding.UTF8.GetString(Bytes()); objs.Add(v); return v; }
+            case '/': { var v = Bytes(); Byte(); objs.Add(v); return v; }
+        }
+        throw new InvalidDataException("Marshal: unknown kind '" + t + "' at byte " + (p - 1) + ".");
+    }
+}
+
+// Infinite Fusion's Pokedex, from its saves and Data\species.dat (notes/launcher.md, PC games).
+static class InfiniteFusionDex {
+    static readonly byte[] Key = { 0x4A, 0x8F, 0x2C, 0xE1, 0x73, 0xB5, 0x96, 0x0D, 0x5E, 0xA2, 0x3F, 0xC7, 0x81, 0x14, 0x6B, 0xD9 };
+    public static string Plain(string name) {
+        var o = new StringBuilder();
+        foreach (char c in name.ToLowerInvariant().Replace("\u2640", "f").Replace("\u2642", "m").Normalize(NormalizationForm.FormD))
+            if (char.IsLetterOrDigit(c) && c < 128) o.Append(c);
+        return o.ToString();
+    }
+    static string namesFrom; static Dictionary<int, string> names;
+    static Dictionary<int, string> Species(string gameDir) {
+        string file = Path.Combine(gameDir, "Data", "species.dat");
+        string print = file + "|" + new FileInfo(file).LastWriteTimeUtc.Ticks;
+        if (names != null && namesFrom == print) return names;
+        var raw = File.ReadAllBytes(file);
+        if (!(raw.Length > 1 && raw[0] == 4 && raw[1] == 8)) for (int i = 0; i < raw.Length; i++) raw[i] ^= Key[i % Key.Length];
+        var all = RubyMarshal.Load(raw) as Dictionary<object, object>;
+        if (all == null) throw new InvalidDataException("Its species list isn't in the form expected.");
+        var d = new Dictionary<int, string>();
+        foreach (var kv in all) {
+            var o = kv.Value as RObj; if (o == null || !(kv.Key is long)) continue;
+            var n = o["real_name"] as string ?? o["@real_name"] as string;
+            if (n != null) d[(int)(long)kv.Key] = n;
+        }
+        names = d; namesFrom = print;
+        return d;
+    }
+    static int Count(object table) {
+        int n = 0; var rows = table as List<object>; if (rows == null) return 0;
+        foreach (var row in rows) { var r = row as List<object>; if (r != null) foreach (var x in r) if (x is bool && (bool)x) n++; }
+        return n;
+    }
+    // Every save of the game, read together. national: a Pokemon's plain name (Plain) to its National Dex number.
+    public static void Read(string gameDir, IEnumerable<string> saves, Dictionary<string, int> national, HashSet<int> caught, HashSet<int> seen, out int fusionsCaught, out int fusionsSeen, HashSet<int> laterCaught, HashSet<int> laterSeen) {
+        fusionsCaught = 0; fusionsSeen = 0;
+        var species = Species(gameDir);
+        foreach (var file in saves) {
+            var save = RubyMarshal.Load(File.ReadAllBytes(file)) as Dictionary<object, object>;
+            object player; if (save == null || !save.TryGetValue(new RSym("player"), out player)) continue;
+            var pl = player as RObj; var dex = pl != null ? pl["@pokedex"] as RObj : null;
+            if (dex == null) continue;
+            foreach (var key in new[] { "@owned_standard", "@seen_standard" }) {
+                var list = dex[key] as List<object>; if (list == null) continue;
+                bool owned = key == "@owned_standard";
+                for (int i = 1; i < list.Count; i++) {
+                    if (!(list[i] is bool) || !(bool)list[i]) continue;
+                    string name; int nat;
+                    if (i <= 251) nat = i;
+                    else if (!species.TryGetValue(i, out name) || !national.TryGetValue(Plain(name), out nat)) {
+                        // A later Pokemon than the collection lists (Oricorio, Carbink): kept by its own number.
+                        (owned ? laterCaught : laterSeen).Add(i);
+                        continue;
+                    }
+                    (owned ? caught : seen).Add(nat);
+                }
+            }
+            fusionsCaught = Math.Max(fusionsCaught, Count(dex["@owned_fusion"]));
+            fusionsSeen = Math.Max(fusionsSeen, Count(dex["@seen_fusion"]));
+        }
+        seen.UnionWith(caught); laterSeen.UnionWith(laterCaught);
+    }
+}
+
+// The Gen1Recomp community mod index (notes/launcher.md, Mods).
+static class ModIndex {
+    public const string Feed = "https://bryanthaboi.github.io/gen1recomp-mod-index/data/index.json";
+    public const string Site = "https://github.com/bryanthaboi/gen1recomp-mod-index";
+    const long MaxZip = 300L * 1024 * 1024;
+    public class Entry {
+        public string Id, Title, Author, Summary, Version, Repo, License, ZipUrl, Folder;
+        public List<string> Games = new List<string>(), Permissions = new List<string>(), Categories = new List<string>(), Needs = new List<string>(), Clashes = new List<string>();
+        public bool Experimental; public long ZipSize; public long Downloads = -1;
+    }
+    static string CacheFile { get { return Path.Combine(Config.State, "mod-index.json"); } }
+    public static int CachedCount() {
+        try { return File.Exists(CacheFile) ? Parse(File.ReadAllText(CacheFile, Encoding.UTF8)).Count : 0; } catch { return 0; }
+    }
+    static string Str(Dictionary<string, object> d, string k) { object v; return d != null && d.TryGetValue(k, out v) ? v as string : null; }
+    static List<string> Strs(Dictionary<string, object> d, string k) {
+        object v; var o = new List<string>();
+        if (d != null && d.TryGetValue(k, out v) && v is System.Collections.IEnumerable && !(v is string)) foreach (var x in (System.Collections.IEnumerable)v) if (x is string) o.Add((string)x);
+        return o;
+    }
+    static Dictionary<string, object> Obj(Dictionary<string, object> d, string k) { object v; return d != null && d.TryGetValue(k, out v) ? v as Dictionary<string, object> : null; }
+    // The list, from the feed; a copy kept six hours, and used whenever the feed can't be reached.
+    public static List<Entry> Load(out string note) {
+        note = null; string text = null;
+        var age = File.Exists(CacheFile) ? DateTime.UtcNow - File.GetLastWriteTimeUtc(CacheFile) : TimeSpan.MaxValue;
+        if (age > TimeSpan.FromHours(6)) {
+            try {
+                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+                using (var web = new System.Net.WebClient()) {
+                    web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+                    web.Encoding = Encoding.UTF8;
+                    text = web.DownloadString(Feed);
+                }
+                Parse(text);   // a feed that doesn't read is never kept
+                Directory.CreateDirectory(Config.State);
+                File.WriteAllText(CacheFile + ".part", text, Encoding.UTF8);
+                if (File.Exists(CacheFile)) File.Delete(CacheFile);
+                File.Move(CacheFile + ".part", CacheFile);
+            } catch (Exception x) {
+                text = null;
+                if (!File.Exists(CacheFile)) throw new IOException("The mod index couldn't be reached. " + x.Message);
+                note = "The mod index couldn't be reached, so this is the list from " + File.GetLastWriteTime(CacheFile).ToString("d MMM, h:mm tt") + ".";
+            }
+        }
+        if (text == null) text = File.ReadAllText(CacheFile, Encoding.UTF8);
+        return Parse(text);
+    }
+    static List<Entry> Parse(string text) {
+        var js = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+        var root = js.Deserialize<Dictionary<string, object>>(text.TrimStart('\uFEFF'));
+        object ver; root.TryGetValue("schema_version", out ver);
+        if (ver == null || Convert.ToInt32(ver) != 1) throw new InvalidDataException("The mod index is in a newer form than this launcher reads. Update nativeMons.");
+        var list = new List<Entry>();
+        object mods; root.TryGetValue("mods", out mods);
+        foreach (var o in (mods as System.Collections.IEnumerable) ?? new object[0]) {
+            var m = o as Dictionary<string, object>; if (m == null) continue;
+            var e = new Entry { Id = Str(m, "id"), Title = Str(m, "title"), Author = Str(m, "author"), Summary = Str(m, "summary"), Version = Str(m, "version"), Repo = Str(m, "repo"), License = Str(m, "license"), Folder = Str(m, "folder") };
+            if (string.IsNullOrEmpty(e.Id) || string.IsNullOrEmpty(e.Title)) continue;
+            e.Games = Strs(m, "games"); e.Permissions = Strs(m, "permissions"); e.Categories = Strs(m, "categories");
+            // Its required mods, by id (a spec string is id, then @range, then #repo).
+            e.Needs = Strs(m, "dependencies").Select(spec => spec.Split('@', '#')[0]).Where(id => id != "").ToList();
+            e.Clashes = Strs(m, "conflicts").Select(spec => spec.Split('@', '#')[0]).Where(id => id != "").ToList();
+            object x; e.Experimental = m.TryGetValue("experimental", out x) && x is bool && (bool)x;
+            var latest = Obj(m, "latest"); var zip = Obj(latest, "zip");
+            if (latest != null && !string.IsNullOrEmpty(Str(latest, "version"))) e.Version = Str(latest, "version");
+            e.ZipUrl = Str(zip, "url") ?? Str(m, "downloadURL");
+            object size; if (zip != null && zip.TryGetValue("size", out size) && size != null) e.ZipSize = Convert.ToInt64(size);
+            var dl = Obj(m, "downloads"); object total; if (dl != null && dl.TryGetValue("total", out total) && total != null) e.Downloads = Convert.ToInt64(total);
+            if (e.ZipUrl == null || !e.ZipUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue;   // nothing installable
+            list.Add(e);
+        }
+        return list.OrderByDescending(e => e.Downloads).ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+    static string Generation(string version) {
+        switch (version) {
+            case "red": case "blue": case "yellow": return "gen1";
+            case "gold": case "silver": case "crystal": return "gen2";
+            default: return "gen3";
+        }
+    }
+    // A mod that names no games is offered everywhere (the game itself decides, as it does for any installed mod).
+    public static bool Fits(Entry e, string version) {
+        return e.Games.Count == 0 || e.Games.Any(x => string.Equals(x, version, StringComparison.OrdinalIgnoreCase) || string.Equals(x, Generation(version), StringComparison.OrdinalIgnoreCase));
+    }
+    // A repo's newest release .zip, in the engine's own updater's order. Null url when there's none.
+    public static string GithubZip(string repo, string id, out long size, out string version) {
+        size = 0; version = null;
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        string text;
+        using (var web = new System.Net.WebClient()) {
+            web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+            web.Headers[System.Net.HttpRequestHeader.Accept] = "application/vnd.github+json";
+            web.Encoding = Encoding.UTF8;
+            text = web.DownloadString("https://api.github.com/repos/" + repo + "/releases?per_page=10");
+        }
+        var releases = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Deserialize<List<Dictionary<string, object>>>(text);
+        foreach (var r in releases.OrderBy(x => x.ContainsKey("prerelease") && x["prerelease"] is bool && (bool)x["prerelease"] ? 1 : 0)) {
+            if (r.ContainsKey("draft") && r["draft"] is bool && (bool)r["draft"]) continue;
+            var assets = new List<Dictionary<string, object>>();
+            object a; if (r.TryGetValue("assets", out a) && a is System.Collections.IEnumerable) foreach (var x in (System.Collections.IEnumerable)a) { var d = x as Dictionary<string, object>; if (d != null) assets.Add(d); }
+            var zips = assets.Where(x => (Str(x, "name") ?? "").EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList();
+            var pick = zips.FirstOrDefault(x => (Str(x, "name") ?? "").StartsWith(id + "-", StringComparison.OrdinalIgnoreCase)) ?? zips.FirstOrDefault();
+            if (pick == null) continue;
+            object sz; if (pick.TryGetValue("size", out sz) && sz != null) size = Convert.ToInt64(sz);
+            version = (Str(r, "tag_name") ?? "").TrimStart('v', 'V');
+            return Str(pick, "browser_download_url");
+        }
+        return null;
+    }
+    public static string PermissionWords(string p) {
+        switch (p) {
+            case "engine_internals": return "reaches into the game engine's own code";
+            case "filesystem": return "reads and writes files";
+            case "network": return "goes online";
+            default: return p.Replace('_', ' ');
+        }
+    }
+    // Downloads the release .zip as <id>.zip (the name a bare archive's folder takes) and installs it.
+    public static string Install(Entry e, Action<float> progress) {
+        if (e.ZipSize > MaxZip) return e.Title + " is " + (e.ZipSize / (1024 * 1024)) + " MB, larger than nativeMons installs from the index.";
+        return InstallFrom(e.ZipUrl, e.Id, e.Title, e.ZipSize, progress);
+    }
+    // Any https link to a mod's .zip, checked to be the mod named id before it goes in.
+    public static string InstallFrom(string url, string id, string title, long size, Action<float> progress) {
+        string dir = Path.Combine(Config.State, "mod-downloads"), zip = Path.Combine(dir, id + ".zip");
+        Directory.CreateDirectory(dir);
+        try {
+            if (url == null || !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return "Only https:// links are used.";
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+            req.UserAgent = "nativeMons";
+            using (var resp = req.GetResponse()) using (var input = resp.GetResponseStream()) using (var output = File.Create(zip + ".part")) {
+                long total = resp.ContentLength > 0 ? resp.ContentLength : size, got = 0;
+                var buffer = new byte[81920]; int n;
+                while ((n = input.Read(buffer, 0, buffer.Length)) > 0) {
+                    got += n;
+                    if (got > MaxZip) throw new IOException("the download is larger than nativeMons installs from the index");
+                    output.Write(buffer, 0, n);
+                    if (total > 0) progress((float)got / total);
+                }
+            }
+            if (File.Exists(zip)) File.Delete(zip);
+            File.Move(zip + ".part", zip);
+            return LauncherForm.ExtractMod(zip, id);
+        } catch (Exception x) { return "Couldn't install " + title + ": " + x.Message; }
+        finally { try { File.Delete(zip + ".part"); } catch { } try { File.Delete(zip); } catch { } }
+    }
+}
+
+// Mods that need other mods: what ModsCli's deps reports for one game, less the optional ones the player declined.
+static class ModDeps {
+    public class Dep { public string ModId, ModName, Id, Range, Github, Status, Have; public bool Required; }
+    static string SkipFile { get { return Path.Combine(Config.State, "mod-deps-declined.txt"); } }
+    static HashSet<string> Declined() {
+        try { return File.Exists(SkipFile) ? new HashSet<string>(File.ReadAllLines(SkipFile).Where(x => x.Trim() != "")) : new HashSet<string>(); } catch { return new HashSet<string>(); }
+    }
+    public static void Decline(Dep d) {
+        var all = Declined(); all.Add(d.ModId + "\t" + d.Id);
+        Directory.CreateDirectory(Config.State); File.WriteAllLines(SkipFile, all.OrderBy(x => x).ToArray());
+    }
+    // What's still to settle for this game: missing or the wrong version, required first.
+    public static List<Dep> Open(GameEntry g) {
+        var declined = Declined(); var list = new List<Dep>();
+        foreach (var row in (LauncherForm.Gen1Cli("deps " + g.Gen1) ?? "").Split('\n')) {
+            var f = row.TrimEnd('\r').Split('\t');
+            if (f.Length < 8 || f[6] == "ok") continue;
+            var d = new Dep { ModId = f[0], ModName = f[1], Required = f[2] == "required", Id = f[3], Range = f[4], Github = f[5], Status = f[6], Have = f[7] };
+            if (!d.Required && declined.Contains(d.ModId + "\t" + d.Id)) continue;
+            // The same mod asked for by several: one row, the strongest ask.
+            var same = list.Find(x => x.Id == d.Id);
+            if (same != null) { if (d.Required && !same.Required) list[list.IndexOf(same)] = d; continue; }
+            list.Add(d);
+        }
+        return list.OrderBy(x => x.Required ? 0 : 1).ThenBy(x => x.Id).ToList();
+    }
+}
+
+// Mods that say they don't work with others (notes/launcher.md, Mods).
+static class ModClashes {
+    public class Clash {
+        public string ModId, ModName, OtherId, OtherName, Range; public bool ModOn, OtherOn;
+        public bool Active { get { return ModOn && OtherOn; } }
+    }
+    public static List<Clash> Read(GameEntry g) {
+        var list = new List<Clash>();
+        foreach (var row in (LauncherForm.Gen1Cli("conflicts " + g.Gen1) ?? "").Split('\n')) {
+            var f = row.TrimEnd('\r').Split('\t');
+            if (f.Length < 7) continue;
+            list.Add(new Clash { ModId = f[0], ModName = f[1], ModOn = f[2] == "on", OtherId = f[3], OtherName = f[4], OtherOn = f[5] == "on", Range = f[6] });
+        }
+        return list;
+    }
+    // What a mod's row says about its clashes, or null.
+    public static string Note(List<Clash> all, string id) {
+        var mine = all.FirstOrDefault(c => c.ModId == id && c.Active) ?? all.FirstOrDefault(c => c.ModId == id);
+        if (mine != null) return (mine.Active ? "Won't load: clashes with " : "Clashes with ") + mine.OtherName;
+        var theirs = all.FirstOrDefault(c => c.OtherId == id && c.Active) ?? all.FirstOrDefault(c => c.OtherId == id);
+        if (theirs != null) return theirs.Active ? theirs.ModName + " won't load while this is on" : theirs.ModName + " clashes with it";
+        return null;
+    }
+}
+
 // One dump of a game. Two files with the same contents are one dump.
 class RomFile {
     public string File, Sha1; public int Revision; public DateTime Added; public bool Gen1Ok, NativeplatOk, Encrypted, EngineCopy;
@@ -611,8 +915,7 @@ class RomFile {
     public string Label { get { return "Rev " + Revision; } }
 }
 
-// Unpacks a DS ROM the way the Platinum PC port does on first launch, so its file picker never shows.
-// Files already there stay. What it writes comes from the player's own ROM, and stays on their PC.
+// Unpacks a DS ROM as the Platinum port does on first launch, so its file picker never shows.
 static class NdsExtract {
     static void Put(string file, byte[] rom, uint offset, uint size) {
         if (File.Exists(file)) return;
@@ -672,9 +975,7 @@ static class NdsExtract {
     }
 }
 
-// The Platinum PC port's save.bin holds the same data as a DS save, but its 64-bit build pads some structures to 8-byte
-// boundaries: the s64 times in GameTime and SystemData, the BoxPokemon (u64 ribbons) in each Daycare slot, and PCBoxes.
-// Nothing else differs, so a save converts both ways by adding or removing that padding and redoing each block's footer.
+// The Platinum port's save.bin: a DS save with 64-bit padding (notes/launcher.md, Saves).
 static class PlatinumSave {
     const int MainDs = 0xCF2C, BoxesDs = 0x121E4, FooterSize = 20, HalfSize = 0x40000, Size = 0x80000;
     const uint Signature = 0x20060623;
@@ -743,8 +1044,114 @@ static class PlatinumSave {
     public static byte[] ToDs(byte[] port) { return Convert(port, false); }
 }
 
-// Each game's own title screen, captured from the player's ROM on their PC by running it without a window. None of it
-// ships: it lives in state\game-art, and a game without any keeps its drawn scene.
+// Each game's title screen, captured from the player's ROM on their PC. Never shipped (notes/launcher.md, Pictures).
+// Runs a GBA ROM on mGBA's libretro core with no window or sound, pressing scripted buttons and saving chosen
+// frames as PNGs. Used for romhacks' title screens, in a process of its own (--gba-art).
+static class LibretroShots {
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate bool EnvFn(uint cmd, IntPtr data);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void VideoFn(IntPtr data, uint w, uint h, UIntPtr pitch);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void SampleFn(short l, short r);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate UIntPtr BatchFn(IntPtr data, UIntPtr frames);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void PollFn();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate short StateFn(uint port, uint device, uint index, uint id);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void SetFn(IntPtr cb);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate void VoidFn();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate bool LoadFn(ref GameInfo info);
+    [StructLayout(LayoutKind.Sequential)] struct GameInfo { public IntPtr Path, Data; public UIntPtr Size; public IntPtr Meta; }
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr LoadLibrary(string file);
+    [DllImport("kernel32", CharSet = CharSet.Ansi)] static extern IntPtr GetProcAddress(IntPtr lib, string name);
+
+    static int format, width, height, pitch; static byte[] frame;
+    static IntPtr dirPtr;
+    static int now; static Dictionary<int, HashSet<uint>> held = new Dictionary<int, HashSet<uint>>();
+    static T Fn<T>(IntPtr lib, string name) where T : class {
+        var p = GetProcAddress(lib, name);
+        if (p == IntPtr.Zero) throw new InvalidOperationException("The core has no " + name + ".");
+        return Marshal.GetDelegateForFunctionPointer(p, typeof(T)) as T;
+    }
+    static readonly Dictionary<string, uint> Buttons = new Dictionary<string, uint> { { "b", 0 }, { "select", 2 }, { "start", 3 }, { "up", 4 }, { "down", 5 }, { "left", 6 }, { "right", 7 }, { "a", 8 } };
+    // press: frame:button[:held frames], separated by ';'. shots: the frames to save.
+    public static string Run(string core, string rom, string outDir, string press, IEnumerable<int> shots, int frames) {
+        foreach (var step in (press == "-" ? "" : press ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)) {
+            var f = step.Split(':'); int at = int.Parse(f[0]), hold = f.Length > 2 ? int.Parse(f[2]) : 6;
+            for (int i = at; i < at + hold; i++) { HashSet<uint> s; if (!held.TryGetValue(i, out s)) held[i] = s = new HashSet<uint>(); s.Add(Buttons[f[1].ToLowerInvariant()]); }
+        }
+        var want = new HashSet<int>(shots);
+        var lib = LoadLibrary(core);
+        if (lib == IntPtr.Zero) return "The mGBA core couldn't be loaded.";
+        Directory.CreateDirectory(outDir);
+        string work = Path.Combine(outDir, ".core"); Directory.CreateDirectory(work);
+        dirPtr = Marshal.StringToHGlobalAnsi(work);
+        EnvFn env = Env; VideoFn video = Video; SampleFn sample = delegate { }; BatchFn batch = (d, n) => n; PollFn poll = delegate { };
+        StateFn state = (port, device, index, id) => { HashSet<uint> s; return (short)(port == 0 && device == 1 && held.TryGetValue(now, out s) && s.Contains(id) ? 1 : 0); };
+        var keep = new object[] { env, video, sample, batch, poll, state };
+        Fn<SetFn>(lib, "retro_set_environment")(Marshal.GetFunctionPointerForDelegate(env));
+        Fn<SetFn>(lib, "retro_set_video_refresh")(Marshal.GetFunctionPointerForDelegate(video));
+        Fn<SetFn>(lib, "retro_set_audio_sample")(Marshal.GetFunctionPointerForDelegate(sample));
+        Fn<SetFn>(lib, "retro_set_audio_sample_batch")(Marshal.GetFunctionPointerForDelegate(batch));
+        Fn<SetFn>(lib, "retro_set_input_poll")(Marshal.GetFunctionPointerForDelegate(poll));
+        Fn<SetFn>(lib, "retro_set_input_state")(Marshal.GetFunctionPointerForDelegate(state));
+        Fn<VoidFn>(lib, "retro_init")();
+        var data = File.ReadAllBytes(rom);
+        var pin = GCHandle.Alloc(data, GCHandleType.Pinned);
+        var path = Marshal.StringToHGlobalAnsi(rom);
+        try {
+            var info = new GameInfo { Path = path, Data = pin.AddrOfPinnedObject(), Size = (UIntPtr)data.Length };
+            if (!Fn<LoadFn>(lib, "retro_load_game")(ref info)) return "The core wouldn't load the ROM.";
+            var run = Fn<VoidFn>(lib, "retro_run");
+            for (now = 0; now < frames; now++) {
+                run();
+                if (want.Contains(now) && frame != null) Save(Path.Combine(outDir, "f-" + now.ToString("000000") + ".png"));
+            }
+            Fn<VoidFn>(lib, "retro_unload_game")();
+            Fn<VoidFn>(lib, "retro_deinit")();
+            GC.KeepAlive(keep);
+            return null;
+        } finally {
+            pin.Free(); Marshal.FreeHGlobal(path);
+            try { Directory.Delete(work, true); } catch { }
+        }
+    }
+    static bool Env(uint cmd, IntPtr data) {
+        switch (cmd) {
+            case 3: Marshal.WriteByte(data, 1); return true;                      // can dupe frames
+            case 9: case 31: Marshal.WriteIntPtr(data, dirPtr); return true;      // system and save folders
+            case 10: format = Marshal.ReadInt32(data); return format == 1 || format == 2 || format == 0;
+            case 16: return true;                                                 // variables: defaults are fine
+            case 17: Marshal.WriteByte(data, 0); return true;                     // no variable updates
+            default: return false;
+        }
+    }
+    static void Video(IntPtr data, uint w, uint h, UIntPtr p) {
+        if (data == IntPtr.Zero) return;
+        width = (int)w; height = (int)h; pitch = (int)p;
+        if (frame == null || frame.Length != pitch * height) frame = new byte[pitch * height];
+        Marshal.Copy(data, frame, 0, frame.Length);
+    }
+    static void Save(string file) {
+        using (var bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppRgb)) {
+            var lk = bmp.LockBits(new Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.WriteOnly, bmp.PixelFormat);
+            var row = new byte[width * 4];
+            for (int y = 0; y < height; y++) {
+                int o = y * pitch;
+                for (int x = 0; x < width; x++) {
+                    int r, g, b;
+                    if (format == 1) { b = frame[o + x * 4]; g = frame[o + x * 4 + 1]; r = frame[o + x * 4 + 2]; }
+                    else {
+                        int v = frame[o + x * 2] | frame[o + x * 2 + 1] << 8;
+                        if (format == 2) { r = (v >> 11 & 31) * 255 / 31; g = (v >> 5 & 63) * 255 / 63; b = (v & 31) * 255 / 31; }
+                        else { r = (v >> 10 & 31) * 255 / 31; g = (v >> 5 & 31) * 255 / 31; b = (v & 31) * 255 / 31; }
+                    }
+                    row[x * 4] = (byte)b; row[x * 4 + 1] = (byte)g; row[x * 4 + 2] = (byte)r; row[x * 4 + 3] = 255;
+                }
+                Marshal.Copy(row, 0, lk.Scan0 + y * lk.Stride, row.Length);
+            }
+            bmp.UnlockBits(lk);
+            bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        }
+    }
+}
+
 static class GameArt {
     const int Count = 48, Step = 6;   // ten pictures a second, for just under five seconds
     static readonly object gate = new object();
@@ -753,11 +1160,15 @@ static class GameArt {
     static string FrameFile(string id, int i) { return Path.Combine(Folder(id), "frame-" + i.ToString("00") + ".jpg"); }
     static string LogoFile(string id) { return Path.Combine(Folder(id), "logo.png"); }
     public static bool Has(string id) { return id != null && File.Exists(FrameFile(id, Count - 1)); }
+    // A romhack shows its base game's pictures until it has its own.
+    public static volatile Dictionary<string, string> BaseOf = new Dictionary<string, string>();
+    static string Shown(string id, Func<string, bool> has) { string b; return id == null || has(id) || !BaseOf.TryGetValue(id, out b) || !has(b) ? id : b; }
     // The home screen's wallpaper: one of the game's towns.
     static string TownFile(string id) { return Path.Combine(Folder(id), "town.jpg"); }
     public static bool HasTown(string id) { return id != null && File.Exists(TownFile(id)); }
     static string loadedTownId; static Bitmap loadedTown;
     public static Bitmap Town(string id) {
+        id = Shown(id, HasTown);
         if (!HasTown(id)) return null;
         lock (gate) {
             if (loadedTownId != id) {
@@ -772,9 +1183,7 @@ static class GameArt {
     }
     // A game nativeplat can show but doesn't run for the player names its core as townCore: its wallpaper comes from there.
     public static bool CanCaptureTown(GameEntry g) { return g.Pc != null ? g.OnPc && !PcGames.IsCustom(g) :((g.TownFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom)) || g.OnNativeplat || (g.TownCore != null && g.FulldexRom != null && File.Exists(Config.Nativeplat) && !Library.NeedsPatch(g.FulldexRom)) || (g.Gen1 != null && g.Gen1Rom != null)); }
-    // nativeplat's test mode, which uses saves of its own and never the player's. At its furthest camera the whole of Twinleaf
-    // fits and the people, the player included, are too far off to be drawn. Diamond and Pearl play a scripted new game (from
-    // gen4recomp's tests/dp) until they can walk, then jump to the town. Platinum's save lab makes a save standing there.
+    // Towns from nativeplat's test mode, which never uses the player's saves (notes/launcher.md, Pictures).
     const string DpNewGame = "1250:start;1350:a:4:40:35;2800:down;2820:down;2840:a;2900:a:4:40:14;3560:tap:128:100:8:40:3;3700:a:4:40:49;5850:tap:82:118:6;6600:b:4:40:6;6950:down;6980:a;7040:a:4:40:40;9300:a:4:40:120";
     const string HgNewGame = "1300:start;1700:start;2100:a:4:40:10;3100:tap:220:170:4:80:30;6100:tap:128:72:4;6500:a:4;6800:tap:128:147:4;7200:tap:220:170:4:80:50;11500:tap:70:140:4;11900:tap:220:180:4:80:3;12500:tap:60:80:4;12800:tap:220:180:4;13200:tap:190:55:4;13500:tap:220:180:4:80:3;14000:start:4;14100:a:4;14500:tap:220:180:4;14800:tap:190:55:4;15100:tap:220:180:4:80:20";
     const string Twinleaf = "411", TwinleafX = "110", TwinleafZ = "888";
@@ -792,8 +1201,7 @@ static class GameArt {
             return p.ExitCode;
         }
     }
-    // Generation 5's own opening flies over the player's home town. Pressing A through a new game reaches it at a fixed frame,
-    // set per game in games.json, on Fulldex with no save.
+    // Generation 5's opening flies over the home town, at a frame set in games.json.
     static string CaptureTownOpening(GameEntry g) {
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-town"), script = temp + ".txt";
         try {
@@ -875,7 +1283,7 @@ static class GameArt {
         }
         return null;
     }
-    // Always under the throwaway identity: the game has to start a new game to reach a town, and that must never meet a real save.
+    // Always under the throwaway identity: the new game this needs must never meet a real save.
     public static string CaptureTown(GameEntry g) {
         if (g.Pc != null) return CapturePcTown(g);
         if (g.TownFrame > 0) return CaptureTownOpening(g);
@@ -922,6 +1330,7 @@ static class GameArt {
     }
     // There and back, so the end meets the beginning without a jump.
     public static Bitmap Frame(string id, float t) {
+        id = Shown(id, Has);
         if (!Has(id)) return null;
         lock (gate) {
             try { Load(id); } catch { return null; }
@@ -930,6 +1339,7 @@ static class GameArt {
         }
     }
     public static Bitmap Logo(string id) {
+        id = Shown(id, Has);
         if (!Has(id)) return null;
         lock (gate) { try { Load(id); return loadedLogo; } catch { return null; } }
     }
@@ -949,8 +1359,7 @@ static class GameArt {
         }
         return sum;
     }
-    // The widescreen view shows the game's two screens side by side, and some titles swap them. The logo is the half that looks
-    // the same in every picture, which leaves the other as the moving art.
+    // Widescreen shows both screens. The logo is the half that's the same in every picture.
     static void Sort(string[] shots, string id) {
         const int thumbW = 32, thumbH = 24;
         var thumbs = new List<Bitmap>(); var sides = new List<bool>(); var sources = new List<int>();
@@ -1052,12 +1461,10 @@ static class GameArt {
         if (g.Pc != null) return g.OnPc && !PcGames.IsCustom(g);
         if (g.IsDs && g.FulldexCode == null) return g.OnNativeplat;
         if (g.IsDs) return g.ArtFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && (!Library.NeedsPatch(g.FulldexRom) || File.Exists(Config.Patcher));
+        if (g.IsHack) return g.Roms.Count > 0 && File.Exists(Config.MgbaCore);
         return g.Gen1 != null && (g.Imported || g.Gen1Rom != null);
     }
-    // Game Boy and GBA games: Gen1Recomp shows its own title screen in a window kept out of sight, with the sound off. A single
-    // screen has no logo half to sort, and whatever surrounds the game in the window is cut away.
-    // A game that isn't prepared yet gets prepared under a throwaway identity, removed afterwards: preparing it for real would
-    // turn on save sharing for a game the player may only use with Fulldex.
+    // Game Boy and GBA title screens, from a hidden, silent Gen1Recomp window (notes/launcher.md, Pictures).
     const string ArtIdentity = "nativemons-art";
     static string CaptureGen1(GameEntry g) {
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
@@ -1111,6 +1518,37 @@ static class GameArt {
             if (throwaway) LauncherForm.RemoveArtData(ArtIdentity);
         }
     }
+    // A GBA romhack's title screen, from mGBA in a process of its own (--gba-art), on a copy of the ROM.
+    // START skips the opening; the title screen shows after it (notes/launcher.md, Pictures).
+    const int GbaPress = 1000, GbaFirstShot = 1500;
+    static string CaptureGba(GameEntry g) {
+        string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots"), rom = temp + ".gba";
+        try {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            Directory.CreateDirectory(temp);
+            File.Copy((g.Chosen ?? g.Roms[0]).File, rom, true);
+            File.SetAttributes(rom, FileAttributes.Normal);
+            var at = Enumerable.Range(0, Count).Select(i => (GbaFirstShot + i * Step).ToString()).ToArray();
+            string args = "--gba-art \"" + rom + "\" \"" + temp + "\" " + (GbaFirstShot + Count * Step + 2) + " " + GbaPress + ":start " + string.Join(",", at);
+            var psi = new ProcessStartInfo(Application.ExecutablePath, args) { UseShellExecute = false, CreateNoWindow = true };
+            using (var p = Process.Start(psi)) { Watch(p);
+                try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
+                if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
+            }
+            var shots = Directory.GetFiles(temp, "f-*.png").OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            if (shots.Length != Count) return "Only " + shots.Length + " pictures came out.";
+            Directory.CreateDirectory(Folder(g.Id));
+            var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+            var quality = new System.Drawing.Imaging.EncoderParameters(1);
+            quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+            for (int i = 0; i < Count; i++) using (var pic = new Bitmap(shots[i])) pic.Save(FrameFile(g.Id, i), jpeg, quality);
+            return null;
+        } catch (Exception x) { return x.Message; }
+        finally {
+            try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { }
+            try { if (File.Exists(rom)) File.Delete(rom); } catch { }
+        }
+    }
     // A game only nativeplat runs: its test mode shows the title screen with no window or sound and keeps no save.
     static string CaptureNativeplat(GameEntry g) {
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots");
@@ -1142,6 +1580,7 @@ static class GameArt {
     // Null when done, or why not. It uses no save, at low priority, and the ROM is only read.
     public static string Capture(GameEntry g) {
         if (g.Pc != null) return CapturePc(g);
+        if (!g.IsDs && g.IsHack) return CaptureGba(g);
         if (!g.IsDs) return CaptureGen1(g);
         if (g.FulldexCode == null) return CaptureNativeplat(g);
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots"), patched = temp + "-rom";
@@ -1248,9 +1687,7 @@ static class GameArt {
     }
 }
 
-// Settings holds a default for all games, and each game can follow it or choose its own. "own" leaves things as they are, and
-// nothing is written for a game unless one of these says so. Most are kept inside each game's save. Engine ones aren't, so they
-// work for every generation, and go in the engine's own settings when a game starts.
+// A default for all games in Settings, which each game follows or overrides (notes/launcher.md, Settings).
 class GameOption {
     public string Key, Name, Note; public char Icon = '\uE713'; public string[] Values, Labels; public bool GameOnly, Engine; public int FirstGen = 1;
     public string Label(string value) { int i = Array.IndexOf(Values, value); return i >= 0 ? Labels[i] : value; }
@@ -1308,7 +1745,6 @@ static class GameOptions {
         if (value == Follow) return "Global";
         return value == Own ? (g == null ? "Each game's own" : "This game's own") : o.Label(value);
     }
-    // The settings this game should start with, as key=value.
     public static Dictionary<string, string> ForGame(GameEntry g) {
         var r = new Dictionary<string, string>();
         foreach (var o in All) {
@@ -1464,6 +1900,11 @@ static class Library {
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
             object tf; if (d.TryGetValue("townFrame", out tf)) e.TownFrame = Convert.ToInt32(tf);
+            object hk; if (d.TryGetValue("hacks", out hk)) foreach (var o in (System.Collections.IEnumerable)hk) {
+                var k = o as Dictionary<string, object>;
+                if (k != null && str(k, "id") != null && str(k, "title") != null && k.ContainsKey("sha1"))
+                    foreach (var s in ((System.Collections.IEnumerable)k["sha1"]).Cast<object>()) e.KnownHacks[(string)s] = new[] { str(k, "id"), str(k, "title") };
+            }
             if (d.TryGetValue("colors", out c)) {
                 var hex = ((System.Collections.IEnumerable)c).Cast<object>().Select(x => (string)x).ToArray();
                 if (hex.Length == 3) { e.Theme = Theme.Make(hex[0], hex[1], hex[2], str(d, "finish")); e.Theme.GameId = e.Id; }
@@ -1499,29 +1940,26 @@ static class Library {
         }
         SaveHashes();
         list = Hacks(list);
+        GameArt.BaseOf = list.Where(x => x.IsHack).ToDictionary(x => x.Id, x => x.BaseId);
         foreach (var g in list) ChooseRom(g);
         Games = list;
     }
-    // Romhacks become games of their own, each listed after its base game. A hack keeps its base game's code in its header,
-    // so it's sorted there first; it's told apart by its contents alone: it isn't one of the clean dumps an engine accepts
-    // for that game (every clean revision of it; other regions have other codes). Its file name only names it, once it's
-    // known to be a hack (user, 2026-11-03). Only games Fulldex runs, since the other engines take clean copies only, and
-    // only where the clean dumps are known (Gen1Recomp found, or nativeplat's list). A DS dump with its secure area still
-    // encrypted is a clean one with another SHA-1, so it stays with its game.
+    // Romhacks become games of their own, after their base game (notes/launcher.md, ROMs and romhacks).
     static List<GameEntry> Hacks(List<GameEntry> list) {
         var result = new List<GameEntry>();
         foreach (var g in list) {
             result.Add(g);
-            if (g.FulldexCode == null || !g.CanVerify || g.Pc != null || (g.Gen1 != null && !Gen1Found)) continue;
-            foreach (var r in g.Roms.Where(r => !r.Verified && !r.Encrypted).ToList()) {
+            if (g.FulldexCode == null || g.Pc != null) continue;
+            // Where no engine knows the clean dumps, only hacks known by their hash are told apart.
+            bool clean = g.CanVerify && !(g.Gen1 != null && !Gen1Found);
+            foreach (var r in g.Roms.Where(r => !r.Encrypted && (clean ? !r.Verified : g.KnownHacks.ContainsKey(r.Sha1 ?? ""))).ToList()) {
                 g.Roms.Remove(r);
                 result.Add(HackOf(g, r, list.Concat(result)));
             }
         }
         return result;
     }
-    // What a file's name says besides its base game: "Rocket Edition" from "Pokemon_FireRed_Rocket_Edition.gba", nothing from
-    // "Pokemon - FireRed Version (USA, Europe) (Rev 1).gba". Bracketed tags, region and version words don't count.
+    // What a file name says besides its base game, such as "Rocket Edition". Tags, region and version words don't count.
     static readonly string[] PlainWords = { "pokemon", "pokémon", "version", "usa", "europe", "eur", "us", "u", "e", "j", "en", "rev", "v1", "v0", "rom", "the" };
     public static string HackWords(GameEntry g, string file) {
         string name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file), @"[\(\[\{][^\)\]\}]*[\)\]\}]", " ");
@@ -1548,11 +1986,15 @@ static class Library {
     }
     static GameEntry HackOf(GameEntry b, RomFile r, IEnumerable<GameEntry> taken) {
         var h = b.CopyOf();
-        string words = HackWords(b, r.File), own;
+        string words = HackWords(b, r.File), own; string[] known;
         string title = words != "" ? b.Title + " " + words : b.Title + " (modified " + r.Sha1.Substring(0, 6) + ")";
+        // A known build is named by its hash, whatever its file is called. The player's own name still wins.
+        bool isKnown = b.KnownHacks.TryGetValue(r.Sha1, out known);
+        if (isKnown) title = known[1];
         if (HackNames().TryGetValue(r.Sha1, out own)) title = own;
-        // The id comes from the file's name, as the game's save does, so neither changes when it's renamed here.
+        // Otherwise the id comes from the file's name, as the game's save does, so renaming it here changes neither.
         string slug = System.Text.RegularExpressions.Regex.Replace((words != "" ? words : r.Sha1.Substring(0, 8)).ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        if (isKnown) slug = known[0].StartsWith(b.Id + "-") ? known[0].Substring(b.Id.Length + 1) : known[0];
         string id = b.Id + "-" + (slug == "" ? r.Sha1.Substring(0, 8) : slug);
         var used = taken.Select(x => x.Id).ToList();
         for (int i = 2; used.Contains(id); i++) id = b.Id + "-" + slug + "-" + i;
@@ -1600,9 +2042,7 @@ static class Library {
         using (var f = File.OpenRead(file)) using (var s = SHA1.Create())
             return BitConverter.ToString(s.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
     }
-    // nativeplat's own import refuses Platinum Rev 0, but pret's build files show the revisions differ only in the header's
-    // revision byte and one GTS overlay, whose code nativeplat doesn't take from the ROM. Every game file is the same, and it
-    // doesn't check the hash when a game starts.
+    // nativeplat takes Platinum Rev 0 too (notes/launcher.md, ROMs and romhacks).
     static readonly Dictionary<string, string[]> NativeplatDumps = new Dictionary<string, string[]> {
         { "diamond", new[] { "a46233d8b79a69ea87aa295a0efad5237d02841e" } }, { "pearl", new[] { "99083bf15ec7c6b81b4ba241ee10abd9e80999ac" } },
         { "platinum", new[] { "0862ec35b24de5c7e2dcb88c9eea0873110d755c", "ce81046eda7d232513069519cb2085349896dec7" } },
@@ -1622,8 +2062,7 @@ static class Library {
         if (same < 0) g.Roms.Add(rom);
         else if (g.Roms[same].EngineCopy && !rom.EngineCopy) g.Roms[same] = rom;
     }
-    // A dump an engine has verified comes first, then what's ready to run, then what the player has had longest, so adding
-    // another version of a game never takes over from the one they've been playing.
+    // Verified dumps first, then ready to run, then the oldest, so a new version never takes over.
     static IEnumerable<RomFile> Ranked(GameEntry g) {
         return g.Roms.OrderBy(r => r.EngineCopy ? 1 : 0).ThenBy(r => r.Verified ? 0 : 1).ThenBy(r => r.Encrypted ? 1 : 0).ThenBy(r => r.Added).ThenBy(r => r.File, StringComparer.OrdinalIgnoreCase);
     }
@@ -1676,9 +2115,8 @@ static class Library {
     }
 }
 
-// Pokemon pictures from pogo.hails.app, kept on disk because they rarely change. A picture is fetched only when it is
-// missing or over 30 days old, and an old copy keeps working if the site can't be reached.
-// A Pokedex entry's words and numbers: from PokeAPI when first looked at, then from a cache, so no game text is in this project.
+// Pictures from pogo.hails.app, fetched again after 30 days. Pokedex text from PokeAPI, then a cache,
+// so no game text is in this project.
 class DexInfo {
     public string Genus = ""; public int Height, Weight; public string[] Types = new string[0], Abilities = new string[0];
     public int[] Stats = new int[6]; public Dictionary<string, string> Flavor = new Dictionary<string, string>();
@@ -1753,8 +2191,7 @@ static class DexInfos {
     }
 }
 
-// Updates come whole from this project's releases, where every engine was built and tested together. What the player made is
-// never touched: the state folder isn't in a package, and the files below stay as they are even when a package has them.
+// Updates come whole from this project's releases. The state folder and the files below are never touched.
 static class Updater {
     const string Site = "https://github.com/Hailey-Ross/nativeMons/releases/download/";
     public class Release { public string channel, revision, package, sha256; public int build; }
@@ -1980,8 +2417,7 @@ static class Sprites {
     }
 }
 
-// Keeps saves safe. Every save that's about to change is copied first, the copy is checked byte for byte, and only
-// checked copies are kept. A game both engines can run shares one save: the cartridge file Fulldex uses.
+// Verified backups before any change, and one shared save per game (notes/launcher.md, Saves).
 static class SaveGuard {
     public static string Hash(string file) {
         if (file == null || !File.Exists(file)) return "";
@@ -2013,6 +2449,13 @@ static class SaveGuard {
         } catch { return false; }
     }
     // Null when the save is healthy, otherwise what's wrong with it. Without the tool, nothing can be checked.
+    // A romhack's save only has to read: many store parts of it their own way, which fails the original's checksums.
+    public static string Problem(GameEntry g, string file) {
+        if (g == null || !g.IsHack) return Problem(file);
+        if (!File.Exists(Config.MonBridge) || IsBlank(file)) return null;
+        int code; string o = Bridge("info \"" + file + "\"", out code);
+        return code == 0 ? null : "It can't be read.";
+    }
     public static string Problem(string file) {
         if (!File.Exists(Config.MonBridge) || IsBlank(file)) return null;
         int code; string o = Bridge("check \"" + file + "\"", out code);
@@ -2028,7 +2471,7 @@ static class SaveGuard {
         string hash = Hash(file);
         var newest = Directory.GetFiles(folder, "*.sav").OrderByDescending(x => x, StringComparer.Ordinal).FirstOrDefault();
         if (newest != null && Hash(newest) == hash) return newest;
-        string mark = Problem(file) != null ? "-damaged" : "";
+        string mark = Problem(g, file) != null ? "-damaged" : "";
         string target = Path.Combine(folder, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + reason + mark + ".sav");
         string temp = target + ".part";
         File.Copy(file, temp, true);
@@ -2061,6 +2504,8 @@ class Item {
     public Theme Theme;   // a game's row: its colours
     public string Sprite; // a Pokemon's row: its picture (see Sprites)
     public string TileHint = "";   // a short second line on its grid tile, to tell similar rows apart
+    public int Fold;   // a section header: 1 open, 2 closed
+    public Color Tint = Color.Empty; // its icon card's colour, when the icon's own won't do
     public Item(string text, string hint, bool on, Action run) { Text = text; Hint = hint ?? ""; On = on; Run = run; }
 }
 class Page {
@@ -2075,18 +2520,19 @@ class Page {
     public int[] DexOrder;       // what left and right step through on an entry
     public bool DexShiny;        // the entry is showing its shiny picture
     public GameEntry DexOnly;    // a list or entry of one game's own Pokedex (a romhack's), not the collection's
+    public bool FitBody;         // the Body's box only as tall as its text, so the list below it has room
     public float DexHeight;      // how tall the entry came out
+    public bool Mods;            // hides the clash banner while open
     public BoxView Boxes;        // Move Pokemon's box screen
     public bool Main;
     public Theme Theme;
 }
 
-// Move Pokemon as boxes, the way Pokemon HOME shows them: two games, one above the other, each showing one of its PC
-// boxes as a grid of the Pokemon in it. A Pokemon is dragged (or picked up with A and put down with A) into a slot of the
-// other game, or of another box of the same game.
+// Move Pokemon as boxes, as Pokemon HOME shows them: two games' boxes, with Pokemon dragged between them.
 class BoxMon { public string Species, Nick, Trainer; public int Level, Dex; public bool Shiny; }
 class BoxSide {
     public GameEntry Game; public string File, Problem;
+    public bool NoSave;   // nothing saved yet: not a fault, and said as such
     public int Boxes = 1, Slots = 30;
     public List<string> Names = new List<string>();
     public Dictionary<int, BoxMon> Mons = new Dictionary<int, BoxMon>();   // box * Slots + slot
@@ -2106,8 +2552,7 @@ class BoxView {
 
 class LauncherForm : Form {
     const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, A = 0x1000, B = 0x2000;
-    // Gen1Recomp's credit, shown on the Credits page (user, 2026-11-02: not on the splash or atop the README). The last
-    // sentence keeps the wording term 1 of its LICENSE.MD gives; the rest says what it applies to.
+    // Gen1Recomp's credit, on the Credits page only. The last sentence keeps its LICENSE.MD term 1 wording.
     public const string Gen1Credit = "Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).";
     const string Identity = "nativemons";   // Gen1Recomp's save folder, apart from any other install's saves
 
@@ -2129,7 +2574,6 @@ class LauncherForm : Form {
     public LauncherForm(string playId, string slot, string choose) {
         playDirect = playId; directSlot = slot; chooseId = choose;
         Text = "nativeMons";
-        // The exe's own icon, for the taskbar and Alt+Tab.
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         FormClosing += delegate { DropReady(); StopSnapshot(); };
         // A device standing upright: no window frame, the window's own outline is the shell's.
@@ -2151,7 +2595,6 @@ class LauncherForm : Form {
         MakeFonts(ClientSize.Width);
     }
 
-    // Sizes follow the device's width.
     void MakeFonts(int width) {
         float h = Math.Max(420, width * 1.15f);
         foreach (var f in fitFonts.Values) f.Dispose();
@@ -2186,6 +2629,16 @@ class LauncherForm : Form {
             var preview = Library.Games.Find(g => g.Id == id);
             if (preview != null) current = preview;
         }
+        // clashbanner[:<game>]: the clash banner, read now.
+        if (screen == "clashbanner") {
+            foreach (var mg in Library.Games.Where(x => x.OnGen1 && (previewId == null || x.Id == previewId))) {
+                int n = ModClashes.Read(mg).Count(c => c.Active);
+                if (n > 0) { clashCount += n; if (clashGame == null) clashGame = mg; }
+            }
+            // Nothing to show: a sample.
+            if (clashGame == null) { clashGame = Library.Games.Find(x => x.OnGen1); clashCount = 1; }
+            clashAt = -100;
+        }
         if (screen == "updatebanner") { Updater.Latest = new Updater.Release { build = Updater.Build + 1, sha256 = "preview" }; bannerBuild = Updater.Latest.build; bannerAt = -1; }
         if (screen == "splash") { starting = true; startSince = DateTime.Now.AddSeconds(-4); startStage = "Looking for your games"; }
         else pages.Push(MainPage());
@@ -2210,6 +2663,39 @@ class LauncherForm : Form {
         if (screen.StartsWith("controls-")) { int n = int.Parse(screen.Substring(9)); pages.Push(ControlsPage()); pages.Push(new Page { Title = ControlSheets[n][0] + " controls", Body = ControlSheets[n][2] }); }
         var sample = (previewId != null ? Library.Games.Find(g => g.Id == previewId) : null) ?? Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
+        // clashes:<game> (Mods that clash), clashon:<game>,<mod id> (switching that mod on beside one it clashes with).
+        if (screen == "clashes" || screen == "clashon") {
+            var ids = (previewId ?? "").Split(',');
+            var mg = Library.Games.Find(x => x.Id == ids[0] && x.OnGen1);
+            if (mg != null) {
+                pages.Push(ModsPage(mg));
+                if (screen == "clashes") pages.Push(ClashesPage(mg, null));
+                else {
+                    var c = ModClashes.Read(mg).FirstOrDefault(x => x.ModId == ids[1] || x.OtherId == ids[1]);
+                    if (c != null) pages.Push(ClashChoicePage(mg, ids[1], c.ModId == ids[1] ? c.ModName : c.OtherName, c));
+                }
+            }
+        }
+        // deps:<game> (Needs other mods), dep:<game>,<dependency id> (where to get one).
+        if (screen == "deps" || screen == "dep") {
+            var ids = (previewId ?? "").Split(',');
+            var mg = Library.Games.Find(x => x.Id == ids[0] && x.OnGen1);
+            if (mg != null) {
+                pages.Push(ModsPage(mg)); pages.Push(DepsPage(mg, screen == "deps" ? "Installed (the mod just added)." : null));
+                var one = ids.Length > 1 ? ModDeps.Open(mg).Find(x => x.Id == ids[1]) : null;
+                if (screen == "dep" && one != null) { string note; List<ModIndex.Entry> all; try { all = ModIndex.Load(out note); } catch { all = new List<ModIndex.Entry>(); } pages.Push(DepPage(mg, one, all)); }
+            }
+        }
+        if (screen == "findmods" || screen == "modentry") {
+            var ids = (previewId ?? "").Split(',');
+            var mg = Library.Games.Find(x => x.Id == ids[0] && x.OnGen1);
+            if (mg != null) {
+                string note; var all = ModIndex.Load(out note); var have = InstalledMods(mg);
+                pages.Push(ModsPage(mg)); pages.Push(FindModsPage(mg, have, all, note));
+                var one = ids.Length > 1 ? all.Find(x => x.Id == ids[1]) : null;
+                if (screen == "modentry" && one != null) pages.Push(ModEntryPage(mg, one, have));
+            }
+        }
         if (screen == "mods") { var m = Library.Games.Find(g => g.OnGen1); if (m != null) pages.Push(ModsPage(m)); }
         if (screen == "sprites") {
             Sprites.LoadFamilies(BridgeFamilies);
@@ -2220,8 +2706,8 @@ class LauncherForm : Form {
             foreach (var it in sp.Items) Sprites.Get(it.Sprite);
             Sprites.Wait(30);
         }
-        // boxes:<top id>,<bottom id> (boxheld: the same, with the cursor's Pokemon picked up): reads the saves only.
-        if (screen == "boxes" || screen == "boxheld") {
+        // boxes|boxheld|boxchoose:<top id>,<bottom id>: the box screen, reading the saves only.
+        if (screen == "boxes" || screen == "boxheld" || screen == "boxchoose") {
             var ids = (previewId ?? "").Split(',');
             var a = Library.Games.Find(g => g.Id == ids[0] && g.SaveTools); var b = ids.Length > 1 ? Library.Games.Find(g => g.Id == ids[1] && g.SaveTools) : a;
             if (a != null && b != null) {
@@ -2231,6 +2717,7 @@ class LauncherForm : Form {
                 v.Cursor = first % v.Side[0].Slots;
                 if (screen == "boxheld" && v.Side[0].At(0, v.Cursor) != null) { v.HeldPane = 0; v.HeldBox = 0; v.HeldSlot = v.Cursor; v.Pane = 1; v.Cursor = 8; }
                 pages.Push(new Page { Title = "Move Pokemon", Boxes = v });
+                if (screen == "boxchoose") ChooseBoxGame(v, 1);
                 for (int i = 0; i < 2; i++) foreach (var mon in v.Side[i].Mons.Where(x => x.Key / v.Side[i].Slots == v.Box[i]).Select(x => x.Value)) Sprites.Get((mon.Shiny ? "shiny/" : "") + mon.Dex);
                 Sprites.Wait(30);
             }
@@ -2260,11 +2747,7 @@ class LauncherForm : Form {
     }
 
     // ---------- the engines ----------
-    // Gen1Recomp's data (saves, options, mods, exports and its ROM cache) is in state\gen1recomp, which it's told with
-    // NATIVEMONS_DATA_DIR (portable mode in its SaveData), so it moves with the launcher's folder. Before 2026-11-03 it
-    // was in %APPDATA%\LOVE\nativemons: that folder is copied over once, every file checked, and then left as it was, as
-    // a backup. LOVE still keeps a folder under %APPDATA%\LOVE for the few caches that don't follow portable mode; it
-    // gets another name, so the old folder is never read or changed again.
+    // Gen1Recomp's data is in state\gen1recomp (notes/launcher.md, Gen1Recomp).
     public static string Gen1Data { get { return Path.Combine(Config.State, "gen1recomp"); } }
     // LOVE's folder follows APPDATA, so the launcher reads it the same way (and a test can point both elsewhere).
     static string LoveRoot { get { return Path.Combine(Environment.GetEnvironmentVariable("APPDATA") ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LOVE"); } }
@@ -2318,8 +2801,7 @@ class LauncherForm : Form {
         var s = new StringBuilder(600);
         return Native.GetShortPathName(dir, s, 600) > 0 ? s.ToString() : dir;
     }
-    // The picture jobs' throwaway Gen1Recomp, apart from the player's: its own name and, when the player's data is beside
-    // the launcher, its own folder there too.
+    // The picture jobs' throwaway Gen1Recomp, apart from the player's.
     static string Gen1ArtData { get { return Path.Combine(Config.State, "gen1recomp-art"); } }
     public static void UseArtIdentity(ProcessStartInfo psi, string identity) {
         psi.EnvironmentVariables["POKEPORT_IDENTITY"] = identity;
@@ -2341,10 +2823,23 @@ class LauncherForm : Form {
             psi.EnvironmentVariables["POKEPORT_IDENTITY"] = DataIdentity;
             psi.EnvironmentVariables["NATIVEMONS_DATA_DIR"] = PlainDir(Gen1Data);
         } else psi.EnvironmentVariables["POKEPORT_IDENTITY"] = Identity;
-        // The launcher shows its own Discord status (DiscordPresence), so Gen1Recomp's isn't shown beside it, nor by a
-        // game quick start keeps waiting.
+        // The launcher shows its own Discord status, so Gen1Recomp's is off.
         psi.EnvironmentVariables["POKEPORT_NO_DISCORD"] = "1";
         return psi;
+    }
+    // Mods now off by default, switched off once in older settings (notes/launcher.md, Gen1Recomp).
+    static readonly string[] OffByDefault = { "example_lttp_overhaul" };
+    static void ModDefaults() {
+        if (!Library.Gen1Found) return;
+        string done = Config.Read("mod-defaults.txt", "");
+        foreach (var id in OffByDefault) {
+            if (done.Split('\n').Any(l => l.Trim() == id)) continue;
+            var psi = Gen1Start("");
+            psi.EnvironmentVariables["NATIVEMONS_CLI"] = "default-off " + id;
+            int code; RunCapture(psi, 30, out code);
+            if (code != 0) continue;   // tried again next start
+            Config.Write("mod-defaults.txt", (done = done.TrimEnd() + "\n" + id).Trim() + "\n");
+        }
     }
     // Asks the Gen1Recomp fork something (src/nativemons/ModsCli.lua). Null when it can't run.
     public static string Gen1Cli(string command) {
@@ -2367,7 +2862,7 @@ class LauncherForm : Form {
         }
         return found;
     }
-    // A wallpaper capture runs an engine too. Whatever the player starts goes first: it stops after this picture, then that carries on.
+    // A wallpaper capture runs an engine too: it stops after this picture, then this carries on.
     bool AfterCapture(Action then) {
         if (!GameArt.Capturing) return false;
         GameArt.StopNow();
@@ -2399,6 +2894,7 @@ class LauncherForm : Form {
             // Once: Gen1Recomp's saves come beside the launcher (EnsureGen1Data), before anything asks it about them.
             if (Gen1DataMoveNeeded) { startStage = "Moving Gen1Recomp's saves beside the launcher"; err = EnsureGen1Data(); startStage = "Looking for your games"; }
             try { Library.Scan(Gen1Cli); RecoverSwitches(); } catch (Exception e) { err = e.Message; }
+            try { ModDefaults(); } catch { }
             try { PrepareAll(); } catch { }
             // A shortcut straight to a game doesn't wait for pictures; they're made in the background instead.
             if (playDirect == null) try { WallpapersAtStart(); } catch { }
@@ -2421,6 +2917,7 @@ class LauncherForm : Form {
         starting = false;
         PickCurrent();
         pages.Push(MainPage());
+        ReadClashes();
         if (playDirect != null) {
             var direct = Library.Games.Find(g => g.Id == playDirect);
             if (direct != null && direct.Playable) { PlayWithSlot(direct, directSlot, delegate { Close(); }); Invalidate(); return; }
@@ -2428,6 +2925,8 @@ class LauncherForm : Form {
             return;
         }
         if (chooseId != null) { Request("show", chooseId, directSlot); chooseId = null; }
+        // For tests: straight to a screen once the start is done, with no key presses to miss (NATIVEMONS_TEST_OPEN=move).
+        if (Environment.GetEnvironmentVariable("NATIVEMONS_TEST_OPEN") == "move") OpenBoxView();
         if (err != null) ShowText("Something went wrong", err, null);
         else if (Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) { firstSetup = true; pages.Push(FoldersPage()); }
         else AskAboutEncrypted();
@@ -2489,8 +2988,7 @@ class LauncherForm : Form {
             AskAboutEncrypted();
         });
     }
-    // Encrypted ROMs are raised as soon as they're found, not when someone tries to play. Each file is asked about once,
-    // however the question is left; after that it stays flagged on its game's page, which can still patch it.
+    // Encrypted ROMs are raised once, when found. After that they stay flagged on their game's page.
     static string PatchAskedFile { get { return Path.Combine(Config.State, "patch-asked.txt"); } }
     static List<string> PatchAsked() { try { return File.Exists(PatchAskedFile) ? File.ReadAllLines(PatchAskedFile).ToList() : new List<string>(); } catch { return new List<string>(); } }
     void AskAboutEncrypted() {
@@ -2533,7 +3031,7 @@ class LauncherForm : Form {
         return p;
     }
     // ---------- settings ----------
-    // One place for both engines. Values are stored where each engine's own menus keep them, so the two always agree.
+    // Stored where each engine's own menus keep them, so the two agree.
     Page SettingsPage() {
         var p = new Page { Title = "Settings" };
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
@@ -2598,8 +3096,7 @@ class LauncherForm : Form {
         }
         return p;
     }
-    // Called after the save is backed up and shared. Gen1Recomp is told at start instead (NATIVEMONS_OPTIONS). A save it can't
-    // change is left alone and the game still starts. The sync record moves with it, so this never looks like a conflict.
+    // After the save is backed up and shared. A save it can't change is left alone.
     static void ApplyOptions(GameEntry g) {
         var wanted = GameOptions.ForGame(g);
         try { ApplyEngineOptions(g, wanted); } catch { }
@@ -2739,8 +3236,7 @@ class LauncherForm : Form {
         int code; string o = RunCapture(psi, 60, out code);
         return code == 0 ? o.Trim().Split('\n').Last().Trim() : null;
     }
-    // Brings both engines level. Never throws, never replaces a save without a verified backup and a proven result, and
-    // whatever happens the game can still start: a failure leaves both saves alone and is tried again next time.
+    // Brings both engines level. Never throws, or replaces a save without a verified backup (notes/launcher.md, Saves).
     public static SyncResult SyncSave(GameEntry g, string prefer) {
         var r = new SyncResult();
         if (!Shares(g) || !g.Imported) return r;
@@ -2869,7 +3365,7 @@ class LauncherForm : Form {
             string file = CurrentSave(g);
             if (file != null) {
                 try { SaveGuard.Backup(g, file, "played"); } catch { }
-                damaged = SaveGuard.Problem(file);
+                damaged = SaveGuard.Problem(g, file);
             }
             if (damaged == null) result = SyncSave(g, null);
             return null;
@@ -2906,7 +3402,7 @@ class LauncherForm : Form {
         string problem = null;
         Busy("Restoring your save", delegate {
             try {
-                problem = SaveGuard.Problem(file);
+                problem = SaveGuard.Problem(g, file);
                 if (problem != null) { problem = "That backup failed its check: " + problem; return null; }
                 string current = CurrentSave(g);
                 SaveGuard.Backup(g, current, "before-restore");
@@ -2958,8 +3454,7 @@ class LauncherForm : Form {
         }
         SaveSets.SetActive(g, set);
     }
-    // Nothing is shared during a switch: each save is parked exactly as it stands, even mid-conflict, and meets it again later.
-    // The save being left is parked and proven first, so a failure from then on can put everything back.
+    // Each save is parked as it stands. The one being left is proven first, so a failure can be undone.
     public static string SwitchSave(GameEntry g, string target) {
         string from = SaveSets.Active(g);
         if (target == from) return null;
@@ -3114,7 +3609,7 @@ class LauncherForm : Form {
     }
 
     // ---------- exporting saves ----------
-    // Everything needed to put a save back on a device. Copies byte for byte: the file is already in cartridge format.
+    // Copies byte for byte: the file is already in cartridge format.
     public static string ExportSave(GameEntry g, bool checkpoint, string outFolder, string backup, out bool ok) {
         ok = false;
         string why, file = SaveOf(g, out why);
@@ -3387,7 +3882,23 @@ class LauncherForm : Form {
         var d = DexInAllSaves(g);
         return d == null ? null : d.Caught;
     }
-    class DexGame { public HashSet<int> Caught = new HashSet<int>(), Seen = new HashSet<int>(), Shiny = new HashSet<int>(); }
+    class DexGame { public HashSet<int> Caught = new HashSet<int>(), Seen = new HashSet<int>(), Shiny = new HashSet<int>(); public int FusionsCaught = -1, FusionsSeen = -1, LaterCaught, LaterSeen; }
+    // Games whose Pokedex is read: those with save tools, and Infinite Fusion, read from its own saves.
+    static bool ReadsDex(GameEntry g) { return g.SaveTools || (g.Pc == "infinitefusion" && g.OnPc); }
+    static List<string> IfSaves(GameEntry g) {
+        string dir = PcGames.SaveDir(g);
+        return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.rxdata").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList() : new List<string>();
+    }
+    DexGame IfDex(GameEntry g) {
+        var saves = IfSaves(g);
+        if (saves.Count == 0) return null;
+        var national = new Dictionary<string, int>();
+        foreach (var kv in dexNames) { string k = InfiniteFusionDex.Plain(kv.Value); if (!national.ContainsKey(k)) national[k] = kv.Key; }
+        var d = new DexGame(); int fc, fs; var lc = new HashSet<int>(); var ls = new HashSet<int>();
+        InfiniteFusionDex.Read(PcGames.Dir(g), saves, national, d.Caught, d.Seen, out fc, out fs, lc, ls);
+        d.FusionsCaught = fc; d.FusionsSeen = fs; d.LaterCaught = lc.Count; d.LaterSeen = ls.Count;
+        return d;
+    }
     static bool AddDex(DexGame into, string file) {
         if (file == null || !File.Exists(file) || SaveGuard.IsBlank(file)) return false;
         int code; string o = Bridge("dex \"" + file + "\"", out code);
@@ -3429,8 +3940,7 @@ class LauncherForm : Form {
     HashSet<GameEntry> dexNoSave = new HashSet<GameEntry>();
     readonly Dictionary<int, string> dexNames = new Dictionary<int, string>();
     string DexName(int id) { string n; return dexNames.TryGetValue(id, out n) ? n : "#" + id; }
-    // The collection counts the games themselves only. Romhacks and fan games such as Infinite Fusion never count toward
-    // it: they have a section of their own, each with its own Pokedex (user, 2026-11-03).
+    // Romhacks and fan games never count toward the collection: each has its own Pokedex.
     static bool CountsInCollection(GameEntry g) { return !g.IsHack && g.Pc == null; }
     IEnumerable<DexGame> DexOf(GameEntry only) {
         if (only != null) { DexGame d; return dexBy.TryGetValue(only, out d) ? new[] { d } : new DexGame[0]; }
@@ -3447,6 +3957,7 @@ class LauncherForm : Form {
         var o = new StringBuilder(g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
         Action<string> file = delegate(string f) { try { var i = new FileInfo(f); if (i.Exists) o.Append("|" + i.Name + ":" + i.Length + ":" + i.LastWriteTimeUtc.Ticks); } catch { } };
         Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
+        if (g.Pc == "infinitefusion") { foreach (var f in IfSaves(g)) file(f); return o.ToString(); }
         if (g.Save != null) file(MasterOf(g));
         folder(Path.Combine(Config.State, "save-sets", g.Id));
         if (g.Gen1 != null) folder(Path.Combine(Gen1Root, "saves", g.Gen1));
@@ -3467,7 +3978,9 @@ class LauncherForm : Form {
                 var f = l.Split('\t');
                 if (f.Length < 3) continue;
                 DexGame d = null;
-                if (f.Length == 5) { d = new DexGame(); ReadIds(f[2], d.Caught); ReadIds(f[3], d.Seen); ReadIds(f[4], d.Shiny); }
+                if (f.Length >= 5) { d = new DexGame(); ReadIds(f[2], d.Caught); ReadIds(f[3], d.Seen); ReadIds(f[4], d.Shiny); }
+                if (d != null && f.Length >= 7) { int.TryParse(f[5], out d.FusionsCaught); int.TryParse(f[6], out d.FusionsSeen); }
+                if (d != null && f.Length >= 9) { int.TryParse(f[7], out d.LaterCaught); int.TryParse(f[8], out d.LaterSeen); }
                 dexKept[f[0]] = new DexKept { Print = f[1], Dex = d };
             }
         } catch { }
@@ -3475,7 +3988,7 @@ class LauncherForm : Form {
     static void SaveDexKept() {
         try {
             Directory.CreateDirectory(Config.State);
-            File.WriteAllLines(DexFile, dexKept.Select(x => x.Key + "\t" + x.Value.Print + "\t" + (x.Value.Dex == null ? "none" : Ids(x.Value.Dex.Caught) + "\t" + Ids(x.Value.Dex.Seen) + "\t" + Ids(x.Value.Dex.Shiny))).ToArray());
+            File.WriteAllLines(DexFile, dexKept.Select(x => x.Key + "\t" + x.Value.Print + "\t" + (x.Value.Dex == null ? "none" : Ids(x.Value.Dex.Caught) + "\t" + Ids(x.Value.Dex.Seen) + "\t" + Ids(x.Value.Dex.Shiny) + (x.Value.Dex.FusionsSeen >= 0 ? "\t" + x.Value.Dex.FusionsCaught + "\t" + x.Value.Dex.FusionsSeen + "\t" + x.Value.Dex.LaterCaught + "\t" + x.Value.Dex.LaterSeen : ""))).ToArray());
         } catch { }
     }
     // Everything already known, on the entries of the latest scan. True when none of it is out of date.
@@ -3484,7 +3997,7 @@ class LauncherForm : Form {
             ReadDexKept();
             if (dexNames.Count == 0) return false;
             var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>(); bool all = true;
-            foreach (var g in Library.Games.Where(x => x.SaveTools)) {
+            foreach (var g in Library.Games.Where(ReadsDex)) {
                 DexKept k;
                 if (!dexKept.TryGetValue(g.Id, out k) || k.Print != DexPrint(g)) { all = false; continue; }
                 if (k.Dex == null) none.Add(g); else by[g] = k.Dex;
@@ -3504,18 +4017,20 @@ class LauncherForm : Form {
                 foreach (var line in o.Split('\n')) { var f = line.TrimEnd('\r').Split('\t'); int id; if (f.Length == 2 && int.TryParse(f[0], out id)) dexNames[id] = f[1]; }
             }
             bool changed = false;
-            foreach (var g in Library.Games.Where(x => x.SaveTools).ToList()) {
+            foreach (var g in Library.Games.Where(ReadsDex).ToList()) {
                 if (background && (GameArt.Hold || job != null || RunningGames() != "")) break;
                 string print = DexPrint(g); DexKept k;
                 if (dexKept.TryGetValue(g.Id, out k) && k.Print == print) continue;
-                bool partial; var d = DexInAllSaves(g, !background, out partial);
+                bool partial = false; DexGame d;
+                if (g.Pc != null) { try { d = IfDex(g); } catch { d = null; } }
+                else d = DexInAllSaves(g, !background, out partial);
                 // Stopped or incomplete: it's read again later, not remembered wrong.
                 if (partial || (background && GameArt.Hold)) continue;
                 dexKept[g.Id] = new DexKept { Print = print, Dex = d }; changed = true;
             }
             if (changed) SaveDexKept();
             var by = new Dictionary<GameEntry, DexGame>(); var none = new HashSet<GameEntry>();
-            foreach (var g in Library.Games.Where(x => x.SaveTools)) { DexKept k; if (!dexKept.TryGetValue(g.Id, out k) || k.Dex == null) none.Add(g); else by[g] = k.Dex; }
+            foreach (var g in Library.Games.Where(ReadsDex)) { DexKept k; if (!dexKept.TryGetValue(g.Id, out k) || k.Dex == null) none.Add(g); else by[g] = k.Dex; }
             dexBy = by; dexNoSave = none;
         }
         return null;
@@ -3548,11 +4063,16 @@ class LauncherForm : Form {
         var p = new Page { Title = "Romhacks and fan games" };
         foreach (var game in Library.Games.Where(OwnSection)) {
             var g = game;
+            bool has = dexBy.ContainsKey(g);
             if (g.Pc != null) {
-                p.Items.Add(new Item(g.Title + ": not read yet", "", false, null) { Icon = '\uE7FC', Theme = g.Theme, Info = "Its saves are in a format of its own, which nativeMons can't read yet. It never counts toward your collection." });
+                var d = has ? dexBy[g] : null;
+                int caughtAll = has ? d.Caught.Count + d.LaterCaught : 0, seenAll = has ? d.Seen.Count + d.LaterSeen : 0;
+                p.Items.Add(new Item(g.Title + ": " + (has ? caughtAll + " caught" : "no save"), "", has, delegate { pages.Push(DexListPage(g.Title, 1, DexRegionStart[DexRegions.Length] - 1, g)); }) {
+                    Icon = '\uE7FC', Theme = g.Theme,
+                    Info = has ? "Its own Pokedex, read from its saves: " + caughtAll + " caught and " + seenAll + " seen" + (d.LaterSeen > 0 ? " (" + d.LaterSeen + " of them from after Unova, which the list here doesn't go up to)" : "") + ", and " + d.FusionsCaught + " fusions caught, " + d.FusionsSeen + " seen. It doesn't count toward your collection." : "No save to read yet, or its saves couldn't be read. Play and save once." });
+                if (has && d.FusionsSeen >= 0) p.Items[p.Items.Count - 1].Records = new[] { "Fusions: " + d.FusionsCaught + " caught, " + d.FusionsSeen + " seen" };
                 continue;
             }
-            bool has = dexBy.ContainsKey(g);
             int last = Math.Min(g.Dex > 0 ? g.Dex : DexRegionStart[DexRegions.Length] - 1, DexRegionStart[DexRegions.Length] - 1);
             p.Items.Add(new Item(g.Title + ": " + (has ? dexBy[g].Caught.Count + " caught" : "no save"), "", has, delegate { pages.Push(DexListPage(g.Title, 1, last, g)); }) {
                 Icon = '\uE7FC', Theme = g.Theme,
@@ -3638,7 +4158,7 @@ class LauncherForm : Form {
             string gameName = s.Game.Title.Replace("Pokemon ", "");
             var nameArea = new RectangleF(mid.X, mid.Y + hh * 0.06f, mid.Width, hh * 0.5f);
             Write(g, gameName, FitFont(g, gameName, nameArea.Size, itemBold, 0.6f, false), gt.Ink, nameArea, StringAlignment.Center, StringAlignment.Center, false);
-            string boxName = s.Problem != null ? "Can't read its save" : (v.Box[pane] < s.Names.Count ? s.Names[v.Box[pane]] : "Box " + (v.Box[pane] + 1)) + "  ·  " + (v.Box[pane] + 1) + " of " + s.Boxes;
+            string boxName = s.NoSave ? "No save yet" : s.Problem != null ? "Can't read its save" : (v.Box[pane] < s.Names.Count ? s.Names[v.Box[pane]] : "Box " + (v.Box[pane] + 1)) + "  ·  " + (v.Box[pane] + 1) + " of " + s.Boxes;
             var boxArea = new RectangleF(mid.X, mid.Y + hh * 0.5f, mid.Width, hh * 0.42f);
             Write(g, boxName, FitFont(g, boxName, boxArea.Size, smallFont, 0.6f, false), Fade(gt.Ink, 210), boxArea, StringAlignment.Center, StringAlignment.Center, false);
             boxHits.Add(new KeyValuePair<RectangleF, string>(left, "l" + pane));
@@ -3648,7 +4168,17 @@ class LauncherForm : Form {
             float gy = head.Bottom + gap * 0.5f;
             var well = new RectangleF(gx, gy, gw, cell * rows);
             Group(g, well, cell * 0.16f);
-            if (s.Problem != null) { Write(g, s.Problem, smallFont, PhoneSub, RectangleF.Inflate(well, -cell * 0.3f, -cell * 0.3f), StringAlignment.Center, StringAlignment.Center, true); continue; }
+            if (s.Problem != null) {
+                // Nothing saved yet reads as a plain fact, large: its title, then what to do. A real fault stays small print.
+                var inner = RectangleF.Inflate(well, -cell * 0.3f, -cell * 0.3f);
+                if (s.NoSave) {
+                    var lines = s.Problem.Split(new[] { "\n\n" }, StringSplitOptions.None);
+                    float titleH = itemBold.Height * 1.4f;
+                    Write(g, lines[0], itemBold, PhoneText, new RectangleF(inner.X, inner.Y + inner.Height / 2 - titleH, inner.Width, titleH), StringAlignment.Center, StringAlignment.Far, false);
+                    if (lines.Length > 1) Write(g, lines[1], smallFont, PhoneSub, new RectangleF(inner.X, inner.Y + inner.Height / 2 + itemBold.Height * 0.2f, inner.Width, inner.Height / 2), StringAlignment.Center, StringAlignment.Near, true);
+                } else Write(g, s.Problem, smallFont, PhoneSub, inner, StringAlignment.Center, StringAlignment.Center, true);
+                continue;
+            }
             // The slots first, then the Pokemon over them, as their pictures reach past their own slot.
             for (int i = 0; i < s.Slots; i++) {
                 var r = new RectangleF(gx + (i % cols) * cell, gy + (i / cols) * cell, cell, cell);
@@ -3801,9 +4331,38 @@ class LauncherForm : Form {
             using (var path = Round(new RectangleF(w - m * 0.5f, barY, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
         }
     }
-    Page GamesPage() {
+    // Original games, then romhacks and fan games, each section folding away (kept in games-folded.txt).
+    Page GamesPage() { return GamesPage(null); }
+    Page GamesPage(string at) {
         var p = new Page { Title = "Games" };
-        foreach (var game in Library.Games.OrderBy(g => g.Playable ? 0 : 1)) {
+        var folded = Config.Read("games-folded.txt", "").Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+        var sections = new[] {
+            new { Key = "originals", Name = "Original games", Games = Library.Games.Where(x => !x.IsHack && x.Pc == null).ToList() },
+            new { Key = "hacks", Name = "Romhacks and fan games", Games = Library.Games.Where(x => x.IsHack || x.Pc != null).ToList() } };
+        foreach (var sec in sections) {
+            if (sec.Games.Count == 0) continue;
+            var key = sec.Key; bool open = !folded.Contains(key);
+            if (key == at) p.Sel = p.Items.Count;
+            p.Items.Add(new Item(sec.Name + ": " + sec.Games.Count, "", true, delegate {
+                if (open) folded.Add(key); else folded.Remove(key);
+                Config.Write("games-folded.txt", string.Join("\n", folded.ToArray()));
+                pages.Pop(); pages.Push(GamesPage(key));
+            }) { Fold = open ? 1 : 2, Info = (open ? "Select or press Left to hide these." : "Select or press Right to show these.") + " " + sec.Games.Count(x => x.Playable) + " of " + sec.Games.Count + " ready to play." });
+            if (open) AddGameRows(p, sec.Games);
+        }
+        if (p.Items.Count == 0) p.Items.Add(new Item("No games listed", Library.Note, false, null));
+        p.Items.Add(new Item("Add a PC game", "Any game with its own program, such as a fan game.", true, delegate { AddPcGame(); }) { Icon = '', Info = "From its folder (run where it is), its .zip (unpacked into the launcher) or its .exe. It's run as it is, with no extras: the launcher starts it and shows it on Discord, and leaves its saves to the game." });
+        return p;
+    }
+    // Numbers compare as numbers, so 1.3.1 comes after 1.3 and 1.10 after 1.9.
+    static string Natural(string s) { return System.Text.RegularExpressions.Regex.Replace(s ?? "", @"\d+", m => m.Value.PadLeft(10, '0')); }
+    static string Family(string title) { return System.Text.RegularExpressions.Regex.Replace(title ?? "", @"\s+v?\d[\w.\- ]*$", ""); }
+    void AddGameRows(Page p, List<GameEntry> games) {
+        // A hack's versions sit together under its base game, newest first.
+        var order = games.Select((x, i) => new { x, i }).ToDictionary(o => o.x, o => o.i);
+        var bases = Library.Games.Select((x, i) => new { x.Id, i }).ToDictionary(o => o.Id, o => o.i);
+        Func<GameEntry, int> baseAt = x => { int i; return x.BaseId != null && bases.TryGetValue(x.BaseId, out i) ? i : order[x]; };
+        foreach (var game in games.OrderBy(g => g.Playable ? 0 : 1).ThenBy(baseAt).ThenBy(g => Family(g.Title)).ThenByDescending(g => Natural(g.Title))) {
             var g = game;
             string why = Library.WhyNotPlayable(g);
             // A PC game not yet installed opens its page, where it's installed.
@@ -3812,9 +4371,6 @@ class LauncherForm : Form {
             it.Records = GameRecords(g);
             p.Items.Add(it);
         }
-        if (p.Items.Count == 0) p.Items.Add(new Item("No games listed", Library.Note, false, null));
-        p.Items.Add(new Item("Add a PC game", "Any game with its own program, such as a fan game.", true, delegate { AddPcGame(); }) { Icon = '', Info = "From its folder (run where it is), its .zip (unpacked into the launcher) or its .exe. It's run as it is, with no extras: the launcher starts it and shows it on Discord, and leaves its saves to the game." });
-        return p;
     }
     string[] GameRecords(GameEntry g) {
         var r = new List<string>();
@@ -3912,30 +4468,275 @@ class LauncherForm : Form {
         return p;
     }
     Page ModGamesPage() {
-        var p = new Page { Title = "Mods: choose a game" };
+        var p = new Page { Title = "Mods: choose a game", Mods = true };
         foreach (var game in Library.Games.Where(x => x.OnGen1)) {
             var g = game;
-            p.Items.Add(new Item(g.Title, "", true, delegate { pages.Push(ModsPage(g)); }) { Icon = '', Theme = g.Theme, Info = "Mods can differ per game." });
+            p.Items.Add(new Item(g.Title, "", true, delegate { pages.Push(ModsPage(g)); }) { Icon = '', Theme = g.Theme, TileHint = g.Console, Info = "Each game has its own mods, switched on and off for it alone." });
         }
         return p;
     }
+    // A game's mods: Find mods, then what's installed, then installing from a file.
     Page ModsPage(GameEntry g) {
-        var p = new Page { Title = "Mods: " + g.Title, Theme = g.Theme };
+        var p = new Page { Title = "Mods: " + g.Title, Theme = g.Theme, Mods = true };
         string list = Gen1Cli("list " + g.Gen1) ?? "";
+        var installed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in list.Split('\n')) { var f = row.TrimEnd('\r').Split('\t'); if (f.Length >= 3) installed[f[0]] = f[2]; }
+        int listed = ModIndex.CachedCount();
+        p.Items.Add(new Item("Find mods", "", true, delegate { FindMods(g, installed); }) {
+            Icon = '\uE721', TileHint = listed > 0 ? listed + " mods in the community index" : "Browse the community index",
+            Info = "Browse the Gen1Recomp community mod index and install from it. The mods are their authors' own, and being listed isn't a check of them." });
+        var open = ModDeps.Open(g);
+        if (open.Count > 0) {
+            int needed = open.Count(x => x.Required);
+            p.Items.Add(new Item("Missing mods: " + open.Count, "", true, delegate { pages.Push(DepsPage(g, null)); }) {
+                Icon = '\uE7BA', Tint = Warn, TileHint = needed > 0 ? needed + " needed for a mod to load" : "Optional extras your mods can use",
+                Info = "Mods you installed ask for others: " + string.Join(", ", open.Select(x => x.Id).ToArray()) + ". Select to choose where each comes from." });
+        }
+        var clashes = ModClashes.Read(g);
+        int active = clashes.Count(c => c.Active);
+        if (active > 0) p.Items.Add(new Item("Clashes: " + active, "", true, delegate { pages.Push(ClashesPage(g, null)); }) {
+            Icon = '\uE7BA', Tint = Warn, TileHint = active == 1 ? "A mod won't load until you choose" : "Mods won't load until you choose",
+            Info = "Some mods say they don't work with others that are on. While both are on, the game skips the one that says so. Select to choose which to keep." });
+        int mine = 0;
         foreach (var row in list.Split('\n')) {
             var f = row.TrimEnd('\r').Split('\t');
             if (f.Length < 6 || f[4] != "yes") continue;
             string id = f[0], name = f[1]; bool on = f[3] == "on";
+            string clash = ModClashes.Note(clashes, id);
             Item item = null;
-            item = new Item(name + (on ? ": ON" : ": OFF"), "", true, delegate {
+            item = new Item(name + (on ? ": On" : ": Off"), "", true, delegate {
+                // Switching on beside a mod it clashes with: ask first.
+                var against = !on ? clashes.FirstOrDefault(c => (c.ModId == id && c.OtherOn) || (c.OtherId == id && c.ModOn)) : null;
+                if (against != null) { pages.Push(ClashChoicePage(g, id, name, against)); return; }
                 on = !on;
                 Gen1Cli("set " + g.Gen1 + " " + id + " " + (on ? "on" : "off"));
-                item.Text = name + (on ? ": ON" : ": OFF");
-            }) { Icon = '', Info = f[5] };
-            item.Records = new[] { "Version: " + f[2] };
-            p.Items.Add(item);
+                int sel = p.Sel; pages.Pop(); var fresh = ModsPage(g); fresh.Sel = Math.Min(sel, fresh.Items.Count - 1); pages.Push(fresh);
+            }) { Icon = clash != null ? '\uE7BA' : '\uE74C', Tint = clash != null ? Warn : Color.Empty, TileHint = clash ?? "Version " + f[2], Info = f[5] + (f[5] != "" ? "\n" : "") + (clash != null ? clash + ". " : "") + "Select to switch it on or off for " + g.Title.Replace("Pokemon ", "") + "." };
+            p.Items.Add(item); mine++;
         }
-        p.Items.Add(new Item("Install a mod (.zip)", "", true, delegate { InstallMod(g); }) { Icon = '\uE896', Info = "Copies a mod into the game's mods folder. Only install mods you trust: they run code in the game." });
+        if (mine == 0) p.Items.Add(new Item("No mods installed yet", "", false, null) { Icon = '\uE74C', Hint = "Find mods above, or install one from a file below." });
+        p.Items.Add(new Item("Install from a .zip file", "", true, delegate { InstallMod(g); }) { Icon = '\uE896', TileHint = "A mod you downloaded yourself", Info = "Copies a mod into the game's mods folder. Only install mods you trust: they run code in the game." });
+        return p;
+    }
+    // The community mod index, for one game.
+    void FindMods(GameEntry g, Dictionary<string, string> installed) {
+        List<ModIndex.Entry> all = null; string note = null, problem = null;
+        Busy("Reading the mod index", delegate { try { all = ModIndex.Load(out note); } catch (Exception x) { problem = x.Message; } return null; }, delegate(string e) {
+            if (e != null || problem != null) { ShowText("Find mods", e ?? problem, null); return; }
+            pages.Push(FindModsPage(g, installed, all, note));
+        });
+    }
+    // What the list shows: one kind or all, most downloaded or A to Z. Kept while the launcher runs.
+    string modKind; bool modAlphabetical;
+    static string KindName(string c) { return c == "UI" ? "UI" : c == "QOL" ? "Quality of life" : Titled(c.ToLowerInvariant().Replace('_', '-')).Replace('-', ' '); }
+    static char KindIcon(string c) {
+        switch (c) {
+            case "GAMEPLAY": return '\uE7FC'; case "CONTENT": return '\uE8A5'; case "BALANCE": return '\uE8CB'; case "ART": return '\uE790';
+            case "AUDIO": return '\uE8D6'; case "UI": return '\uE8A9'; case "QOL": return '\uE713'; case "TRANSLATION": return '\uE774';
+            case "TOTAL_CONVERSION": return '\uE7B8'; case "LIBRARY": return '\uE8F1'; case "TOOL": return '\uE90F'; default: return '\uE74C';
+        }
+    }
+    Page FindModsPage(GameEntry g, Dictionary<string, string> installed, List<ModIndex.Entry> all, string note) {
+        var fits = all.Where(x => ModIndex.Fits(x, g.Gen1)).ToList();
+        var kinds = fits.SelectMany(x => x.Categories).GroupBy(x => x).OrderByDescending(x => x.Count()).Select(x => x.Key).ToList();
+        if (modKind != null && !kinds.Contains(modKind)) modKind = null;
+        var shown = fits.Where(x => modKind == null || x.Categories.Contains(modKind));
+        shown = modAlphabetical ? shown.OrderBy(x => x.Title, StringComparer.OrdinalIgnoreCase) : shown.OrderByDescending(x => x.Downloads).ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase);
+        var p = new Page { Title = "Find mods: " + g.Title.Replace("Pokemon ", ""), Theme = g.Theme, Jump = 10 };
+        Action again = delegate { int sel = p.Sel; pages.Pop(); var fresh = FindModsPage(g, installed, all, note); fresh.Sel = Math.Min(sel, fresh.Items.Count - 1); pages.Push(fresh); };
+        p.Items.Add(new Item("Kind: " + (modKind == null ? "All" : KindName(modKind)), "", true, delegate {
+            int at = modKind == null ? -1 : kinds.IndexOf(modKind);
+            modKind = at + 1 < kinds.Count ? kinds[at + 1] : null; again();
+        }) { Icon = '\uE71C', TileHint = shown.Count() + " of " + fits.Count + " mods for this game", Info = "Select to show one kind of mod at a time: " + string.Join(", ", kinds.Select(KindName).ToArray()) + ", or all." });
+        p.Items.Add(new Item("Sort: " + (modAlphabetical ? "A to Z" : "Most downloaded"), "", true, delegate { modAlphabetical = !modAlphabetical; again(); }) { Icon = '\uE8CB', Info = "Select to sort " + (modAlphabetical ? "by downloads." : "by name.") });
+        if (note != null) p.Items.Add(new Item("Showing the last list", "", false, null) { Icon = '\uE946', Hint = "The index couldn't be reached", Info = note });
+        foreach (var entry in shown) {
+            var m = entry; string have;
+            bool has = installed.TryGetValue(m.Id, out have);
+            string state = has ? (have == m.Version ? "Installed" : "Update") : m.Experimental ? "Experimental" : "";
+            p.Items.Add(new Item(m.Title + (state != "" ? ": " + state : ""), "", true, delegate { pages.Push(ModEntryPage(g, m, installed)); }) {
+                Icon = KindIcon(m.Categories.FirstOrDefault() ?? ""),
+                TileHint = "by " + m.Author + (m.Downloads >= 0 ? "  ·  " + m.Downloads.ToString("N0") + " downloads" : ""),
+                Info = m.Summary ?? "" });
+        }
+        if (!shown.Any()) p.Items.Add(new Item("Nothing listed here yet", "", false, null) { Icon = '\uE74C', Hint = modKind != null ? "Try another kind" : "" });
+        return p;
+    }
+    static Dictionary<string, string> InstalledMods(GameEntry g) {
+        var installed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in (Gen1Cli("list " + g.Gen1) ?? "").Split('\n')) { var f = row.TrimEnd('\r').Split('\t'); if (f.Length >= 3) installed[f[0]] = f[2]; }
+        return installed;
+    }
+    // One mod: what it does and the trust note, Install first, then its details as a table, then its own page.
+    Page ModEntryPage(GameEntry g, ModIndex.Entry m, Dictionary<string, string> installed) {
+        string have; bool has = installed.TryGetValue(m.Id, out have);
+        string about = !string.IsNullOrEmpty(m.Summary) ? m.Summary : "No description given.";
+        var p = new Page { Title = m.Title, Theme = g.Theme, FitBody = true, Body = about + "\n\nIts author's own code, run in the game. Being listed isn't a check of it: install only what you trust." };
+        string label = !has ? "Install" : have == m.Version ? "Install again" : "Update to " + m.Version;
+        p.Items.Add(new Item(label, "", true, delegate {
+            string message = null;
+            Busy("Installing " + m.Title, delegate { message = ModIndex.Install(m, delegate(float at) { BeginInvoke((Action)delegate { progress = at; dirty = true; }); }); return null; }, delegate(string e) {
+                AfterModInstall(g, e ?? message);
+            });
+        }) { Icon = '\uE896', TileHint = has ? "You have version " + have : m.Experimental ? "Experimental: it installs switched off" : (m.ZipSize > 0 ? Math.Max(1, m.ZipSize / 1024).ToString("N0") + " KB download" : "") });
+        Action<string, string, char> fact = delegate(string name, string value, char icon) { if (!string.IsNullOrEmpty(value)) p.Items.Add(new Item(name + ": " + value, "", true, null) { Icon = icon, Info = name + ": " + value }); };
+        // First, what else it takes: those are asked for after the install.
+        if (m.Needs.Count > 0) p.Items.Add(new Item("Needs: " + string.Join(", ", m.Needs.ToArray()), "", true, null) { Icon = '\uE7BA', Tint = Warn, Info = "It needs these mods too. After it's installed, the launcher asks where to get each one." });
+        if (m.Clashes.Count > 0) {
+            var mine = m.Clashes.Where(installed.ContainsKey).ToList();
+            p.Items.Add(new Item("Clashes with: " + string.Join(", ", m.Clashes.ToArray()), "", true, null) {
+                Icon = '\uE7BA', Tint = Warn, TileHint = mine.Count > 0 ? "You have " + string.Join(", ", mine.ToArray()) : "",
+                Info = "Its author says it doesn't work with these. While one of them is on, it doesn't load" + (mine.Count > 0 ? ". You have " + string.Join(", ", mine.ToArray()) + ": after the install you choose which to keep on." : ".") });
+        }
+        fact("Author", m.Author, '\uE77B');
+        fact("Version", m.Version, '\uE946');
+        if (m.Downloads >= 0) fact("Downloads", m.Downloads.ToString("N0"), '\uE896');
+        fact("Games", m.Games.Count == 0 ? "Any" : string.Join(", ", m.Games.Select(x => Titled(x)).ToArray()), '\uE7FC');
+        if (m.Categories.Count > 0) fact("Kind", string.Join(", ", m.Categories.Select(KindName).ToArray()), KindIcon(m.Categories[0]));
+        if (m.Permissions.Count > 0) {
+            p.Items.Add(new Item("Asks for: " + string.Join(", ", m.Permissions.Select(x => x == "engine_internals" ? "Engine" : x == "filesystem" ? "Files" : x == "network" ? "Internet" : Titled(x.Replace('_', '-'))).ToArray()), "", true, null) { Icon = '\uE72E', Info = "Besides what a plain mod does, it " + string.Join(", and ", m.Permissions.Select(ModIndex.PermissionWords).ToArray()) + "." });
+        }
+        fact("Licence", m.License, '\uE8A5');
+        if (!string.IsNullOrEmpty(m.Repo)) p.Items.Add(new Item("Open its page", "", m.Repo.StartsWith("https://", StringComparison.OrdinalIgnoreCase), delegate { try { Process.Start(m.Repo); } catch { } }) { Icon = '\uE774', TileHint = m.Repo.Replace("https://", ""), Info = m.Repo });
+        return p;
+    }
+    // What installed mods ask for, for one game: each missing one to install from where the player says, or leave.
+    // intro: what just happened (an install), shown above the list.
+    Page DepsPage(GameEntry g, string intro) {
+        var open = ModDeps.Open(g);
+        var p = new Page { Title = "Needs other mods", Theme = g.Theme, FitBody = true };
+        p.Body = (intro != null ? intro + "\n\n" : "") + (open.Count == 0 ? "Every mod they ask for is installed." :
+            "Your mods ask for these. A required one has to be there for the mod to load; an optional one adds to it. Choose where each comes from.");
+        foreach (var dep in open) {
+            var d = dep;
+            string state = d.Status == "version" ? "Wrong version" : d.Required ? "Required" : "Optional";
+            p.Items.Add(new Item(d.Id + ": " + state, "", true, delegate { OpenDep(g, d); }) {
+                Icon = d.Required ? '\uE7BA' : '\uE74C', Tint = d.Required ? Warn : Color.Empty,
+                TileHint = "For " + d.ModName + (d.Range != "" ? ", version " + d.Range : "") + (d.Status == "version" ? " (you have " + d.Have + ")" : ""),
+                Info = (d.Required ? d.ModName + " won't load without it." : d.ModName + " can use it, and works without it.") + " Select to install it." });
+        }
+        p.Items.Add(new Item(open.Count == 0 ? "Done" : "Not now", "", true, delegate { BackToMods(g, null); }) { Icon = '\uE8FB', TileHint = open.Count == 0 ? "" : "Back to the mods. The Mods page keeps a row for these." });
+        return p;
+    }
+    // Back to the game's mods, read again, and a note if there is one.
+    void BackToMods(GameEntry g, string note) {
+        while (pages.Count > 0 && !(pages.Peek().Title ?? "").StartsWith("Mods: ")) pages.Pop();
+        if (pages.Count > 0) pages.Pop();
+        pages.Push(ModsPage(g));
+        if (note != null) ShowText("Mods", note, null);
+    }
+    // Clashing pairs that are both on: choose which stays. intro: what just happened (an install), above the list.
+    Page ClashesPage(GameEntry g, string intro) {
+        var active = ModClashes.Read(g).Where(c => c.Active).ToList();
+        var p = new Page { Title = "Mods that clash", Theme = g.Theme, FitBody = true };
+        p.Body = (intro != null ? intro + "\n\n" : "") + (active.Count == 0 ? "No mods that are on clash with each other." :
+            "These mods say they don't work together. While both are on, the game skips the one that says so. Choose which to keep on.");
+        foreach (var clash in active) {
+            var c = clash;
+            p.Items.Add(new Item(c.ModName + " and " + c.OtherName, "", true, delegate { pages.Push(ClashPairPage(g, c)); }) {
+                Icon = '\uE7BA', Tint = Warn, TileHint = c.ModName + " won't load while " + c.OtherName + " is on",
+                Info = c.ModName + " names " + c.OtherName + (c.Range != "" ? " (version " + c.Range + ")" : "") + " as a mod it doesn't work with." });
+        }
+        p.Items.Add(new Item(active.Count == 0 ? "Done" : "Not now", "", true, delegate { BackToMods(g, null); }) { Icon = '\uE8FB', TileHint = active.Count == 0 ? "" : "The Mods page keeps a row for these." });
+        return p;
+    }
+    void SetMod(GameEntry g, string id, bool on) { Gen1Cli("set " + g.Gen1 + " " + id + " " + (on ? "on" : "off")); }
+    Page ClashPairPage(GameEntry g, ModClashes.Clash c) {
+        var p = new Page { Title = "Which to keep?", Theme = g.Theme, FitBody = true,
+            Body = c.ModName + " says it doesn't work with " + c.OtherName + ". While both are on, " + c.ModName + " doesn't load." };
+        Action back = delegate { while (pages.Count > 0 && pages.Peek().Title != "Mods that clash") pages.Pop(); if (pages.Count > 0) pages.Pop(); pages.Push(ClashesPage(g, null)); };
+        p.Items.Add(new Item("Keep " + c.ModName, "", true, delegate { SetMod(g, c.OtherId, false); back(); }) { Icon = '\uE73E', TileHint = c.OtherName + " is switched off" });
+        p.Items.Add(new Item("Keep " + c.OtherName, "", true, delegate { SetMod(g, c.ModId, false); back(); }) { Icon = '\uE73E', TileHint = c.ModName + " is switched off" });
+        p.Items.Add(new Item("Leave both on", "", true, delegate { pages.Pop(); }) { Icon = '\uE711', TileHint = c.ModName + " stays skipped" });
+        return p;
+    }
+    // Switching a mod on beside one it clashes with.
+    Page ClashChoicePage(GameEntry g, string id, string name, ModClashes.Clash c) {
+        bool claims = c.ModId == id;   // this mod made the claim, so it's the one that won't load
+        string other = claims ? c.OtherName : c.ModName, otherId = claims ? c.OtherId : c.ModId;
+        var p = new Page { Title = "Switch " + name + " on?", Theme = g.Theme, FitBody = true,
+            Body = (claims ? name + " says it doesn't work with " + other + ", which is on. While both are on, " + name + " doesn't load."
+                           : other + " says it doesn't work with " + name + ". While both are on, " + other + " doesn't load.") };
+        Action back = delegate { while (pages.Count > 0 && !(pages.Peek().Title ?? "").StartsWith("Mods: ")) pages.Pop(); if (pages.Count > 0) pages.Pop(); pages.Push(ModsPage(g)); };
+        p.Items.Add(new Item("Switch " + other + " off", "", true, delegate { SetMod(g, otherId, false); SetMod(g, id, true); back(); }) { Icon = '\uE73E', TileHint = name + " on, " + other + " off" });
+        p.Items.Add(new Item("Switch it on anyway", "", true, delegate { SetMod(g, id, true); back(); }) { Icon = '\uE7BA', Tint = Warn, TileHint = (claims ? name : other) + " won't load" });
+        p.Items.Add(new Item("Leave it off", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
+        return p;
+    }
+    // The last mod ExtractMod installed, and enable-new's answer: "<version>\ton" or "<version>\tclash\t<id>\t<name>".
+    public static string LastInstalled, LastEnable;
+    // Where the new mod was left off for this game because it clashes with one that's on: the clash, or null.
+    static ModClashes.Clash NewModClash(GameEntry g) {
+        if (LastInstalled == null || LastEnable == null) return null;
+        bool left = LastEnable.Split('\n').Select(l => l.TrimEnd('\r').Split('\t')).Any(f => f.Length >= 2 && f[0] == g.Gen1 && f[1] == "clash");
+        return left ? ModClashes.Read(g).FirstOrDefault(c => c.ModId == LastInstalled || c.OtherId == LastInstalled) : null;
+    }
+    void AfterModInstall(GameEntry g, string result) {
+        var held = NewModClash(g);
+        if (held != null) {
+            // It went in switched off here: choose, with the install's result above.
+            string id = LastInstalled, name = held.ModId == id ? held.ModName : held.OtherName;
+            while (pages.Count > 0 && !(pages.Peek().Title ?? "").StartsWith("Mods: ")) pages.Pop();
+            if (pages.Count > 0) pages.Pop();
+            pages.Push(ModsPage(g));
+            var choice = ClashChoicePage(g, id, name, held);
+            choice.Body = result + " It's off for now.\n\n" + choice.Body;
+            pages.Push(choice);
+            LastInstalled = null;
+            return;
+        }
+        bool deps = ModDeps.Open(g).Count > 0, clash = !deps && ModClashes.Read(g).Any(c => c.Active);
+        if (deps || clash) {
+            while (pages.Count > 0 && !(pages.Peek().Title ?? "").StartsWith("Mods: ")) pages.Pop();
+            if (pages.Count > 0) pages.Pop();
+            pages.Push(ModsPage(g));
+            pages.Push(deps ? DepsPage(g, result) : ClashesPage(g, result));
+        } else BackToMods(g, result);
+    }
+    void OpenDep(GameEntry g, ModDeps.Dep d) {
+        List<ModIndex.Entry> all = null; string note;
+        Busy("Looking for " + d.Id, delegate { try { all = ModIndex.Load(out note); } catch { all = new List<ModIndex.Entry>(); } return null; }, delegate(string e) {
+            pages.Push(DepPage(g, d, all ?? new List<ModIndex.Entry>()));
+        });
+    }
+    Page DepPage(GameEntry g, ModDeps.Dep d, List<ModIndex.Entry> index) {
+        var listed = index.Find(x => string.Equals(x.Id, d.Id, StringComparison.OrdinalIgnoreCase));
+        var p = new Page { Title = d.Id, Theme = g.Theme, FitBody = true };
+        p.Body = d.ModName + (d.Required ? " needs this mod to load." : " can use this mod. It works without it.")
+            + (d.Range != "" ? " It asks for version " + d.Range + "." : "")
+            + (d.Status == "version" ? " You have " + d.Have + ", which doesn't fit." : "")
+            + "\n\nChoose where to get it. Whatever you choose has to hold " + d.Id + ", or nothing is installed.";
+        Action<string, Func<Action<float>, string>> install = delegate(string what, Func<Action<float>, string> work) {
+            string result = null;
+            Busy("Installing " + what, delegate { result = work(delegate(float at) { BeginInvoke((Action)delegate { progress = at; dirty = true; }); }); return null; }, delegate(string e) {
+                // Back to the list, read again: this one done, and anything it asks for in turn.
+                while (pages.Count > 0 && pages.Peek().Title != "Needs other mods") pages.Pop();
+                if (pages.Count > 0) pages.Pop();
+                pages.Push(DepsPage(g, e ?? result));
+            });
+        };
+        if (listed != null) p.Items.Add(new Item("From the mod index", "", true, delegate { install(listed.Title, delegate(Action<float> at) { return ModIndex.Install(listed, at); }); }) {
+            Icon = '\uE721', TileHint = listed.Title + ", version " + listed.Version + " by " + listed.Author, Info = "The release the Gen1Recomp community mod index lists for it." });
+        if (d.Github != "") p.Items.Add(new Item("From its GitHub releases", "", true, delegate {
+            install(d.Id, delegate(Action<float> at) {
+                long size; string version;
+                string url = ModIndex.GithubZip(d.Github, d.Id, out size, out version);
+                return url == null ? d.Github + " has no release with a .zip to install." : ModIndex.InstallFrom(url, d.Id, d.Id + " " + version, size, at);
+            });
+        }) { Icon = '\uE774', TileHint = "github.com/" + d.Github, Info = "The newest release there with a .zip, as " + d.ModName + " names it." });
+        p.Items.Add(new Item("Choose a downloaded .zip", "", true, delegate {
+            string zip;
+            using (var dlg = new OpenFileDialog { Filter = "Mod archive (*.zip)|*.zip", Title = "Choose the .zip for " + d.Id }) { if (dlg.ShowDialog(this) != DialogResult.OK) return; zip = dlg.FileName; }
+            install(d.Id, delegate(Action<float> at) { try { return ExtractMod(zip, d.Id); } catch (Exception x) { return "Could not install it: " + x.Message; } });
+        }) { Icon = '\uE8B7', TileHint = "One you already downloaded", Info = "A mod archive on your PC. It has to be " + d.Id + "." });
+        p.Items.Add(new Item("Enter a download link", "", true, delegate {
+            string url = AskText("Download link", "Link to the .zip of " + d.Id + " (https://):", "");
+            if (string.IsNullOrWhiteSpace(url)) return;
+            url = url.Trim();
+            install(d.Id, delegate(Action<float> at) { return ModIndex.InstallFrom(url, d.Id, d.Id, 0, at); });
+        }) { Icon = '\uE71B', TileHint = "A link to its .zip", Info = "Where its author publishes it: an https:// link straight to the .zip." });
+        if (!d.Required) p.Items.Add(new Item("Don't install it", "", true, delegate { ModDeps.Decline(d); pages.Pop(); pages.Pop(); pages.Push(DepsPage(g, null)); }) {
+            Icon = '\uE711', TileHint = "Not asked again for " + d.ModName, Info = d.ModName + " works without it. You can still install it later from a .zip." });
         return p;
     }
     void InstallMod(GameEntry g) {
@@ -3943,11 +4744,19 @@ class LauncherForm : Form {
             if (d.ShowDialog(this) != DialogResult.OK) return;
             string message;
             try { message = ExtractMod(d.FileName); } catch (Exception e) { message = "Could not install it: " + e.Message; }
-            pages.Pop(); pages.Push(ModsPage(g));
-            ShowText("Install a mod", message, null);
+            AfterModInstall(g, message);
         }
     }
-    public static string ExtractMod(string zip) {
+    public static string ExtractMod(string zip) { return ExtractMod(zip, null); }
+    // The mod's id from its manifest.json, or null.
+    static string ManifestId(string folder) {
+        try {
+            var d = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(folder, "manifest.json")).TrimStart('\uFEFF'));
+            object id; return d != null && d.TryGetValue("id", out id) ? id as string : null;
+        } catch { return null; }
+    }
+    // expected: the mod this zip has to be (a dependency asked for by id), or null for any.
+    public static string ExtractMod(string zip, string expected) {
         string paths = Gen1Cli("paths");
         if (paths == null) return "Gen1Recomp was not found.";
         string mods = paths.Split('\n').Select(l => l.TrimEnd('\r').Split('\t')).Where(f => f[0] == "mods").Select(f => f[1]).First().Replace('/', '\\');
@@ -3961,6 +4770,9 @@ class LauncherForm : Form {
             // The manifest is at the top of the archive, or inside one folder.
             string root = File.Exists(Path.Combine(temp, "manifest.json")) ? temp : Directory.GetDirectories(temp).FirstOrDefault(x => File.Exists(Path.Combine(x, "manifest.json")));
             if (root == null) return "This archive has no manifest.json, so it is not a Gen1Recomp mod.";
+            string holds = ManifestId(root);
+            if (expected != null && !string.Equals(holds, expected, StringComparison.OrdinalIgnoreCase))
+                return "That archive holds " + (holds ?? "a mod with no id") + ", not " + expected + ", so nothing was installed.";
             string target = Path.Combine(mods, root == temp ? Path.GetFileNameWithoutExtension(zip) : Path.GetFileName(root));
             // An older copy steps aside first and comes back if the new one can't go in.
             if (Directory.Exists(old)) Directory.Delete(old, true);
@@ -3969,6 +4781,8 @@ class LauncherForm : Form {
             try { MoveTree(root, target); }
             catch { if (Directory.Exists(target)) Directory.Delete(target, true); if (replacing) Directory.Move(old, target); throw; }
             if (replacing) Directory.Delete(old, true);
+            // A newly installed mod is switched on in each game, unless it clashes there with one that's on.
+            LastInstalled = holds; LastEnable = holds != null ? (Gen1Cli("enable-new " + holds) ?? "") : "";
             return (replacing ? "Updated " : "Installed ") + Path.GetFileName(target) + ".";
         }
         finally { try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
@@ -4062,10 +4876,8 @@ class LauncherForm : Form {
         }
     }
     // ---------- dropped files ----------
-    // Only on the menu: never while a game, a task or the splash is running.
     bool CanTakeDrop() { return job == null && !starting && pages.Count > 0 && pages.Peek().Boxes == null; }
-    // Folders become ROM folders, ROMs are used where they are, a .zip's ROMs are copied out, and saves go to Import saves.
-    // Nothing dropped is ever changed.
+    // Folders become ROM folders, ROMs are used in place, a zip's ROMs are copied out, saves are imported. Nothing dropped changes.
     void TakeDrop(string[] paths) {
         if (!CanTakeDrop()) return;
         Native.Front(Handle);
@@ -4203,13 +5015,14 @@ class LauncherForm : Form {
             + "\n\nPokemon Infinite Fusion by chardub (Frogman) and its contributors (github.com/infinitefusion/infinitefusion-e18), made with Pokemon Essentials on RPG Maker XP. Its custom fusion sprites are by the Infinite Fusion artist community. Installed from your own copy or its GitHub; not included, and not affiliated with nativeMons."
             + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection. Pokedex entries from PokeAPI (pokeapi.co)."
+            + "\n\nFind mods reads the Gen1Recomp community mod index (github.com/bryanthaboi/gen1recomp-mod-index). Its listings are by the mods' authors, and the mods are theirs."
+            + "\n\nRomhacks' title screens are captured with mGBA by endrift and contributors (github.com/mgba-emu/mgba, MPL-2.0), as its libretro core."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
     }
-    // Keys each engine answers to while a game runs, from each project's own README (Infinite Fusion: its scripts), in
-    // our words. Every engine also has its own menu for changing them.
+    // Keys each engine answers to while a game runs, from each project's README, in our words.
     static readonly string[][] ControlSheets = {
         new[] { "Fulldex", "DS and GBA games in widescreen.",
             "Move: arrow keys\nA: X    B: Z\nX: S    Y: A\nL: Q    R: W\nStart: Enter\nSelect: Backspace\nTouch screen: the mouse\n\nPause menu: Esc\nFast forward: hold Left Shift\nSave state: F5\nLoad state: F8\nWindow or fullscreen: F11\n\nA controller plays as a DS: hold its right trigger to fast forward, Start opens the pause menu.\n\nChange any key in the pause menu, under Controls, then Keys and buttons." },
@@ -4222,8 +5035,7 @@ class LauncherForm : Form {
         new[] { "Infinite Fusion", "Its own program.",
             "Speed up: the A key\nScreenshot: F8\nKeys and controller: F1\n\nWhether A holds or toggles the speed is set in the game's Options." },
     };
-    // Where each engine's screenshot key writes. nativeplat: F12, into userdata\screenshots (portable.txt keeps it beside the
-    // exe). Infinite Fusion: F8, into its save folder (RTP.getSaveFileName). Fulldex and Gen1Recomp have no screenshot key.
+    // Where each engine's screenshot key writes. Fulldex and Gen1Recomp have none.
     static List<KeyValuePair<string, string>> ScreenshotFolders() {
         var list = new List<KeyValuePair<string, string>>();
         if (File.Exists(Config.Nativeplat)) list.Add(new KeyValuePair<string, string>("nativeplat", Path.Combine(NativeplatDir, "userdata", "screenshots")));
@@ -4311,7 +5123,14 @@ class LauncherForm : Form {
         return code == 0 ? o : null;
     }
     static string Bridge(string args, out int code) { return RunCapture(new ProcessStartInfo(Config.MonBridge, args), 60, out code); }
-    // Gen1Recomp keeps its own save format, so a cartridge .sav is exported for the move. Fulldex's are ready as they are.
+    // Whether a game has a save to show, without running anything.
+    static bool HasBoxSave(GameEntry g) {
+        try {
+            if (g.Engine() != "gen1") { var f = new FileInfo(Path.Combine(Config.FulldexDir, "saves", g.Save ?? "")); return f.Exists && f.Length > 0; }
+            string dir = Path.Combine(Gen1Root, "saves", g.Gen1 ?? "");
+            return Directory.Exists(dir) && Directory.GetFiles(dir, "*.lua").Any(x => !x.EndsWith(".bak.lua", StringComparison.OrdinalIgnoreCase));
+        } catch { return true; }
+    }
     static string SaveOf(GameEntry g, out string why) {
         why = null;
         if (g.Engine() != "gen1") {
@@ -4342,7 +5161,11 @@ class LauncherForm : Form {
         var s = new BoxSide { Game = g };
         string why;
         s.File = SaveOf(g, out why);
-        if (s.File == null) { s.Problem = why; return s; }
+        if (s.File == null) {
+            s.NoSave = !HasBoxSave(g) || why == null || why.StartsWith("No save yet") || why.IndexOf("no save", StringComparison.OrdinalIgnoreCase) >= 0;
+            s.Problem = s.NoSave ? "No save yet\n\nPlay " + g.Title + " and save once in the game. Its boxes show here after that." : why;
+            return s;
+        }
         int code; string layout = Bridge("layout \"" + s.File + "\"", out code);
         if (code != 0) { s.Problem = layout.Trim(); return s; }
         foreach (var row in layout.Split('\n')) {
@@ -4380,8 +5203,10 @@ class LauncherForm : Form {
     void OpenBoxView() {
         var games = Library.Games.Where(x => x.SaveTools).ToList();
         if (games.Count == 0) return;
-        var top = current != null && current.SaveTools ? current : games[0];
-        var bottom = games.FirstOrDefault(x => x.Id != top.Id) ?? top;
+        var saved = games.Where(HasBoxSave).ToList();
+        if (saved.Count == 0) { ShowText("Move Pokemon", "None of your games has a save yet. Play one and save once in the game, then its boxes show here.", null); return; }
+        var top = current != null && saved.Contains(current) ? current : saved[0];
+        var bottom = saved.FirstOrDefault(x => x.Id != top.Id) ?? top;
         var v = new BoxView();
         LoadBoxes(v, top, bottom, delegate { pages.Push(new Page { Title = "Move Pokemon", Boxes = v }); });
     }
@@ -4390,7 +5215,8 @@ class LauncherForm : Form {
         var p = new Page { Title = (pane == 0 ? "Top" : "Bottom") + ": which game?" };
         foreach (var game in Library.Games.Where(x => x.SaveTools)) {
             var g = game;
-            p.Items.Add(new Item(g.Title, g.Id == v.Side[pane].Game.Id ? "Showing now." : "", true, delegate {
+            bool has = HasBoxSave(g);
+            p.Items.Add(new Item(g.Title, g.Id == v.Side[pane].Game.Id ? "Showing now." : has ? "" : "No save yet. Play and save once first.", has || g.Id == v.Side[pane].Game.Id, delegate {
                 pages.Pop();
                 var other = v.Side[1 - pane].Game;
                 v.Box[pane] = 0; v.HeldPane = -1; v.Cursor = -1; v.Pane = pane;
@@ -4399,8 +5225,7 @@ class LauncherForm : Form {
         }
         pages.Push(p);
     }
-    // What the box screen's move goes on to: the slot it was dropped on, and back to the boxes afterwards. The list
-    // pages' moves leave these empty.
+    // Where the box screen's move goes, and back to the boxes after. The list pages leave these empty.
     string moveAt; Action moveAfter;
     void BoxDrop(BoxView v, int toPane, int toSlot) {
         int fromPane = v.HeldPane, fromBox = v.HeldBox, fromSlot = v.HeldSlot, toBox = v.Box[toPane];
@@ -4773,18 +5598,12 @@ class LauncherForm : Form {
             if (then != null) then(); else ShowText("Ready", g.Title + " is prepared.", null);
         });
     }
-    // Gen1Recomp builds a game's data from its ROM before the first play, which takes up to a minute for a GBA game. Doing every
-    // game here, behind the splash, means Play starts straight away. A ROM that fails is noted and left to Play, which says why.
-    // Each game has its own data folder and the fork's import writes nothing shared, so a few run at once. The first runs alone,
-    // as an older install may move its Red data on the first import.
+    // Prepares every Gen1Recomp game behind the splash (notes/launcher.md, Gen1Recomp).
     void PrepareAll() {
         if (RunningGames() != "") return;
         var todo = Library.Games.Where(g => g.Gen1 != null && !g.Imported && g.Gen1Rom != null && !PrepareFailed(g.Gen1Rom)).ToList();
         if (todo.Count == 0) return;
-        // Three games at once, two extract workers each: as each one finishes, the next in line starts, so three are always
-        // running until the list is done. A game is prepared once. Most of the PC's load here isn't the engine (1 to 4 cores)
-        // but Windows Defender scanning the ~60,000 small files 11 games write (about 12 cores on a 28-thread PC). One at a time
-        // only spreads that out: 70 seconds instead of 49, still peaking near 60%.
+        // Three at once, two extract workers each. Defender scanning the files is most of the load.
         int lanes = Math.Max(1, Math.Min(3, Environment.ProcessorCount / 6));
         int workers = Math.Max(1, Math.Min(2, Environment.ProcessorCount / (lanes * 4)));
         int done = 0;
@@ -4799,8 +5618,7 @@ class LauncherForm : Form {
         var rest = todo.Skip(1).OrderByDescending(g => { try { return new FileInfo(g.Gen1Rom).Length; } catch { return 0L; } }).ToList();
         Parallel.ForEach(System.Collections.Concurrent.Partitioner.Create(rest, true), new ParallelOptions { MaxDegreeOfParallelism = lanes }, one);
     }
-    // The title screen and town of the game the menu opens on are made here, so Play shows that game's own screen straight away,
-    // and loaded before the menu appears. Each is made once.
+    // The opening game's title screen and town are made once, before the menu appears.
     void WallpapersAtStart() {
         string last = Config.Read("last-game.txt", "");
         var first = Library.Games.Find(g => g.Id == last && g.Playable) ?? Library.Games.Find(g => g.Playable);
@@ -4833,8 +5651,7 @@ class LauncherForm : Form {
         try { File.AppendAllText(PrepareFailedFile, PrepareKey(rom) + Environment.NewLine); } catch { }
     }
     void PlayGen1(GameEntry g) {
-        // The game kept ready is used only if nothing it loaded has changed since: its options, and its save after the
-        // backup and sharing that just ran. A GBA game reads its save while it starts.
+        // The waiting game is used only if its options and save haven't changed since it loaded.
         if (ReadyFor(g)) { UseReady(g, delegate(int code) { Finished(g, code); }); return; }
         if (ready != null) QuickNote("not used for " + g.Id);
         DropReady();
@@ -4849,8 +5666,7 @@ class LauncherForm : Form {
         try { PcGames.PrepareSaves(g, psi); } catch (Exception x) { ShowText("Could not start " + g.Title, "Its save folder couldn't be set up: " + x.Message, null); return; }
         DateTime started = DateTime.Now;
         RunJob(g.Title, psi, true, delegate(int code) {
-            // Some games start through a small program that hands over to the real one and quits. If an added game's
-            // program ends that soon, the session lasts while anything run from its folder is still open.
+            // Some games start through a program that quits at once: then the session lasts while their folder's programs run.
             if (!PcGames.IsCustom(g) || (DateTime.Now - started).TotalSeconds > 15) { Finished(g, code); return; }
             string dir = PcGames.Dir(g);
             Busy("Playing " + g.Title, delegate {
@@ -4863,11 +5679,8 @@ class LauncherForm : Form {
             }, delegate(string e) { Finished(g, 0); });
         });
     }
-    // A PC game: imported into the launcher (its files and saves in the launcher's folders, updated by it), or an existing
-    // installation added as it is (run in place, saves where the game keeps them). Either can become the other.
     // ---------- PC games the player adds (CustomGames) ----------
-    // Three ways in: its folder (run where it is, nothing copied), its .zip (unpacked into games\, which the launcher then
-    // keeps), or its program, either way.
+    // From its folder, its .zip or its program (notes/launcher.md, PC games).
     void AddPcGame() {
         var p = new Page { Title = "Add a PC game", Body = "Any game with its own program, such as a fan game. It runs as it is, with no extras, and keeps its saves wherever it always does." };
         p.Items.Add(new Item("From its folder", "Runs where it is. Nothing is copied.", true, delegate {
@@ -5078,9 +5891,7 @@ class LauncherForm : Form {
     static string Gen1Options(GameEntry g) { return string.Join(",", GameOptions.ForGame(g).Select(x => x.Key + "=" + x.Value).ToArray()); }
 
     // ---------- quick start ----------
-    // The last game waits at its title screen, out of sight, silent and stopped, while the menu is up: Play shows it at
-    // once. Gen1Recomp's side is src/nativemons/QuickStart.lua. Anything that could change what it loaded throws it away,
-    // and it's made again once the menu has been idle a moment.
+    // The last game waits at its title screen while the menu is up (notes/launcher.md, Quick start).
     public static bool QuickStart { get { return Config.Read("quick-start.txt", "on").Trim() != "off"; } set { Config.Write("quick-start.txt", value ? "on" : "off"); } }
     Process ready; GameEntry readyFor; string readyOptions, readySave, readyFailed; bool readyUp, readyHeld;
     static volatile int readyPid;
@@ -5159,10 +5970,7 @@ class LauncherForm : Form {
         readySave = QuickSave(g);
         QuickNote("starting " + g.Id + " pid " + p.Id);
     }
-    // Fulldex DS games start from a snapshot of their title screen, made headless in the background from a copy of the save
-    // (about 6 s). A snapshot holds the cartridge save, and loading one writes it to the save file: so it's used only while
-    // the save is byte for byte the one it was made from, with the same ROM, Fulldex and settings. Fulldex sets the clock
-    // to now after loading one. Remade when anything differs, so after most sessions.
+    // Fulldex DS quick start: a title-screen snapshot, used only while the save matches (notes/launcher.md, Quick start).
     static string SnapDir { get { return Path.Combine(Config.State, "quick-start"); } }
     static string SnapFile(GameEntry g) { return Path.Combine(SnapDir, g.Id + ".snap"); }
     static string SnapInfo(GameEntry g) { return Path.Combine(SnapDir, g.Id + ".txt"); }
@@ -5288,22 +6096,19 @@ class LauncherForm : Form {
                 string stale = Path.Combine(roms, Path.GetFileName(mine.File));
                 try { if (File.Exists(stale) && !string.Equals(stale, copy, StringComparison.OrdinalIgnoreCase) && Library.Sha1Cached(stale) == mine.Sha1) File.Delete(stale); } catch { }
             }
-            args = "--game " + g.FulldexCode;
+            // A hack shares its base game's code, so --game would start the clean game: its list starts the hack instead.
+            args = g.IsHack || g.IsModified(g.Chosen) ? "" : "--game " + g.FulldexCode;
             watchGba = true; gbaPlaying = false; gbaClosed = false;
-            // Fulldex only starts games it knows by themselves. A romhack waits in its list, which opens on the last game played:
-            // so it's made that, and started with one key press.
+            // A romhack is made Fulldex's last game played, then started with one key press.
             gbaPress = g.IsHack || g.IsModified(g.Chosen); gbaPresses = 0; gbaPressAt = DateTime.MinValue;
             if (gbaPress) try { File.WriteAllText(Path.Combine(dir, "last-game.txt"), dir + "/roms/" + Path.GetFileName(g.FulldexRom) + Environment.NewLine); } catch { gbaPress = false; }
         }
         var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        // Its list can ask to update, with Install selected, and that key press must never answer it. A check that can't connect stays
-        // silent, and Fulldex updates come with nativeMons. Not SSR_UPDATE_TEST: that one installs what it finds.
+        // That key press must never answer an update prompt, so update checks go nowhere.
         if (gbaPress && !g.IsDs) psi.EnvironmentVariables["FULLDEX_UPDATE_URL"] = "http://127.0.0.1:9/";
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
     }
-    // After a GBA game ends, Fulldex's published build opens its own game list instead of exiting, and has no argument
-    // to change that. Its list has a window title of its own, and by then the game has finished and saved, so seeing the
-    // game's window give way to the list means it's safe to close the program and come straight back here.
+    // Fulldex opens its game list after a GBA game. Seeing it means the game has saved, so Fulldex can close.
     bool watchGba, gbaPlaying, gbaClosed, gbaPress;
     int gbaPresses; DateTime gbaPressAt;
     DateTime gbaWatchedAt;
@@ -5329,8 +6134,7 @@ class LauncherForm : Form {
         } catch { }
     }
     // ---------- the Platinum PC port ----------
-    // It reads and writes save.bin beside its program, in its own padded layout (see PlatinumSave). Only one engine runs at a
-    // time, so the save goes in, converted, before it starts and comes back, converted and checked, when it ends.
+    // Its save goes in converted before it starts, and comes back checked (notes/launcher.md, Saves).
     static string PortDir { get { return Path.GetDirectoryName(Config.PlatinumPort); } }
     static string PortSave { get { return Path.Combine(PortDir, "save.bin"); } }
     static string PortRecord(GameEntry g) { return Path.Combine(Config.State, "save-sync", g.Id + "-port.txt"); }
@@ -5399,9 +6203,7 @@ class LauncherForm : Form {
         });
     }
     // ---------- nativeplat ----------
-    // It keeps raw cartridge saves in named slots under userdata (portable.txt beside it). We give each game one slot and treat
-    // it as the port's save.bin: the shared save goes in before the game and comes back, checked, after. Its own launcher only
-    // shows if something is wrong, because the ROM and the slot are both there before it starts.
+    // One cartridge slot per game, treated like the port's save.bin (notes/launcher.md, Saves).
     const string NativeplatSlotName = "nativemons";
     const int DsSaveBytes = 0x80000;
     static string NativeplatDir { get { return Path.GetDirectoryName(Config.Nativeplat); } }
@@ -5517,8 +6319,7 @@ class LauncherForm : Form {
         p.BeginOutputReadLine(); p.BeginErrorReadLine();
         Invalidate();
     }
-    // Gen1Recomp reads paths from the environment in the system's code page, which garbles accented names such as
-    // "Pokémon". Such a file goes in through a plain-named temporary copy. Dispose removes it.
+    // Gen1Recomp garbles accented paths from the environment, so such files go in as plain-named copies.
     internal sealed class PlainPath : IDisposable {
         public readonly string Path_; readonly string temp;
         public PlainPath(string file) {
@@ -5546,7 +6347,7 @@ class LauncherForm : Form {
     void JobEnded() {
         var p = job; job = null; int code = 0;
         try { p.WaitForExit(); code = p.ExitCode; p.Dispose(); } catch { }
-        if (jobIsGame) DiscordPresence.Stop();
+        if (jobIsGame) { DiscordPresence.Stop(); ReadClashes(); }
         if (gbaClosed) code = 0;
         watchGba = false; gbaClosed = false;
         if (!Visible) Show();
@@ -5608,6 +6409,7 @@ class LauncherForm : Form {
         // A tablet while Move Pokemon's boxes are anywhere in the page stack, a phone again once they've closed.
         MorphTowards(pages.Any(pg => pg.Boxes != null));
         if (BannerAge((float)clock.Elapsed.TotalSeconds) >= 0) dirty = true;
+        if (ClashShowing() && (float.IsNaN(clashAt) || (float)clock.Elapsed.TotalSeconds - clashAt < 0.4f)) dirty = true;
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
@@ -5641,6 +6443,7 @@ class LauncherForm : Form {
     bool scrolling;   // a grid is still gliding, so keep redrawing
     protected override void OnMouseWheel(MouseEventArgs e) {
         base.OnMouseWheel(e);
+        if (Morphing) return;
         if (job == null && e.Delta != 0) Act(e.Delta > 0 ? "up" : "down", false);
     }
     readonly List<KeyValuePair<RectangleF, int>> hits = new List<KeyValuePair<RectangleF, int>>();
@@ -5652,11 +6455,13 @@ class LauncherForm : Form {
     // No window frame, so dragging the shell moves the device.
     protected override void OnMouseDown(MouseEventArgs e) {
         base.OnMouseDown(e);
+        if (Morphing) return;
         if (PromptAt(e.Location) == null && BoxMouseDown(e)) return;
         if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
     }
     protected override void OnMouseUp(MouseEventArgs e) {
         base.OnMouseUp(e);
+        if (Morphing) return;
         BoxMouseUp(e);
     }
     protected override bool ShowWithoutActivation { get { return Native.Quiet; } }
@@ -5665,20 +6470,23 @@ class LauncherForm : Form {
     string PromptAt(Point pt) { foreach (var h in promptHits) if (h.Key.Contains(pt)) return h.Value; return null; }
     protected override void OnMouseMove(MouseEventArgs e) {
         base.OnMouseMove(e);
+        if (Morphing) return;
         string over = PromptAt(e.Location);
         if (over != hoverPrompt) { hoverPrompt = over; Cursor = over != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
         if (BoxMouseMove(e)) return;
         int i = HitAt(e.Location);
-        if (job == null && over != "N" && over != "NX" && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
+        if (job == null && over != "N" && over != "NX" && over != "C" && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
     }
     protected override void OnMouseClick(MouseEventArgs e) {
         base.OnMouseClick(e);
+        if (Morphing) return;
         string prompt = e.Button == MouseButtons.Left ? PromptAt(e.Location) : null;
         if (prompt == "M") { WindowState = FormWindowState.Minimized; return; }
         if (prompt == "X" && job == null) { Close(); return; }
         if (job != null) return;
         if (prompt == "NX") { bannerClosed = bannerBuild.ToString(); Config.Write("update-dismissed.txt", bannerClosed); Invalidate(); return; }
         if (prompt == "N") { bannerAt = -BannerSeconds * 2; OpenUpdates(); return; }
+        if (prompt == "C") { OpenClashes(); return; }
         if (prompt != null) {
             Act(prompt == "A" ? "ok" : prompt == "B" ? "back" : prompt == "U" ? "up" : prompt == "D" ? "down" : prompt == "L" ? "left" : prompt == "R" ? "right" : "", false);
             return;
@@ -5714,6 +6522,8 @@ class LauncherForm : Form {
         } else if (p.Items.Count > 0) {
             if (a == "ok") { var it = p.Items[p.Sel]; if (it.On && it.Run != null) it.Run(); }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
+            else if ((a == "left" && p.Items[p.Sel].Fold == 1) || (a == "right" && p.Items[p.Sel].Fold == 2)) p.Items[p.Sel].Run();
+            else if ((a == "left" || a == "right") && p.Items[p.Sel].Fold != 0) { }
             else if (p.Jump > 0 && a == "left") p.Sel = Math.Max(0, p.Sel - p.Jump);
             else if (p.Jump > 0 && a == "right") p.Sel = Math.Min(p.Items.Count - 1, p.Sel + p.Jump);
             else if (p.Body == null) p.Sel = PageGridMove(p.Sel, a, p.Items.Count, 1);
@@ -5742,8 +6552,7 @@ class LauncherForm : Form {
     }
 
     // ---------- drawing ----------
-    // nativeMons' own look: a handheld field device (lens and status lights on a coloured shell) showing retro cream
-    // dialog boxes with a menu cursor, over a dim tiled floor. The shell takes the colour of the selected version.
+    // A handheld device in the selected version's colour, showing cream dialog boxes.
     static readonly Color Cream = Color.FromArgb(250, 246, 230), CreamDim = Color.FromArgb(218, 214, 198), Line = Color.FromArgb(38, 42, 54);
     static readonly Color Text1 = Color.FromArgb(38, 40, 50), Text2 = Color.FromArgb(92, 94, 106), Text3 = Color.FromArgb(150, 148, 136);
     static readonly Color FootInk = Color.FromArgb(196, 202, 214);
@@ -5751,7 +6560,11 @@ class LauncherForm : Form {
 
     // Set while a loading Poke Ball is on screen, so the window keeps redrawing and it turns.
     bool spinning;
-    protected override void OnPaint(PaintEventArgs ev) { spinning = false; Render(ev.Graphics, ClientSize.Width, ClientSize.Height); Outro(ev.Graphics, ClientSize.Width, ClientSize.Height); }
+    protected override void OnPaint(PaintEventArgs ev) {
+        spinning = false;
+        if (drawW > 0) { ev.Graphics.TranslateTransform(drawX, 0); Render(ev.Graphics, drawW, ClientSize.Height); return; }
+        Render(ev.Graphics, ClientSize.Width, ClientSize.Height); Outro(ev.Graphics, ClientSize.Width, ClientSize.Height);
+    }
 
     string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
@@ -5771,6 +6584,234 @@ class LauncherForm : Form {
             using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(r, top, bottom, 90f)) g.FillPath(b, path);
             if (edgeW > 0) using (var pen = new Pen(edge, edgeW)) g.DrawPath(pen, path);
         }
+    }
+    // A glossy key like the shell's own: its colour top to bottom, a soft shine on the upper half and a darker rim.
+    static void GlossTile(Graphics g, RectangleF r, float rad, Color c) {
+        Card(g, r, rad, Mix(c, Color.White, 0.18f), Mix(c, Color.Black, 0.14f), Color.Empty, 0);
+        using (var path = Round(r, rad)) {
+            var st = g.Save();
+            g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            var shine = new RectangleF(r.X - r.Width * 0.2f, r.Y - r.Height * 0.62f, r.Width * 1.4f, r.Height * 1.08f);
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(shine, Color.FromArgb(80, 255, 255, 255), Color.FromArgb(6, 255, 255, 255), 90f)) g.FillEllipse(b, shine);
+            g.Restore(st);
+            using (var pen = new Pen(Mix(c, Color.Black, 0.35f), Math.Max(1f, r.Width * 0.018f))) g.DrawPath(pen, path);
+        }
+    }
+    static readonly Color Ink = Color.FromArgb(40, 36, 52);
+    // The home screen's app icons, drawn in the games' menu style: chunky dark outlines over two-tone fills. Original shapes.
+    static void AppArt(Graphics g, int app, RectangleF r, Color tile) {
+        float s = r.Width, lw = Math.Max(1.5f, s * 0.045f);
+        Func<float, float, PointF> P = (x, y) => new PointF(r.X + x * s, r.Y + y * s);
+        Func<float, float, float, float, RectangleF> R = (x, y, w2, h2) => new RectangleF(r.X + x * s, r.Y + y * s, w2 * s, h2 * s);
+        var st = g.Save();
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var ink = new Pen(Ink, lw) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round, StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) {
+            switch (AppNames[app]) {
+                case "Games": Ball(g, P(0.5f, 0.5f), s * 0.33f, ink); break;
+                case "Collection": {
+                    var body = R(0.22f, 0.15f, 0.56f, 0.7f);
+                    using (var path = Round(body, s * 0.07f)) {
+                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(body, Color.FromArgb(240, 70, 64), Color.FromArgb(186, 30, 36), 90f)) g.FillPath(b, path);
+                        using (var b = new SolidBrush(Color.FromArgb(150, 20, 26))) g.FillRectangle(b, R(0.22f, 0.15f, 0.07f, 0.7f));
+                        g.DrawPath(ink, path);
+                    }
+                    g.DrawLine(ink, P(0.29f, 0.17f), P(0.29f, 0.83f));
+                    var lens = R(0.35f, 0.21f, 0.2f, 0.2f);
+                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(lens, Color.FromArgb(120, 200, 255), Color.FromArgb(30, 100, 210), 60f)) g.FillEllipse(b, lens);
+                    g.FillEllipse(Brushes.White, R(0.39f, 0.25f, 0.06f, 0.06f));
+                    g.DrawEllipse(ink, lens);
+                    var lights = new[] { Color.FromArgb(255, 90, 80), Color.FromArgb(255, 214, 64), Color.FromArgb(90, 210, 110) };
+                    for (int k = 0; k < 3; k++) { var dot = R(0.59f + k * 0.055f, 0.24f, 0.04f, 0.04f); using (var b = new SolidBrush(lights[k])) g.FillEllipse(b, dot); }
+                    var screen = R(0.34f, 0.5f, 0.36f, 0.25f);
+                    using (var path = Round(screen, s * 0.03f)) { using (var b = new SolidBrush(Color.FromArgb(206, 240, 228))) g.FillPath(b, path); g.DrawPath(ink, path); }
+                    using (var pen = new Pen(Color.FromArgb(120, 170, 150), lw * 0.6f)) { g.DrawLine(pen, P(0.39f, 0.58f), P(0.6f, 0.58f)); g.DrawLine(pen, P(0.39f, 0.66f), P(0.54f, 0.66f)); }
+                    break;
+                }
+                case "Mods": {
+                    var disc = R(0.15f, 0.15f, 0.7f, 0.7f);
+                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(disc, Color.FromArgb(250, 251, 255), Color.FromArgb(160, 168, 186), 45f)) g.FillEllipse(b, disc);
+                    using (var pen = new Pen(Color.FromArgb(150, 255, 255, 255), lw * 1.2f)) g.DrawArc(pen, R(0.22f, 0.22f, 0.56f, 0.56f), 200, 60);
+                    var label = R(0.31f, 0.31f, 0.38f, 0.38f);
+                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(label, Mix(tile, Color.White, 0.35f), Mix(tile, Color.Black, 0.15f), 90f)) g.FillEllipse(b, label);
+                    g.DrawEllipse(ink, label);
+                    var hole = R(0.44f, 0.44f, 0.12f, 0.12f);
+                    using (var b = new SolidBrush(Mix(tile, Color.Black, 0.45f))) g.FillEllipse(b, hole);
+                    g.DrawEllipse(ink, hole);
+                    g.DrawEllipse(ink, disc);
+                    Sparkle(g, P(0.8f, 0.2f), s * 0.09f);
+                    break;
+                }
+                case "ROMs": {
+                    var body = new System.Drawing.Drawing2D.GraphicsPath();
+                    body.AddLines(new[] { P(0.24f, 0.2f), P(0.6f, 0.2f), P(0.68f, 0.28f), P(0.76f, 0.28f), P(0.76f, 0.82f), P(0.24f, 0.82f) });
+                    body.CloseFigure();
+                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(R(0.24f, 0.2f, 0.52f, 0.62f), Color.FromArgb(232, 234, 240), Color.FromArgb(158, 164, 178), 90f)) g.FillPath(b, body);
+                    var label = R(0.31f, 0.33f, 0.38f, 0.3f);
+                    using (var path = Round(label, s * 0.025f)) {
+                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(label, Mix(tile, Color.White, 0.3f), Mix(tile, Color.Black, 0.12f), 90f)) g.FillPath(b, path);
+                        g.DrawPath(ink, path);
+                    }
+                    using (var thin = new Pen(Ink, lw * 0.7f)) Ball(g, P(0.5f, 0.48f), s * 0.08f, thin);
+                    for (int k = 0; k < 5; k++) g.DrawLine(ink, P(0.33f + k * 0.085f, 0.72f), P(0.33f + k * 0.085f, 0.78f));
+                    g.DrawPath(ink, body);
+                    body.Dispose();
+                    break;
+                }
+                case "Move": {
+                    Ball(g, P(0.3f, 0.62f), s * 0.16f, ink);
+                    Ball(g, P(0.7f, 0.62f), s * 0.16f, ink);
+                    var arc = new System.Drawing.Drawing2D.GraphicsPath();
+                    arc.AddBezier(P(0.3f, 0.38f), P(0.36f, 0.12f), P(0.64f, 0.12f), P(0.7f, 0.36f));
+                    var head = new[] { P(0.61f, 0.3f), P(0.705f, 0.4f), P(0.77f, 0.28f) };
+                    using (var back = new Pen(Ink, lw * 3f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) { g.DrawPath(back, arc); g.DrawLines(back, head); }
+                    using (var front = new Pen(Color.White, lw * 1.4f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) { g.DrawPath(front, arc); g.DrawLines(front, head); }
+                    arc.Dispose();
+                    break;
+                }
+                case "Settings": {
+                    var gear = new System.Drawing.Drawing2D.GraphicsPath();
+                    var pts = new List<PointF>(); var c0 = P(0.5f, 0.5f);
+                    for (int k = 0; k < 8; k++) {
+                        double a = k * Math.PI / 4;
+                        foreach (var off in new[] { -0.24, -0.13, 0.13, 0.24 }) {
+                            double ang = a + off * 0.95; float rr = Math.Abs(off) < 0.2 ? 0.35f : 0.27f;
+                            pts.Add(new PointF(c0.X + (float)Math.Cos(ang) * rr * s, c0.Y + (float)Math.Sin(ang) * rr * s));
+                        }
+                    }
+                    gear.AddPolygon(pts.ToArray());
+                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(R(0.15f, 0.15f, 0.7f, 0.7f), Color.FromArgb(252, 252, 255), Color.FromArgb(184, 190, 204), 90f)) g.FillPath(b, gear);
+                    g.DrawPath(ink, gear);
+                    var hole = R(0.39f, 0.39f, 0.22f, 0.22f);
+                    using (var b = new SolidBrush(Mix(tile, Color.Black, 0.3f))) g.FillEllipse(b, hole);
+                    g.DrawEllipse(ink, hole);
+                    gear.Dispose();
+                    break;
+                }
+                case "Exit": {
+                    var ring = R(0.24f, 0.26f, 0.52f, 0.52f);
+                    using (var back = new Pen(Ink, lw * 3.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawArc(back, ring, -60, 300); g.DrawLine(back, P(0.5f, 0.17f), P(0.5f, 0.47f)); }
+                    using (var front = new Pen(Color.FromArgb(255, 118, 110), lw * 1.5f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawArc(front, ring, -60, 300); g.DrawLine(front, P(0.5f, 0.17f), P(0.5f, 0.47f)); }
+                    break;
+                }
+            }
+        }
+        g.Restore(st);
+    }
+    // The list rows' common icons in the same style: white stickers with a dark outline. False: draw the glyph instead.
+    static bool RowArt(Graphics g, char icon, RectangleF r, Color tint) {
+        switch (icon) {
+            case '': AppArt(g, 6, r, tint); return true;
+            case '': AppArt(g, 2, r, tint); return true;
+            case '': AppArt(g, 3, r, tint); return true;
+        }
+        float s = r.Width;
+        Func<float, float, PointF> P = (x, y) => new PointF(r.X + x * s, r.Y + y * s);
+        var lines = new List<PointF[]>(); System.Drawing.Drawing2D.GraphicsPath fill = null; Color fillColor = Color.White; Action extra = null;
+        switch (icon) {
+            case '': fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddPolygon(new[] { P(0.38f, 0.26f), P(0.76f, 0.5f), P(0.38f, 0.74f) }); break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddLines(new[] { P(0.22f, 0.26f), P(0.78f, 0.26f), P(0.78f, 0.62f), P(0.46f, 0.62f), P(0.32f, 0.76f), P(0.34f, 0.62f), P(0.22f, 0.62f) }); fill.CloseFigure();
+                extra = delegate { using (var pen = new Pen(Ink, Math.Max(1f, s * 0.05f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawLine(pen, P(0.32f, 0.38f), P(0.68f, 0.38f)); g.DrawLine(pen, P(0.32f, 0.5f), P(0.56f, 0.5f)); } }; break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddRectangle(new RectangleF(r.X + s * 0.18f, r.Y + s * 0.32f, s * 0.64f, s * 0.38f));
+                extra = delegate { using (var b = new SolidBrush(Ink)) { for (int row = 0; row < 2; row++) for (int k = 0; k < 4; k++) g.FillRectangle(b, r.X + s * (0.26f + k * 0.13f), r.Y + s * (0.39f + row * 0.1f), s * 0.07f, s * 0.06f); g.FillRectangle(b, r.X + s * 0.32f, r.Y + s * 0.6f, s * 0.36f, s * 0.05f); } }; break;
+            case '': case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddLines(new[] { P(0.2f, 0.36f), P(0.36f, 0.36f), P(0.41f, 0.28f), P(0.59f, 0.28f), P(0.64f, 0.36f), P(0.8f, 0.36f), P(0.8f, 0.74f), P(0.2f, 0.74f) }); fill.CloseFigure();
+                extra = delegate { var lens = new RectangleF(r.X + s * 0.37f, r.Y + s * 0.42f, s * 0.26f, s * 0.26f); using (var b = new SolidBrush(Color.FromArgb(70, 140, 230))) g.FillEllipse(b, lens); using (var pen = new Pen(Ink, Math.Max(1.2f, s * 0.06f))) g.DrawEllipse(pen, lens); g.FillEllipse(Brushes.White, lens.X + lens.Width * 0.2f, lens.Y + lens.Height * 0.2f, lens.Width * 0.28f, lens.Height * 0.28f); }; break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddPolygon(new[] { P(0.56f, 0.18f), P(0.28f, 0.56f), P(0.47f, 0.56f), P(0.4f, 0.82f), P(0.72f, 0.42f), P(0.53f, 0.42f) });
+                fillColor = Color.FromArgb(255, 214, 52); break;
+            case '': lines.Add(new[] { P(0.33f, 0.33f), P(0.67f, 0.67f) }); lines.Add(new[] { P(0.67f, 0.33f), P(0.33f, 0.67f) }); break;
+            case '': lines.Add(new[] { P(0.27f, 0.52f), P(0.43f, 0.68f), P(0.73f, 0.34f) }); break;
+            case '': lines.Add(new[] { P(0.5f, 0.27f), P(0.5f, 0.73f) }); lines.Add(new[] { P(0.27f, 0.5f), P(0.73f, 0.5f) }); break;
+            case '': case '':
+                lines.Add(new[] { P(0.5f, 0.24f), P(0.5f, 0.56f) }); lines.Add(new[] { P(0.37f, 0.45f), P(0.5f, 0.58f), P(0.63f, 0.45f) });
+                lines.Add(new[] { P(0.27f, 0.62f), P(0.27f, 0.74f), P(0.73f, 0.74f), P(0.73f, 0.62f) }); break;
+            case '':
+                lines.Add(new[] { P(0.5f, 0.58f), P(0.5f, 0.26f) }); lines.Add(new[] { P(0.37f, 0.37f), P(0.5f, 0.24f), P(0.63f, 0.37f) });
+                lines.Add(new[] { P(0.27f, 0.62f), P(0.27f, 0.74f), P(0.73f, 0.74f), P(0.73f, 0.62f) }); break;
+            case '':
+                lines.Add(new[] { P(0.27f, 0.39f), P(0.71f, 0.39f) }); lines.Add(new[] { P(0.6f, 0.29f), P(0.72f, 0.39f), P(0.6f, 0.49f) });
+                lines.Add(new[] { P(0.73f, 0.61f), P(0.29f, 0.61f) }); lines.Add(new[] { P(0.4f, 0.51f), P(0.28f, 0.61f), P(0.4f, 0.71f) }); break;
+            case '': {
+                var arc = new List<PointF>();
+                for (int k = 0; k <= 10; k++) { double a = (-20 + k * 25) * Math.PI / 180; arc.Add(P(0.5f + 0.21f * (float)Math.Cos(a), 0.5f + 0.21f * (float)Math.Sin(a))); }
+                lines.Add(arc.ToArray());
+                // A solid head at the arc's end, pointing along it.
+                double ea = (-20 + 250) * Math.PI / 180, tx = -Math.Sin(ea), ty = Math.Cos(ea);
+                var tip = P(0.5f + 0.21f * (float)Math.Cos(ea) + 0.13f * (float)tx, 0.5f + 0.21f * (float)Math.Sin(ea) + 0.13f * (float)ty);
+                var bl = P(0.5f + 0.33f * (float)Math.Cos(ea), 0.5f + 0.33f * (float)Math.Sin(ea));
+                var br = P(0.5f + 0.09f * (float)Math.Cos(ea), 0.5f + 0.09f * (float)Math.Sin(ea));
+                extra = delegate { var head = new[] { tip, bl, br }; g.FillPolygon(Brushes.White, head); using (var pen = new Pen(Ink, Math.Max(1.2f, s * 0.06f)) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) g.DrawPolygon(pen, head); };
+                break;
+            }
+            case '':
+                lines.Add(new[] { P(0.5f, 0.46f), P(0.5f, 0.72f) });
+                extra = delegate { float d = s * 0.13f; var c = P(0.5f, 0.3f); using (var b = new SolidBrush(Ink)) g.FillEllipse(b, c.X - d * 0.8f, c.Y - d * 0.8f, d * 1.6f, d * 1.6f); g.FillEllipse(Brushes.White, c.X - d / 2, c.Y - d / 2, d, d); }; break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddPolygon(new[] { P(0.62f, 0.22f), P(0.78f, 0.38f), P(0.42f, 0.74f), P(0.24f, 0.78f), P(0.28f, 0.6f) });
+                fillColor = Color.FromArgb(255, 206, 72);
+                lines.Add(new[] { P(0.54f, 0.3f), P(0.7f, 0.46f) }); break;
+            case '': case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddPolygon(new[] { P(0.22f, 0.3f), P(0.42f, 0.3f), P(0.48f, 0.37f), P(0.78f, 0.37f), P(0.78f, 0.73f), P(0.22f, 0.73f) });
+                fillColor = Color.FromArgb(255, 210, 92); break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddPolygon(new[] { P(0.5f, 0.2f), P(0.8f, 0.76f), P(0.2f, 0.76f) });
+                fillColor = Color.FromArgb(255, 214, 60);
+                extra = delegate { using (var pen = new Pen(Ink, Math.Max(1.5f, s * 0.08f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) g.DrawLine(pen, P(0.5f, 0.4f), P(0.5f, 0.57f)); var c = P(0.5f, 0.67f); float d = s * 0.08f; using (var b = new SolidBrush(Ink)) g.FillEllipse(b, c.X - d / 2, c.Y - d / 2, d, d); }; break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddPolygon(new[] { P(0.3f, 0.34f), P(0.7f, 0.34f), P(0.65f, 0.76f), P(0.35f, 0.76f) });
+                lines.Add(new[] { P(0.24f, 0.31f), P(0.76f, 0.31f) }); lines.Add(new[] { P(0.42f, 0.24f), P(0.58f, 0.24f) });
+                extra = delegate { using (var pen = new Pen(Ink, Math.Max(1f, s * 0.045f))) { g.DrawLine(pen, P(0.45f, 0.43f), P(0.45f, 0.67f)); g.DrawLine(pen, P(0.55f, 0.43f), P(0.55f, 0.67f)); } }; break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath();
+                fill.AddArc(r.X + s * 0.16f, r.Y + s * 0.34f, s * 0.3f, s * 0.36f, 90, 180); fill.AddArc(r.X + s * 0.54f, r.Y + s * 0.34f, s * 0.3f, s * 0.36f, 270, 180); fill.CloseFigure();
+                extra = delegate {
+                    using (var pen = new Pen(Ink, Math.Max(1.2f, s * 0.06f))) { g.DrawLine(pen, P(0.25f, 0.52f), P(0.39f, 0.52f)); g.DrawLine(pen, P(0.32f, 0.45f), P(0.32f, 0.59f)); }
+                    float d = s * 0.08f;
+                    using (var b = new SolidBrush(Color.FromArgb(236, 64, 60))) g.FillEllipse(b, r.X + s * 0.64f - d / 2, r.Y + s * 0.47f - d / 2, d, d);
+                    using (var b = new SolidBrush(Color.FromArgb(52, 120, 232))) g.FillEllipse(b, r.X + s * 0.72f - d / 2, r.Y + s * 0.56f - d / 2, d, d);
+                }; break;
+            case '':
+                fill = new System.Drawing.Drawing2D.GraphicsPath(); fill.AddRectangle(new RectangleF(r.X + s * 0.28f, r.Y + s * 0.22f, s * 0.44f, s * 0.56f));
+                lines.Add(new[] { P(0.36f, 0.22f), P(0.36f, 0.78f) });
+                extra = delegate { using (var b = new SolidBrush(Color.FromArgb(236, 64, 60))) g.FillPolygon(b, new[] { P(0.55f, 0.22f), P(0.65f, 0.22f), P(0.65f, 0.46f), P(0.6f, 0.41f), P(0.55f, 0.46f) }); }; break;
+            default: return false;
+        }
+        var st = g.Save();
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        float back = Math.Max(3f, s * 0.17f), front = Math.Max(1.5f, s * 0.09f);
+        Func<float, Color, Pen> pen0 = (wd, c) => new Pen(c, wd) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round };
+        if (fill != null) {
+            using (var b = new SolidBrush(fillColor)) g.FillPath(b, fill);
+            using (var pen = pen0(Math.Max(1.2f, s * 0.06f), Ink)) g.DrawPath(pen, fill);
+            fill.Dispose();
+        }
+        if (lines.Count > 0) {
+            using (var pen = pen0(back, Ink)) foreach (var l in lines) g.DrawLines(pen, l);
+            using (var pen = pen0(front, Color.White)) foreach (var l in lines) g.DrawLines(pen, l);
+        }
+        if (extra != null) extra();
+        g.Restore(st);
+        return true;
+    }
+    // A Poke Ball: red over white, the dark band and its button, with a glint.
+    static void Ball(Graphics g, PointF c, float rad, Pen ink) {
+        var box = new RectangleF(c.X - rad, c.Y - rad, rad * 2, rad * 2);
+        g.FillEllipse(Brushes.White, box);
+        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(box, Color.FromArgb(250, 84, 72), Color.FromArgb(196, 28, 30), 90f)) g.FillPie(b, box.X, box.Y, box.Width, box.Height, 180, 180);
+        using (var b = new SolidBrush(Color.FromArgb(70, 150, 158, 178))) g.FillPie(b, box.X + rad * 0.12f, box.Y, box.Width - rad * 0.24f, box.Height, 25, 130);
+        using (var band = new Pen(Ink, Math.Max(1.2f, rad * 0.2f))) g.DrawLine(band, c.X - rad, c.Y, c.X + rad, c.Y);
+        g.DrawEllipse(ink, box);
+        float br = rad * 0.32f;
+        var btn = new RectangleF(c.X - br, c.Y - br, br * 2, br * 2);
+        g.FillEllipse(Brushes.White, btn);
+        g.DrawEllipse(ink, btn);
+        using (var b = new SolidBrush(Color.FromArgb(150, 255, 255, 255))) g.FillEllipse(b, c.X - rad * 0.62f, c.Y - rad * 0.72f, rad * 0.4f, rad * 0.26f);
+    }
+    static void Sparkle(Graphics g, PointF c, float r) {
+        var pts = new[] { new PointF(c.X, c.Y - r), new PointF(c.X + r * 0.25f, c.Y - r * 0.25f), new PointF(c.X + r, c.Y), new PointF(c.X + r * 0.25f, c.Y + r * 0.25f), new PointF(c.X, c.Y + r), new PointF(c.X - r * 0.25f, c.Y + r * 0.25f), new PointF(c.X - r, c.Y), new PointF(c.X - r * 0.25f, c.Y - r * 0.25f) };
+        g.FillPolygon(Brushes.White, pts);
     }
     static Color Fade(Color c, int alpha) { return Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), c.R, c.G, c.B); }
     static Color Mix(Color a, Color b, float k) { return Color.FromArgb((int)(a.R + (b.R - a.R) * k), (int)(a.G + (b.G - a.G) * k), (int)(a.B + (b.B - a.B) * k)); }
@@ -5792,8 +6833,7 @@ class LauncherForm : Form {
         return current != null ? current.Theme : Theme.Default;
     }
 
-    // A surface in a version's colours, with a small scene that nods to that game. All original shapes, no game art.
-    // The scene is drawn once per size and kept as a picture; only the few things that move are drawn each frame.
+    // A surface in a version's colours with a small original scene, cached. Only the moving parts redraw.
     class FillLayer { public Bitmap Picture; public PointF[] Sparks = new PointF[0]; }
     static readonly Dictionary<string, FillLayer> fillCache = new Dictionary<string, FillLayer>();
     static FillLayer LayerFor(int w, int h, Theme th) {
@@ -6217,10 +7257,7 @@ class LauncherForm : Form {
             x += d * 1.45f;
         }
     }
-    // A generic cartridge in the version's colour, `len` px wide with its top left at (x, y).
-    // The working screen's spinner: a Poke Ball turning once every 2 s while its top half runs through the rainbow in the
-    // same time, after the "Updating" page on pogo.hails.app (hailsDotGO, static/maintenance.html). Drawn on a 64-unit grid
-    // like that page's SVG; its edges are dark here, as this screen is light.
+    // The working screen's spinner, after pogo.hails.app's "Updating" page (notes/launcher.md, Pictures).
     static readonly Color[] Rainbow = { Color.FromArgb(255, 0, 0), Color.FromArgb(255, 136, 0), Color.FromArgb(255, 255, 0), Color.FromArgb(0, 204, 0), Color.FromArgb(0, 102, 255), Color.FromArgb(136, 0, 255) };
     static Color RainbowAt(float t) {
         float k = (t / 2f % 1f) * Rainbow.Length;
@@ -6286,36 +7323,56 @@ class LauncherForm : Form {
         float pm = PhoneW(h) * 0.06f, e = TabletEase;
         return new RectangleF(pm, h * 0.115f, w - 2 * pm, h * (0.665f + 0.18f * e));
     }
-    // Tablet mode, for Move Pokemon: the device opens out sideways into a tablet Pokedex, one wide screen with no D-pad,
-    // so two games' boxes sit side by side at a size that's easy to see, and folds back to the phone when the boxes close.
-    // It moves smoothly both ways: the case widens from its centre, the screen grows and the controls slide away.
-    // Text stays its phone size; the shell's parts keep the phone's proportions.
+    // Tablet mode for Move Pokemon (notes/launcher.md, Window).
     float tabletK, tabletLast; int phoneW, tabletW, morphCentre;
     bool tablet { get { return tabletK > 0; } }
     float TabletEase { get { float k = tabletK; return k * k * (3 - 2 * k); } }
     int PhoneW(int h) { return phoneW > 0 ? phoneW : h * 60 / 100; }
+    // The window resizes once per fold. In between, only the drawn device changes, so it never judders.
+    int drawX, drawW;
+    bool Morphing { get { return tabletK > 0 && tabletK < 1; } }
     void MorphTowards(bool on) {
         float target = on ? 1 : 0, now = (float)clock.Elapsed.TotalSeconds;
         if (tabletK == target) { tabletLast = now; return; }
         if (phoneW == 0) phoneW = ClientSize.Width;
+        var area = Screen.FromControl(this).WorkingArea;
+        int h = ClientSize.Height;
         if (tabletK == 0 || tabletK == 1) {
             // Starting out: where it opens from, and how wide it gets on this screen.
             morphCentre = Left + Width / 2;
-            var area = Screen.FromControl(this).WorkingArea;
-            tabletW = Math.Max(phoneW, Math.Min(area.Width * 94 / 100, ClientSize.Height * 3 / 2));
+            if (tabletK == 0) {
+                tabletW = Math.Max(phoneW, Math.Min(area.Width * 94 / 100, h * 3 / 2));
+                int left = Math.Max(area.Left, Math.Min(area.Right - tabletW, morphCentre - tabletW / 2));
+                drawW = phoneW; drawX = Left - left;
+                // One change of the window, before anything moves: its final place and size, showing only the phone.
+                SetBounds(left, Top, tabletW, h);
+                SetMorphRegion(drawX, drawW, h);
+                Refresh();
+            }
             tabletLast = now - 0.016f;   // the first step counts one tick, so it gets going
         }
-        float step = Math.Min(0.1f, Math.Max(0f, now - tabletLast)) / 0.35f;
+        float step = Math.Min(0.05f, Math.Max(0f, now - tabletLast)) / 0.35f;
         tabletLast = now;
         tabletK = on ? Math.Min(1f, tabletK + step) : Math.Max(0f, tabletK - step);
-        int h = ClientSize.Height, w = (int)Math.Round(phoneW + (tabletW - phoneW) * TabletEase);
-        var area2 = Screen.FromControl(this).WorkingArea;
-        SuspendLayout();
-        ClientSize = new Size(w, h);
-        Location = new Point(Math.Max(area2.Left, Math.Min(area2.Right - Width, morphCentre - Width / 2)), Top);
-        using (var outline = Round(new RectangleF(0, 0, w, h), CornerRadius(phoneW))) Region = new Region(outline);
-        ResumeLayout(false);
+        int w = (int)Math.Round(phoneW + (tabletW - phoneW) * TabletEase);
+        // It widens from (and narrows back to) the phone's centre, kept inside the window.
+        drawW = w;
+        drawX = Math.Max(0, Math.Min(ClientSize.Width - w, morphCentre - Left - w / 2));
+        if (tabletK == 0) {
+            // Folded: the window becomes the phone again, where the phone now is.
+            int left = Left + drawX;
+            drawX = 0; drawW = 0;
+            SetBounds(left, Top, phoneW, h);
+            SetMorphRegion(0, phoneW, h);
+            Refresh();
+            return;
+        } else if (tabletK == 1) { drawX = 0; drawW = 0; SetMorphRegion(0, ClientSize.Width, h); }
+        else SetMorphRegion(drawX, w, h);
+        if (TestLog != null) try { File.AppendAllText(TestLog, "morph " + ((int)(now * 1000)) + " ms k=" + tabletK.ToString("0.000") + " w=" + w + " x=" + drawX + Environment.NewLine); } catch { }
         Invalidate();
+    }
+    void SetMorphRegion(int x, int w, int h) {
+        using (var outline = Round(new RectangleF(x, 0, w, h), CornerRadius(phoneW))) Region = new Region(outline);
     }
     void TabletShell(Graphics g, int w, int h, Theme th, float t) {
         int pw = PhoneW(h);
@@ -6481,6 +7538,10 @@ class LauncherForm : Form {
             int depth = job != null ? pages.Count + 1 : pages.Count;
             screenDir = depth >= screenDepth ? 1 : -1;
             screenKey = key; screenDepth = depth; screenAt = t;
+            // Leaving the mods pages: what was switched there may have started or ended a clash.
+            bool inMods = pages.Any(x => x.Mods);
+            if (wasInMods && !inMods) ReadClashes();
+            wasInMods = inMods;
         }
         float ease = Ease((t - screenAt) / 0.18f);
         var content = g.Save();
@@ -6494,12 +7555,12 @@ class LauncherForm : Form {
         }
         g.Restore(content);
         StatusBar(g, w, h, home ? Color.White : PhoneText);
-        UpdateBanner(g, w, h, t);
+        float below = ClashBanner(g, w, h, t);
+        UpdateBanner(g, w, h, t, below);
         float barW = w * 0.34f, barH = Math.Max(3f, h * 0.0065f);
         using (var path = Round(new RectangleF((w - barW) / 2, h - barH * 2.4f, barW, barH), barH / 2)) using (var b = new SolidBrush(home ? Color.White : PhoneText)) g.FillPath(b, path);
     }
-    // A phone-style notice: it slides in over the screen and leaves by itself. It takes no keys or focus, makes no sound and
-    // installs nothing. Clicking it opens Updates, which still asks. Closing it hides that build for good; a newer one shows again.
+    // Update notice: slides in, leaves after 8 s and takes no focus. Closing it hides that build for good.
     const float BannerSeconds = 8f;
     int bannerBuild; float bannerAt; string bannerClosed;
     float BannerAge(float t) {
@@ -6513,27 +7574,79 @@ class LauncherForm : Form {
         float age = t - bannerAt;
         return age <= BannerSeconds ? age : -1;
     }
-    void UpdateBanner(Graphics g, int w, int h, float t) {
+    // below: how far down the clash banner reaches, so this one sits under it.
+    void UpdateBanner(Graphics g, int w, int h, float t, float below) {
         float age = BannerAge(t);
         if (age < 0) return;
         float show = Math.Min(Ease(age / 0.28f), Ease((BannerSeconds - age) / 0.28f));
-        float m = w * 0.03f, bh = h * 0.092f, y = h * 0.052f - (1 - show) * (bh + h * 0.06f), rad = bh * 0.26f;
-        var r = new RectangleF(m, y, w - 2 * m, bh);
-        using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.005f, r.Width, r.Height), rad)) using (var b = new SolidBrush(Color.FromArgb((int)(55 * show), 0, 0, 0))) g.FillPath(b, shadow);
+        // A pill as wide as its text.
+        string text = "Build " + bannerBuild + " is ready";
+        float bh = h * 0.056f, y = Math.Max(h * 0.052f, below) - (1 - show) * (bh + h * 0.06f), rad = bh / 2;
+        float pad = bh * 0.16f, size = bh - 2 * pad, close = bh * 0.8f;
+        float textW = g.MeasureString(text, smallBold).Width + pad;
+        float bw = Math.Min(w * 0.9f, pad + size + pad * 1.4f + textW + close);
+        var r = new RectangleF((w - bw) / 2, y, bw, bh);
+        using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.004f, r.Width, r.Height), rad)) using (var b = new SolidBrush(Color.FromArgb((int)(55 * show), 0, 0, 0))) g.FillPath(b, shadow);
         using (var body = Round(r, rad)) using (var b = new SolidBrush(Color.FromArgb((int)(248 * show), 252, 252, 254))) g.FillPath(b, body);
-        float pad = bh * 0.17f, size = bh - 2 * pad;
         var icon = new RectangleF(r.X + pad, r.Y + pad, size, size);
-        Card(g, icon, size * 0.24f, Color.FromArgb(52, 134, 240), Color.FromArgb(30, 104, 214), Color.Empty, 0);
+        Card(g, icon, size / 2, Color.FromArgb(52, 134, 240), Color.FromArgb(30, 104, 214), Color.Empty, 0);
         Write(g, "\uE895", iconSmall, Color.White, icon, StringAlignment.Center, StringAlignment.Center, false);
-        float x = icon.Right + pad, close = bh * 0.56f, textW = r.Right - x - close - pad * 0.5f, line = bh * 0.34f, ty = r.Y + (bh - 2 * line) / 2;
-        Write(g, "Update available", smallBold, PhoneText, new RectangleF(x, ty, textW, line), StringAlignment.Near, StringAlignment.Center, false);
-        Write(g, "Build " + bannerBuild + " is ready. Click to see it.", smallFont, PhoneSub, new RectangleF(x, ty + line, textW, line), StringAlignment.Near, StringAlignment.Center, false);
+        float x = icon.Right + pad * 1.4f;
+        Write(g, text, smallBold, PhoneText, new RectangleF(x, r.Y, r.Right - close - x, bh), StringAlignment.Near, StringAlignment.Center, false);
         var x1 = new RectangleF(r.Right - close, r.Y + (bh - close) / 2, close, close);
         float cross = close * 0.14f, cx = x1.X + close / 2, cy = x1.Y + close / 2;
-        using (var pen = new Pen(hoverPrompt == "NX" ? PhoneText : PhoneSub, Math.Max(1.5f, w * 0.004f))) { g.DrawLine(pen, cx - cross, cy - cross, cx + cross, cy + cross); g.DrawLine(pen, cx - cross, cy + cross, cx + cross, cy - cross); }
+        using (var pen = new Pen(hoverPrompt == "NX" ? PhoneText : PhoneSub, Math.Max(1.5f, h * 0.0024f))) { g.DrawLine(pen, cx - cross, cy - cross, cx + cross, cy + cross); g.DrawLine(pen, cx - cross, cy + cross, cx + cross, cy - cross); }
         // The close button first: the first match wins.
         promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(x1.X + screenX, x1.Y + screenY, x1.Width, x1.Height), "NX"));
         promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(r.X + screenX, r.Y + screenY, r.Width, r.Height), "N"));
+    }
+    // Clashes across the Gen1Recomp games, read in the background, since each read starts the engine.
+    GameEntry clashGame; int clashCount; float clashAt = float.NaN; bool clashReading, clashAgain, wasInMods;
+    void ReadClashes() {
+        if (!IsHandleCreated) return;
+        if (clashReading) { clashAgain = true; return; }
+        clashReading = true;
+        var games = Library.Games.Where(x => x.OnGen1).ToList();
+        Task.Run(() => {
+            GameEntry first = null; int n = 0;
+            foreach (var mg in games) {
+                try { int c = ModClashes.Read(mg).Count(x => x.Active); if (c > 0) { n += c; if (first == null) first = mg; } } catch { }
+            }
+            return Tuple.Create(first, n);
+        }).ContinueWith(task => BeginInvoke((Action)delegate {
+            clashReading = false;
+            clashGame = task.Result.Item1; clashCount = task.Result.Item2; Invalidate();
+            if (clashAgain) { clashAgain = false; ReadClashes(); }
+        }));
+    }
+    bool ClashShowing() { return clashGame != null && !starting && job == null && !pages.Any(x => x.Mods); }
+    void OpenClashes() {
+        var mg = clashGame;
+        if (mg == null) return;
+        Busy("Reading mods", null, delegate(string e) { pages.Push(ModsPage(mg)); pages.Push(ClashesPage(mg, null)); });
+    }
+    // Red and sticky until the clash is settled. Hidden on the Mods pages (notes/launcher.md, Mods).
+    // Returns how far down it reaches, or 0.
+    float ClashBanner(Graphics g, int w, int h, float t) {
+        if (!ClashShowing()) { clashAt = float.NaN; return 0; }
+        if (float.IsNaN(clashAt)) clashAt = t;
+        float show = Ease((t - clashAt) / 0.28f);
+        string text = "Mods are clashing and may cause issues";
+        float bh = h * 0.056f, y = h * 0.052f - (1 - show) * (bh + h * 0.06f), rad = bh / 2;
+        float pad = bh * 0.16f, size = bh - 2 * pad;
+        float textW = g.MeasureString(text, smallBold).Width + pad;
+        float bw = Math.Min(w * 0.9f, pad + size + pad * 1.4f + textW + pad * 1.6f);
+        var r = new RectangleF((w - bw) / 2, y, bw, bh);
+        bool over = hoverPrompt == "C";
+        using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.004f, r.Width, r.Height), rad)) using (var b = new SolidBrush(Color.FromArgb((int)(70 * show), 90, 0, 0))) g.FillPath(b, shadow);
+        using (var body = Round(r, rad)) using (var b = new SolidBrush(Color.FromArgb((int)(250 * show), over ? 236 : 214, over ? 58 : 40, over ? 58 : 44))) g.FillPath(b, body);
+        var icon = new RectangleF(r.X + pad, r.Y + pad, size, size);
+        Card(g, icon, size / 2, Color.White, Color.FromArgb(255, 226, 226), Color.Empty, 0);
+        Write(g, "", iconSmall, Color.FromArgb(200, 32, 36), icon, StringAlignment.Center, StringAlignment.Center, false);
+        float x = icon.Right + pad * 1.4f;
+        Write(g, text, smallBold, Color.White, new RectangleF(x, r.Y, r.Right - pad - x, bh), StringAlignment.Near, StringAlignment.Center, false);
+        promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(r.X + screenX, r.Y + screenY, r.Width, r.Height), "C"));
+        return r.Bottom + h * 0.012f;
     }
     void StatusBar(Graphics g, int w, int h, Color ink) {
         float bar = h * 0.05f, x = w * 0.06f;
@@ -6601,9 +7714,10 @@ class LauncherForm : Form {
             hits.Add(new KeyValuePair<RectangleF, int>(new RectangleF(cx - cell / 2, cy, cell, icon + labelH), i));
             using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.004f, r.Width, r.Height), size * 0.24f)) using (var b = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPath(b, shadow);
             Color c = it.On ? AppColors[i] : Mix(AppColors[i], Color.Gray, 0.7f);
-            Card(g, r, size * 0.24f, Mix(c, Color.White, 0.14f), Mix(c, Color.Black, 0.1f), Color.Empty, 0);
+            GlossTile(g, r, size * 0.24f, c);
             if (sel) using (var ring = Round(new RectangleF(r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6), size * 0.27f)) using (var pen = new Pen(Color.White, Math.Max(2.5f, w * 0.007f))) g.DrawPath(pen, ring);
-            Write(g, AppIcons[i].ToString(), iconFont, it.On ? Color.White : Color.FromArgb(190, 255, 255, 255), r, StringAlignment.Center, StringAlignment.Center, false);
+            AppArt(g, i, r, c);
+            if (!it.On) using (var path = Round(r, size * 0.24f)) using (var b = new SolidBrush(Color.FromArgb(110, c))) g.FillPath(b, path);
             if (AppNames[i] == "Settings" && Updater.Ready) {
                 float dot = size * 0.26f;
                 using (var b = new SolidBrush(Color.FromArgb(240, 58, 50))) g.FillEllipse(b, r.Right - dot * 0.72f, r.Y - dot * 0.28f, dot, dot);
@@ -6653,6 +7767,8 @@ class LauncherForm : Form {
         float rad = w * 0.04f;
         if (p.Body != null) {
             float bodyH = p.Items.Count > 0 ? (bottom - y) * 0.6f : bottom - y;
+            // A page that asks for it gets a box only as tall as its text (up to the same 60%), leaving room for its list.
+            if (p.FitBody && p.Items.Count > 0) bodyH = Math.Min(bodyH, g.MeasureString(p.Body, bodyFont, (int)(w - 2 * m - 2 * h * 0.024f)).Height + 2 * h * 0.024f + bodyFont.Height * 0.3f);
             var br = new RectangleF(m, y, w - 2 * m, bodyH);
             Group(g, br, rad);
             float pad = h * 0.024f, bodyText = br.Height - 2 * pad;
@@ -6732,9 +7848,11 @@ class LauncherForm : Form {
             fy += rh + h * 0.002f;
         }
     }
+    static readonly Color Warn = Color.FromArgb(232, 128, 24);
     static readonly Color[] RowColors = { Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(46, 164, 79), Color.FromArgb(40, 124, 232), Color.FromArgb(124, 84, 214), Color.FromArgb(24, 164, 150), Color.FromArgb(226, 72, 140), Color.FromArgb(92, 104, 124) };
     void ListRow(Graphics g, Item it, bool sel, RectangleF r, bool line, int h, Color accent, Theme th) {
         if (sel) using (var b = new SolidBrush(Fade(accent, 38))) g.FillRectangle(b, r);
+        if (it.Fold != 0) { SectionRow(g, it, sel, r, line, h, accent); return; }
         float icon = r.Height * 0.62f, pad = r.Height * 0.2f, ix = r.X + pad, iy = r.Y + (r.Height - icon) / 2;
         var ib = new RectangleF(ix, iy, icon, icon);
         var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
@@ -6742,9 +7860,12 @@ class LauncherForm : Form {
         else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, ib.X + icon / 2, ib.Y + icon / 2, icon * 0.8f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
         else if (it.Theme != null) Cart(g, ib.X + icon * 0.1f, ib.Y, icon, it.Theme);
         else {
-            Color tint = it.On ? RowColors[it.Icon % RowColors.Length] : Text3;
-            Card(g, ib, icon * 0.24f, Mix(tint, Color.White, 0.12f), tint, Color.Empty, 0);
+            Color tint = !it.On ? Text3 : it.Tint != Color.Empty ? it.Tint : RowColors[it.Icon % RowColors.Length];
+            GlossTile(g, ib, icon * 0.24f, tint);
+            if (!RowArt(g, it.Icon, ib, tint)) {
+            Write(g, it.Icon.ToString(), iconSmall, Color.FromArgb(90, Ink), new RectangleF(ib.X, ib.Y + icon * 0.04f, ib.Width, ib.Height), StringAlignment.Center, StringAlignment.Center, false);
             Write(g, it.Icon.ToString(), iconSmall, Color.White, ib, StringAlignment.Center, StringAlignment.Center, false);
+            }
         }
         float tx = ib.Right + pad, right = r.Right - pad;
         string title = it.Text.Replace("Pokemon ", ""), value = null;
@@ -6769,6 +7890,22 @@ class LauncherForm : Form {
             Write(g, sub, smallFont, PhoneSub, new RectangleF(tx, ty + th1, tw, th2), StringAlignment.Near, StringAlignment.Center, false);
         } else Write(g, title, itemFont, ink, new RectangleF(tx, r.Y, tw, r.Height), StringAlignment.Near, StringAlignment.Center, false);
         if (line) using (var pen = new Pen(PhoneLine, 1)) g.DrawLine(pen, tx, r.Bottom - 1, r.Right, r.Bottom - 1);
+    }
+    // A section header: an arrow pointing down when open, right when folded, then its name and how many it holds.
+    void SectionRow(Graphics g, Item it, bool sel, RectangleF r, bool line, int h, Color accent) {
+        float pad = r.Height * 0.2f, c = r.Height * 0.11f, cx = r.X + pad + r.Height * 0.31f, cy = r.Y + r.Height / 2;
+        var arrow = it.Fold == 1
+            ? new[] { new PointF(cx - c, cy - c * 0.5f), new PointF(cx, cy + c * 0.5f), new PointF(cx + c, cy - c * 0.5f) }
+            : new[] { new PointF(cx - c * 0.5f, cy - c), new PointF(cx + c * 0.5f, cy), new PointF(cx - c * 0.5f, cy + c) };
+        using (var pen = new Pen(accent, Math.Max(2f, h * 0.0035f))) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; pen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round; g.DrawLines(pen, arrow); }
+        string title = it.Text, count = "";
+        int colon = title.LastIndexOf(": ");
+        if (colon > 0) { count = title.Substring(colon + 2); title = title.Substring(0, colon); }
+        float tx = r.X + pad * 2 + r.Height * 0.62f, right = r.Right - pad;
+        float cw = count != "" ? g.MeasureString(count, itemFont).Width + 4 : 0;
+        if (count != "") Write(g, count, itemFont, sel ? accent : PhoneSub, new RectangleF(right - cw, r.Y, cw, r.Height), StringAlignment.Far, StringAlignment.Center, false);
+        Write(g, title, itemBold, sel ? accent : PhoneText, new RectangleF(tx, r.Y, right - cw - tx, r.Height), StringAlignment.Near, StringAlignment.Center, false);
+        if (line) using (var pen = new Pen(PhoneLine, 1)) g.DrawLine(pen, r.X, r.Bottom - 1, r.Right, r.Bottom - 1);
     }
 
     // The start splash: the device powering on, its lens above the wordmark, every version's cartridge rolling by.
@@ -6859,9 +7996,7 @@ static class NativeMonsLauncher {
     static void Main(string[] argv) {
         Application.EnableVisualStyles();
         Config.Load();
-        // --export <game id> <plain|checkpoint> <folder> [checkpoint backup]: exports without opening the window; the result goes in <folder>\export-result.txt.
-        // --sync <game id> <result file> [fulldex|gen1]: shares one game's save without opening the window.
-        // --add-roms <result file> <path>...: adds folders, ROMs and zips as a drop on the window does, and says what each ROM is.
+        // Modes that run without the window (notes/launcher.md, Command line).
         if (argv.Length >= 3 && argv[0] == "--add-roms") {
             var paths = argv.Skip(2).ToList();
             var added = new List<string>(); var notes = new List<string>();
@@ -6869,8 +8004,7 @@ static class NativeMonsLauncher {
             File.WriteAllLines(argv[1], added.Select(f => f + "\t" + LauncherForm.WhatRomIs(f)).Concat(notes).ToArray());
             return;
         }
-        // --add-pc <result file> folder|zip <path> [program number]: Games > Add a PC game from its folder or .zip, without the
-        // window. With several programs and no number, it lists them and adds nothing.
+        // --add-pc <result> folder|zip <path> [program number]
         if (argv.Length >= 4 && argv[0] == "--add-pc") {
             var o = new List<string>(); CustomGames.Entry e = null; string problem = null, work = null;
             List<string> programs;
@@ -6886,6 +8020,42 @@ static class NativeMonsLauncher {
             if (problem == null) problem = argv[2] == "zip" ? CustomGames.AddUnpacked(argv[3], work, programs[pick], out e) : CustomGames.Add(programs[pick], false, delegate { }, out e);
             o.Insert(0, problem == null ? "added\t" + e.id + "\t" + e.title + "\t" + CustomGames.Exe(e) + "\tcopy=" + e.copy : "not added\t" + problem);
             File.WriteAllLines(argv[1], o.ToArray());
+            return;
+        }
+        // --install-index-mod <game id> <mod id> <result file>: Find mods' Install, without the window (for tests).
+        if (argv.Length >= 4 && argv[0] == "--install-index-mod") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            string note, result;
+            try {
+                var one = ModIndex.Load(out note).Find(x => x.Id == argv[2]);
+                var game = Library.Games.Find(x => x.Id == argv[1]);
+                result = one == null ? "not in the index" : game == null || !ModIndex.Fits(one, game.Gen1) ? "not for that game" : ModIndex.Install(one, delegate { });
+            } catch (Exception x) { result = x.Message; }
+            File.WriteAllText(argv[3], result);
+            return;
+        }
+        // --mod-clashes <game id> <result file>: the clashes the Mods page shows for that game.
+        // --gba-art <rom> <folder> <frames> <press> <shot,shot,...|every:<n>>: saves those frames of a GBA ROM, run on mGBA.
+        if (argv.Length >= 6 && argv[0] == "--gba-art") {
+            int frames = int.Parse(argv[3]);
+            var shots = argv[5].StartsWith("every:") ? Enumerable.Range(0, frames).Where(i => i % int.Parse(argv[5].Substring(6)) == 0) : argv[5].Split(',').Select(int.Parse);
+            string why = LibretroShots.Run(Config.MgbaCore, argv[1], argv[2], argv[4], shots, frames);
+            if (why != null) File.WriteAllText(Path.Combine(argv[2], "error.txt"), why);
+            Environment.Exit(why == null ? 0 : 1);
+        }
+        if (argv.Length >= 3 && argv[0] == "--mod-clashes") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var game = Library.Games.Find(x => x.Id == argv[1]);
+            var lines = game == null ? new List<string> { "no such game" } : ModClashes.Read(game).Select(c => c.ModId + " (" + (c.ModOn ? "on" : "off") + ") clashes with " + c.OtherId + " (" + (c.OtherOn ? "on" : "off") + ")" + (c.Active ? ": " + c.ModId + " won't load" : "")).ToList();
+            File.WriteAllLines(argv[2], lines.Count == 0 ? new[] { "no clashes" } : lines.ToArray());
+            return;
+        }
+        // --mod-deps <game id> <result file>: what the Needs other mods page lists for that game.
+        if (argv.Length >= 3 && argv[0] == "--mod-deps") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var game = Library.Games.Find(x => x.Id == argv[1]);
+            var lines = game == null ? new List<string> { "no such game" } : ModDeps.Open(game).Select(d => d.Id + "\t" + (d.Required ? "required" : "optional") + "\t" + d.Status + "\tfor " + d.ModId + (d.Range != "" ? "\t" + d.Range : "") + (d.Github != "" ? "\tgithub " + d.Github : "")).ToList();
+            File.WriteAllLines(argv[2], lines.Count == 0 ? new[] { "nothing missing" } : lines.ToArray());
             return;
         }
         if (argv.Length >= 3 && argv[0] == "--sync") {
@@ -6943,10 +8113,10 @@ static class NativeMonsLauncher {
             Environment.ExitCode = outcome == null ? 0 : 2;
             return;
         }
-        // --install-mod <zip> <result file>: installs a Gen1Recomp mod as the Mods page does, without a window.
+        // --install-mod <zip> <result> [mod id]: only that mod, when an id is given.
         if (argv.Length >= 3 && argv[0] == "--install-mod") {
             string result;
-            try { result = LauncherForm.ExtractMod(argv[1]); } catch (Exception e) { result = "Could not install it: " + e.Message; }
+            try { result = LauncherForm.ExtractMod(argv[1], argv.Length > 3 ? argv[3] : null); } catch (Exception e) { result = "Could not install it: " + e.Message; }
             File.WriteAllText(argv[2], result);
             return;
         }
@@ -6980,8 +8150,7 @@ static class NativeMonsLauncher {
         string folder = Path.GetFullPath(Config.Here).TrimEnd('\\').ToLowerInvariant().Replace('\\', '/');
         bool first;
         using (var instance = new System.Threading.Mutex(true, "Local\\NativeMonsLauncher-" + folder, out first)) {
-            // Shortcut flags: --game <id> (or --play <id>) starts that game, --slot <save> picks which of its saves first,
-            // --launcher opens the menu with that game chosen instead of starting it.
+            // Shortcut flags: --game (or --play) <id>, --slot <save>, --launcher.
             Func<string, string> flag = delegate(string name) { int i = Array.IndexOf(argv, name); return i >= 0 && i + 1 < argv.Length ? argv[i + 1] : null; };
             string game = flag("--game") ?? flag("--play"), slot = flag("--slot");
             bool menu = Array.IndexOf(argv, "--launcher") >= 0;

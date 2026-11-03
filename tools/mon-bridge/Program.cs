@@ -1,23 +1,5 @@
-// mon-bridge: lets the nativeMons launcher read cartridge saves and move Pokemon between them, using PKHeX.Core
-// (https://github.com/kwsch/PKHeX, GPL-3.0-or-later). Licensed under the GNU GPL v3 or later.
-//
-//   mon-bridge list <save>                                  one tab-separated row per Pokemon in the boxes:
-//                                                           box, slot, species, nickname, level, trainer, dex number, shiny/normal
-//   mon-bridge info <save>                                  save type, game, generation, trainer
-//   mon-bridge plan <from save> <box> <slot> <to save>      what stands in the way: forced, conflict/ok <n> <move>, item <name>
-//   mon-bridge caught <save>                                dex numbers marked caught, comma separated
-//   mon-bridge check <save>                                 corruption check: ok or bad, with why
-//   mon-bridge compare <a> <b>                              same trainer, Pokemon, Pokedex and items?
-//   mon-bridge repair <save> <new file>                     rewrites a copy with correct checksums
-//   mon-bridge families                                     evolution families: comma-separated dex numbers
-//   mon-bridge moves <save>                                 the moves that game has: id, name
-//   mon-bridge move <from save> <box> <slot> <to save> <backup folder> [move:<1-4>:<id, 0 deletes>]... [dropitem]
-//                   [at:<box>:<slot>]                       into that empty slot, instead of the first free one
-//   mon-bridge layout <save>                                boxes, slots per box, then a row per box: index, name
-//   mon-bridge relocate <save> <box> <slot> <to box> <to slot> <backup folder>
-//                                                           within one save: moves it, or swaps it with what's there
-//
-// Exit codes: 0 done, 1 usage or unreadable save, 2 the move is not possible (saves untouched).
+// mon-bridge: reads cartridge saves and moves Pokemon between them, using PKHeX.Core (GPL-3.0-or-later).
+// Licensed under the GNU GPL v3 or later. Commands and exit codes: notes/mon-bridge.md.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -69,9 +51,7 @@ static class Program
         return HasFireRedLayout(data) ? new SAV3FRLG(data) : sav;
     }
 
-    // PKHeX tells Gen 3 games apart by one value in the save's header, and calls anything but 0 or 1 Emerald. Some real
-    // FireRed saves hold FFFFFFFF there. The party count settles it, as it sits at a different place in each layout and a
-    // real Emerald save always has 0 to 6 at Emerald's place.
+    // Tells FireRed from Emerald where PKHeX's header value can't (notes/mon-bridge.md, FireRed saves).
     static bool HasFireRedLayout(byte[] data)
     {
         const int sectionSize = 0x1000, sectionsPerSlot = 14, signature = 0x08012025;
@@ -122,8 +102,7 @@ static class Program
         return 0;
     }
 
-    // Where a move goes: the slot asked for (at:<box>:<slot>), which must be empty, or else the first free one.
-    // -1 the boxes are full, -2 no such slot, -3 that slot is taken.
+    // Where a move goes: the empty slot asked for, else the first free one. -1 full, -2 no such slot, -3 taken.
     static int Target(SaveFile to, string[] options)
     {
         foreach (var o in options)
@@ -311,8 +290,7 @@ static class Program
         return Check(to);
     }
 
-    // Stricter readers, Gen1Recomp's among them, go by the header value alone (see HasFireRedLayout), so a repaired copy gets
-    // the value FireRed normally has. It's only ever written to the new file.
+    // Gives a repaired copy FireRed's usual header value, for stricter readers. Only the new file.
     static void MarkAsFireRed(byte[] data)
     {
         const int sectionSize = 0x1000, sectionsPerSlot = 14, trainerLength = 3884;
@@ -372,8 +350,7 @@ static class Program
     }
     static bool from2(PKM p) => p.Format <= 2;
 
-    // OpenHome's converter (tools/openhome-bridge), which keeps more than ForceCopy can. Null when it isn't there, fails, or
-    // gives back anything but this Pokemon in the right format, and the caller falls back to ForceCopy.
+    // OpenHome's converter, when present. Null makes the caller fall back to ForceCopy.
     static PKM? OpenHomeCopy(PKM pk, SaveFile to)
     {
         string? node = Environment.GetEnvironmentVariable("NATIVEMONS_NODE"), tool = Environment.GetEnvironmentVariable("NATIVEMONS_OPENHOME");
@@ -526,10 +503,7 @@ static class Program
         return 0;
     }
 
-    // Sets options stored in a save, given as text=slow|mid|fast scene=on|off style=shift|set sound=mono|stereo
-    // button=normal|alt|lequalsa frame=1..20. What a generation doesn't have is skipped. PKHeX has them for Gen 1 and 2. For
-    // Gen 3 and 4 the place comes from the decompilations, and a value that can't be real means the place is wrong, so nothing
-    // is written. Prints ok or same, or exits 2 with no change when this save can't be changed.
+    // Sets options stored in a save (notes/mon-bridge.md, Game options). Prints ok or same, or exits 2 unchanged.
     static int GameOptions(string path, string[] settings)
     {
         var want = settings.Select(x => x.Split('=')).ToDictionary(x => x[0], x => x[1]);
@@ -581,9 +555,7 @@ static class Program
             }
             case SAV4 s:
             {
-                // Directly before the trainer block. Text 4 bits, sound 2 (stereo = 0), style 1 (set = 1), scene 1 (off = 1),
-                // button 2, frame 5. PKHeX's rewrite of these only touches this and the block's checksum: the 16 byte limit
-                // below holds it to that.
+                // Directly before the trainer block. The 16-byte limit below holds PKHeX to it and its checksum.
                 var block = s.General;
                 int at = s is SAV4Pt ? 0x64 : 0x60;
                 int word = block[at] | block[at + 1] << 8;

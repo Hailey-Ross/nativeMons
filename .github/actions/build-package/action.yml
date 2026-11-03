@@ -55,6 +55,12 @@ runs:
         Move-Item nativeplat-unpacked\nativeplat-windows-x64 "$dist\engines\nativeplat"
         Set-Content "$dist\engines\nativeplat\portable.txt" ''
 
+        # mGBA's libretro core, for romhacks' title screens, with its licence.
+        New-Item -ItemType Directory -Force "$dist\tools\mgba" | Out-Null
+        Invoke-WebRequest "https://buildbot.libretro.com/nightly/windows/x86_64/latest/mgba_libretro.dll.zip" -OutFile mgba.zip
+        Expand-Archive mgba.zip "$dist\tools\mgba"
+        Invoke-WebRequest "https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE" -OutFile "$dist\tools\mgba\LICENSE-mGBA.txt"
+
         # hails.nds-Patcher.
         New-Item -ItemType Directory -Force "$dist\tools\nds-patcher" | Out-Null
         Copy-Item tools\nds-patcher\*.py, tools\nds-patcher\LICENSE "$dist\tools\nds-patcher"
@@ -79,6 +85,6 @@ runs:
         foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
           if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }
         }
-        foreach ($p in 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe') {
+        foreach ($p in 'tools\mgba\mgba_libretro.dll', 'tools\mgba\LICENSE-mGBA.txt', 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe') {
           if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
         }

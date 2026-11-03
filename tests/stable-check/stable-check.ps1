@@ -1,43 +1,10 @@
 <#
 Decides whether a release package is fit to be the stable build. Run before moving main.
 
-By default it's quick: one game per engine, the main screens, one update of each kind (about 10 minutes). -Full tries every
-game on every engine and every screen; a release decision needs a full run of play, snapshots and updater.
+  stable-check.ps1 -Package <zip> -Work <empty folder> -RomFolder <folder> -Report <folder> [options]
+  stable-check.ps1 -Report <folder> -Retest | -Groups saves,sync | -Skip play | -List
 
-The launcher is told not to take the keyboard, so you can keep working; the games' own windows may still take it briefly.
-
-The suite is split into groups, and each group's latest result is kept. Retest a part without redoing the rest; the verdict
-always covers every group, and a group that hasn't run counts against it.
-
-  Everything:      stable-check.ps1 -Package <zip> -Work <empty scratch folder> -RomFolder <folder> -Report <folder> [options]
-  What failed:     stable-check.ps1 -Report <folder> -Retest
-  Chosen groups:   stable-check.ps1 -Report <folder> -Groups saves,sync
-  Leave some out:  stable-check.ps1 -Report <folder> -Skip play
-  Where things are: stable-check.ps1 -Report <folder> -List
-
-Settings are remembered in the report folder, so later runs only need -Report. Give one again to change it.
-
-  repo       what's published: no games or attribution, pins, committed and pushed, dev build green
-  package    the zip: contents, licences, credit, nothing private
-  scan       finding ROMs, several dumps of a game
-  snapshots  every screen draws
-  saves      checks, several saves, export, moving a Pokemon, on copies
-  play       every game on every engine shows a picture, and the launcher comes back (long)
-  sync       shared saves between engines, including damaged ones
-  window     real key presses through the real window, checked by screen name
-  updater    updates and Stable/Dev switching, from local releases (long)
-
-  -Package           the release zip to test (from the bleeding-edge release, normally)
-  -Work              scratch folder, deleted at the end unless -Keep
-  -RomFolder         your ROMs. Only read, and listed before and after to prove it.
-  -SaveFolder        folder of Fulldex .sav files. They're copied in; the originals are only read.
-  -ArtFolder         a state\game-art folder to copy in, so the launcher doesn't spend the run capturing art.
-  -Report            where results and screenshots are kept (kept after -Work is deleted)
-  -LauncherOverride  a locally built launcher to test in place of the package's. The result then doesn't speak for the
-                     package itself: run again without it before releasing.
-
-Windows appear on screen during play and window: don't use the PC for games, or move the mouse over them, meanwhile.
-Exit code: 0 every group has run with no failures, 1 otherwise.
+Groups, options and what each checks: notes/stable-check.md. Exit code 0 when every group passed.
 #>
 param(
   [string]$Package, [string]$Work, [string]$RomFolder,

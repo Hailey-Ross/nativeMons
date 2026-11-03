@@ -1,0 +1,43 @@
+diff --git a/frontend/pc_launcher.cpp b/frontend/pc_launcher.cpp
+index 1542c70..44f9e55 100644
+--- a/frontend/pc_launcher.cpp
++++ b/frontend/pc_launcher.cpp
+@@ -1745,7 +1745,10 @@ bool Start(int& argc, char**& argv)
+     // "--game IREO" (the desktop shortcuts, shortcuts.h): that game at once, without the list.
+     // Other arguments (a ROM given by hand, the test harness): the program runs as it always has.
+     std::string direct;
+-    if (argc == 3 && !strcmp(argv[1], "--game"))
++    // "--rom <file>": that ROM at once, without the list (a GBA one is imported into roms first).
++    std::string directRom;
++    if (argc == 3 && !strcmp(argv[1], "--rom")) directRom = argv[2];
++    else if (argc == 3 && !strcmp(argv[1], "--game"))
+     {
+         direct = argv[2];
+         for (char& c : direct) c = (char)toupper((unsigned char)c);
+@@ -1848,6 +1851,7 @@ bool Start(int& argc, char**& argv)
+ #ifdef SSR_GBA
+     for (int i = 1; i < argc; i++)
+         if (argv[i] && IsGbaRomName(argv[i])) ImportFile(fo, argv[i]);
++    if (!directRom.empty() && IsGbaRomName(directRom)) ImportFile(fo, directRom);
+ #endif
+ 
+     std::map<std::string, std::vector<uint32_t>> artCache;
+@@ -1877,6 +1881,18 @@ bool Start(int& argc, char**& argv)
+             break;
+         }
+     if (!direct.empty() && directGame < 0) fprintf(stderr, "[launcher] --game %s: not in the list\n", direct.c_str());
++    if (!directRom.empty())
++    {
++        auto same = [](const std::string& x, const std::string& y) {
++            std::error_code e1, e2;
++            const auto cx = std::filesystem::weakly_canonical(x, e1), cy = std::filesystem::weakly_canonical(y, e2);
++            return !e1 && !e2 && cx == cy;
++        };
++        const std::string copy = fo.roms + "/" + directRom.substr(directRom.find_last_of("/\\") + 1);
++        for (size_t i = 0; i < games.size() && directGame < 0; i++)
++            if ((same(games[i].rom, directRom) || same(games[i].rom, copy)) && Playable(fo, games[i])) directGame = (int)i;
++        if (directGame < 0) fprintf(stderr, "[launcher] --rom %s: not in the list\n", directRom.c_str());
++    }
+ #ifdef SSR_UPDATER
+     // (At launch, as the list opens: a popup if a new version is out, never installed unasked.)
+     Updater::Init(ProgramDir(), fo.dir);

@@ -38,9 +38,16 @@ runs:
         @{ channel = $env:TAG; build = [int]$env:BUILD; revision = $sha; package = $zip; sha256 = $hash } | ConvertTo-Json | Out-File -Encoding ascii release.json
 
         $commits = git log -15 --no-merges --format="- ``%h`` %s" $sha
+        # A build made by the Engine sync workflow says so, with what moved upstream.
+        $title = "nativeMons ($env:TAG)"; $sync = @()
+        if ((git log -1 --format=%s $sha) -eq 'Engine auto-sync with upstream') {
+          $title += ": engine auto-sync with upstream"
+          $sync = @("**Engine auto-sync with upstream.** Built automatically from these upstream updates:", "", (git log -1 --format=%b $sha).Trim(), "")
+        }
         $notes = @(
           "Rolling build **$env:BUILD**, commit ``$($sha.Substring(0, 12))``."
           ""
+          $sync
           "[Download Windows ZIP](https://github.com/$env:REPO/releases/download/$env:TAG/$zip)"
           ""
           "> $env:BANNER"
@@ -56,4 +63,4 @@ runs:
         gh release delete $env:TAG --cleanup-tag --yes 2>$null
         $global:LASTEXITCODE = 0
         $flag = if ($env:PRE -eq "true") { "--prerelease" } else { "--latest" }
-        gh release create $env:TAG $zip "$zip.sha256" release.json --target $sha --title "nativeMons ($env:TAG)" --notes-file release-body.md $flag
+        gh release create $env:TAG $zip "$zip.sha256" release.json --target $sha --title $title --notes-file release-body.md $flag
