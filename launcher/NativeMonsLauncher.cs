@@ -56,6 +56,91 @@ static class Native {
 }
 
 // Where everything is. Each path can be changed in state\nativemons.cfg (key=value).
+// Discord Rich Presence: while a game runs, the player's Discord status shows which one, played through nativeMons. It speaks
+// Discord's local pipe protocol (a handshake, then SET_ACTIVITY) with no library. Closing the pipe clears the status. Nothing
+// happens when Discord isn't running, when no application ID is set, or when the player turns it off in Settings.
+static class DiscordPresence {
+    // The application registered at discord.com/developers. Its name is what Discord shows as "Playing ...". A file in state
+    // overrides it, for testing another application.
+    const string AppId = "1566980838325747914";
+    const string ImageKey = "nativemons";
+    static readonly object gate = new object();
+    static System.IO.Pipes.NamedPipeClientStream pipe;
+    static int generation;
+    public static bool Enabled { get { return Config.Read("discord.txt", "on").Trim() != "off"; } set { Config.Write("discord.txt", value ? "on" : "off"); if (!value) Stop(); } }
+    static string Id { get { string own = Config.Read("discord-app.txt", "").Trim(); return own != "" ? own : AppId; } }
+    public static bool Available { get { return Id != ""; } }
+    public static string EngineLabel(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "the Platinum PC port" : engine == "nativeplat" ? "nativeplat" : "Gen1Recomp"; }
+    public static void Playing(GameEntry g) {
+        if (g == null || !Enabled || !Available) return;
+        string title = g.Title, engine = EngineLabel(g.Engine()), id = Id;
+        long started = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+        int mine;
+        lock (gate) mine = ++generation;
+        Task.Run(() => {
+            try {
+                var p = Connect(id);
+                if (p == null) return;
+                var activity = new Dictionary<string, object> {
+                    { "details", title.StartsWith("Pokemon ") ? "Pokémon " + title.Substring(8) : title },
+                    { "state", "via nativeMons launcher, on " + engine },
+                    { "timestamps", new Dictionary<string, object> { { "start", started } } },
+                    { "assets", new Dictionary<string, object> { { "large_image", ImageKey }, { "large_text", "nativeMons launcher" } } },
+                    { "buttons", new object[] { new Dictionary<string, object> { { "label", "Get nativeMons" }, { "url", "https://github.com/Hailey-Ross/nativeMons" } } } },
+                };
+                Send(p, 1, new Dictionary<string, object> { { "cmd", "SET_ACTIVITY" }, { "nonce", Guid.NewGuid().ToString() },
+                    { "args", new Dictionary<string, object> { { "pid", Process.GetCurrentProcess().Id }, { "activity", activity } } } });
+                string reply = Receive(p);
+                string testLog = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_LOG");
+                if (testLog != null) try { File.AppendAllText(testLog, "discord: " + reply + Environment.NewLine); } catch { }
+                lock (gate) {
+                    // The game may have closed while this was connecting.
+                    if (mine != generation) { p.Dispose(); return; }
+                    if (pipe != null) pipe.Dispose();
+                    pipe = p;
+                }
+            } catch { }
+        });
+    }
+    public static void Stop() {
+        lock (gate) { generation++; if (pipe != null) { try { pipe.Dispose(); } catch { } pipe = null; } }
+    }
+    static System.IO.Pipes.NamedPipeClientStream Connect(string id) {
+        for (int i = 0; i < 10; i++) {
+            var p = new System.IO.Pipes.NamedPipeClientStream(".", "discord-ipc-" + i, System.IO.Pipes.PipeDirection.InOut);
+            try {
+                p.Connect(200);
+                Send(p, 0, new Dictionary<string, object> { { "v", 1 }, { "client_id", id } });
+                // Discord answers the handshake with READY, or closes the pipe for an unknown application.
+                if (Receive(p) != null) return p;
+            } catch { }
+            p.Dispose();
+        }
+        return null;
+    }
+    static void Send(Stream s, int op, object body) {
+        byte[] data = Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(body));
+        var frame = new byte[8 + data.Length];
+        BitConverter.GetBytes(op).CopyTo(frame, 0);
+        BitConverter.GetBytes(data.Length).CopyTo(frame, 4);
+        data.CopyTo(frame, 8);
+        s.Write(frame, 0, frame.Length); s.Flush();
+    }
+    static string Receive(Stream s) {
+        var head = ReadExactly(s, 8);
+        if (head == null) return null;
+        int op = BitConverter.ToInt32(head, 0), length = BitConverter.ToInt32(head, 4);
+        if (length < 0 || length > 1 << 20) return null;
+        var body = ReadExactly(s, length);
+        // Op 2 is Discord closing the connection, with its reason.
+        return body == null || op == 2 ? null : Encoding.UTF8.GetString(body);
+    }
+    static byte[] ReadExactly(Stream s, int n) {
+        var b = new byte[n]; int got = 0;
+        while (got < n) { int r = s.Read(b, got, n - got); if (r <= 0) return null; got += r; }
+        return b;
+    }
+}
 static class Config {
     public static readonly string Here = AppDomain.CurrentDomain.BaseDirectory;
     public static readonly string State = Environment.GetEnvironmentVariable("NATIVEMONS_STATE") ?? Path.Combine(Here, "state");
@@ -1526,6 +1611,8 @@ class LauncherForm : Form {
     public LauncherForm(string playId) {
         playDirect = playId;
         Text = "nativeMons";
+        // The exe's own icon, for the taskbar and Alt+Tab.
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         // A device standing upright: no window frame, the window's own outline is the shell's.
         var area = Screen.PrimaryScreen.WorkingArea;
         int h = area.Height * 94 / 100;
@@ -1784,6 +1871,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
+        if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
@@ -3748,6 +3836,7 @@ class LauncherForm : Form {
         try { p.Start(); }
         catch (Exception e) { ShowText("Could not start", psi.FileName + "\n\n" + e.Message, null); return; }
         job = p;
+        if (isGame) DiscordPresence.Playing(current);
         p.BeginOutputReadLine(); p.BeginErrorReadLine();
         Invalidate();
     }
@@ -3780,6 +3869,7 @@ class LauncherForm : Form {
     void JobEnded() {
         var p = job; job = null; int code = 0;
         try { p.WaitForExit(); code = p.ExitCode; p.Dispose(); } catch { }
+        if (jobIsGame) DiscordPresence.Stop();
         if (gbaClosed) code = 0;
         watchGba = false; gbaClosed = false;
         if (!Visible) Show();

@@ -1,5 +1,7 @@
 # nativeMons
 
+<p align="center"><img src="assets/logo-512.png" alt="nativeMons logo" width="256"></p>
+
 [![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml)
 [![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
 
@@ -108,6 +110,8 @@ Each engine has its own page of options, stored where its menus keep them, so ch
 **Updates** checks this project's releases when the launcher starts and every 6 hours while it's open. When a new build is ready, a banner appears for a few seconds and Settings gets a badge; nothing downloads until you choose to. The same page switches between **Stable** and **Dev**. Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data and settings stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
 
 **Game options** in Settings set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
+
+**Discord status** shows what you're playing while a game runs: "Playing nativeMons", the game, the engine and a timer, through the Discord app on your PC. It clears when the game closes, and does nothing when Discord isn't open. Turn it off in Settings.
 
 ## nativeplat
 
