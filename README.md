@@ -5,9 +5,7 @@
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
 through its own engine, and the engines stay forks that keep pulling their upstream updates. It also installs and runs
-the fan game Pokémon Infinite Fusion.
-
-Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: **Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).**
+the fan game Pokémon Infinite Fusion, and any other self-contained PC game you add.
 
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
@@ -93,6 +91,12 @@ A game's page in **Games** has Play, its engine, ROM version, saves, game option
 - **Add an existing installation.** The launcher runs your own copy where it is and never changes its files, and its saves stay where the game keeps them, in `%APPDATA%\infinitefusion`. Update it with the game's own updater. **Remove from the launcher** only forgets it.
 
 Either way the launcher backs up the save files before each session (newest 30, under `state\save-backups`), and the game keeps backups of its own too. About 5 GB. Its Play tile and wallpaper come from the game's own title screen and region map. Move Pokémon, My Collection, quick start and the save tools don't apply to it.
+
+## Other PC games
+
+**Add a PC game**, at the end of **Games**, adds any self-contained game with its own program, such as another fan game, with nothing written for it. Choose its `.exe`, then either run it where it is or let the launcher keep its own copy of the game's folder in `games\`. It's named after the program (rename it on its page) and gets a colour of its own.
+
+These games go without the extras: no captured title screen or wallpaper, and no save handling, since the launcher can't know where such a game keeps its saves. The launcher starts the game, shows it on Discord, and waits for it to close; if the program only hands over to another one in its folder and quits, the session lasts until that one closes too. **Remove from the launcher** forgets it, and deletes the launcher's copy if it made one; your own folder and saves are never touched.
 
 ## Saves
 
