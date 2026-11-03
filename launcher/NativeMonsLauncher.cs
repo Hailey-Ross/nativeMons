@@ -179,6 +179,14 @@ static class Config {
         return l;
     }
     public static void SaveRomFolders(List<string> folders) { File.WriteAllLines(Path.Combine(State, "rom-folders.txt"), folders.ToArray()); }
+    // ROMs added one at a time (dropped on the window or picked): used where they are.
+    public static List<string> RomFiles() {
+        string f = Path.Combine(State, "rom-files.txt");
+        return File.Exists(f) ? File.ReadAllLines(f).Where(x => x.Trim() != "").Distinct(StringComparer.OrdinalIgnoreCase).ToList() : new List<string>();
+    }
+    public static void SaveRomFiles(List<string> files) { File.WriteAllLines(Path.Combine(State, "rom-files.txt"), files.ToArray()); }
+    // ROMs taken out of a .zip: our own copies, one folder per zip. Always searched.
+    public static string Unzipped { get { return Path.Combine(State, "roms"); } }
     public static string Read(string name, string fallback) {
         try { string f = Path.Combine(State, name); return File.Exists(f) ? File.ReadAllText(f).Trim() : fallback; } catch { return fallback; }
     }
@@ -1414,18 +1422,18 @@ static class Library {
         LoadHashes();
         var folders = Config.RomFolders();
         folders.Add(Path.Combine(Config.FulldexDir ?? Config.Here, "roms"));
-        foreach (var folder in folders) {
-            if (!Directory.Exists(folder)) continue;
-            foreach (var file in FilesUnder(folder)) {
-                string ext = Path.GetExtension(file).ToLowerInvariant();
-                if (ext != ".nds" && ext != ".gb" && ext != ".gbc" && ext != ".gba") continue;
-                try { Sort(list, file, ext, accepted); } catch { }
-            }
+        folders.Add(Config.Unzipped);
+        var files = Config.RomFiles().Where(File.Exists).ToList();
+        foreach (var folder in folders) if (Directory.Exists(folder)) files.AddRange(FilesUnder(folder));
+        foreach (var file in files) {
+            if (!IsRom(file)) continue;
+            try { Sort(list, file, Path.GetExtension(file).ToLowerInvariant(), accepted); } catch { }
         }
         SaveHashes();
         foreach (var g in list) ChooseRom(g);
         Games = list;
     }
+    public static bool IsRom(string file) { string ext = Path.GetExtension(file).ToLowerInvariant(); return ext == ".nds" || ext == ".gb" || ext == ".gbc" || ext == ".gba"; }
     // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
     public static List<string> FilesUnder(string root) {
         var found = new List<string>();
@@ -1982,10 +1990,11 @@ class LauncherForm : Form {
     Font monoFont, titleFont, itemFont, smallFont, heroFont, markFont, markLight, playFont, iconFont, iconSmall, itemBold, smallBold, bodyFont, splashMark, splashLight;
 
     readonly string playDirect;
-    public LauncherForm() : this(null) { }
-    // playId: start that game at once and close afterwards (--play <id>, for shortcuts).
-    public LauncherForm(string playId) {
-        playDirect = playId;
+    string directSlot, chooseId;   // --slot: which save the shortcut's game uses; --launcher: the game the menu opens on
+    public LauncherForm() : this(null, null, null) { }
+    // playId: start that game at once and close afterwards (--game <id>, for shortcuts).
+    public LauncherForm(string playId, string slot, string choose) {
+        playDirect = playId; directSlot = slot; chooseId = choose;
         Text = "nativeMons";
         // The exe's own icon, for the taskbar and Alt+Tab.
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
@@ -1999,6 +2008,9 @@ class LauncherForm : Form {
         using (var outline = Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), CornerRadius(ClientSize.Width))) Region = new Region(outline);
         BackColor = Color.FromArgb(18, 20, 24); ForeColor = Color.White;
         DoubleBuffered = true; KeyPreview = true;
+        AllowDrop = true;
+        DragEnter += delegate(object o, DragEventArgs e) { e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) && CanTakeDrop() ? DragDropEffects.Copy : DragDropEffects.None; };
+        DragDrop += delegate(object o, DragEventArgs e) { var dropped = e.Data.GetData(DataFormats.FileDrop) as string[]; if (dropped != null && CanTakeDrop()) BeginInvoke((Action)delegate { TakeDrop(dropped); }); };
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         tick.Interval = 16; tick.Tick += delegate { Poll(); };
         Load += delegate { tick.Start(); };
@@ -2059,6 +2071,9 @@ class LauncherForm : Form {
         if (screen == "saves" && current != null) pages.Push(SavesPage(current));
         if (screen == "folder-added") { firstSetup = true; pages.Push(FoldersPage()); pages.Push(FolderAddedPage(Config.RomFolders().FirstOrDefault() ?? "")); }
         if (screen == "credits") pages.Push(CreditsPage());
+        if (screen == "settings") pages.Push(SettingsPage());
+        if (screen == "controls") pages.Push(ControlsPage());
+        if (screen.StartsWith("controls-")) { int n = int.Parse(screen.Substring(9)); pages.Push(ControlsPage()); pages.Push(new Page { Title = ControlSheets[n][0] + " controls", Body = ControlSheets[n][2] }); }
         var sample = Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
         if (screen == "mods") { var m = Library.Games.Find(g => g.OnGen1); if (m != null) pages.Push(ModsPage(m)); }
@@ -2194,14 +2209,58 @@ class LauncherForm : Form {
         pages.Push(MainPage());
         if (playDirect != null) {
             var direct = Library.Games.Find(g => g.Id == playDirect);
-            if (direct != null && direct.Playable) { Play(direct); Invalidate(); return; }
+            if (direct != null && direct.Playable) { PlayWithSlot(direct, directSlot, delegate { Close(); }); Invalidate(); return; }
             ShowText("Can't start " + playDirect, "That game is not in the list, or its ROM was not found.", delegate { Close(); });
             return;
         }
+        if (chooseId != null) { Request("show", chooseId, directSlot); chooseId = null; }
         if (err != null) ShowText("Something went wrong", err, null);
         else if (Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) { firstSetup = true; pages.Push(FoldersPage()); }
         else AskAboutEncrypted();
         Invalidate();
+    }
+    // A shortcut started while the launcher is open (see Main), or --launcher at start.
+    public const int WM_REQUEST = 0x8000 + 0x4E4D;
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_REQUEST) {
+            try {
+                string f = Path.Combine(Config.State, "request.txt");
+                var l = File.ReadAllText(f).Split('\n'); File.Delete(f);
+                if (l.Length >= 2) pendingRequest = l;
+            } catch { }
+            return;
+        }
+        base.WndProc(ref m);
+    }
+    string[] pendingRequest;
+    // Waits for the menu: a request while a game or a task runs is dropped, since only one game runs at a time.
+    void RequestTick() {
+        if (pendingRequest == null || starting) return;
+        var r = pendingRequest; pendingRequest = null;
+        if (job != null) return;
+        Request(r[0].Trim(), r[1].Trim(), r.Length > 2 && r[2].Trim() != "" ? r[2].Trim() : null);
+    }
+    void Request(string what, string id, string slot) {
+        var g = Library.Games.Find(x => x.Id == id);
+        while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+        if (g == null || !g.Playable) { ShowText("Can't start " + id, "That game is not in the list, or its ROM was not found.", null); return; }
+        if (what == "play") { if (!Visible) Show(); Native.Front(Handle); PlayWithSlot(g, slot, null); return; }
+        current = g; ReplaceMain(); pages.Push(GamePage(g));
+        if (!Visible) Show();
+        Native.Front(Handle); Invalidate();
+    }
+    // A save named by its number or its name. Switching goes through SwitchSave, the same as the Saves page.
+    void PlayWithSlot(GameEntry g, string slot, Action failed) {
+        if (slot == null || !g.SaveTools) { if (slot != null && !g.SaveTools) ShowText("Can't pick a save", g.Title + " keeps its saves itself.", failed); else Play(g); return; }
+        string set = SaveSets.All(g).FirstOrDefault(x => x == slot) ?? SaveSets.All(g).FirstOrDefault(x => string.Equals(SaveSets.Name(g, x), slot, StringComparison.OrdinalIgnoreCase));
+        if (set == null) { ShowText("No save called " + slot, g.Title + " has: " + string.Join(", ", SaveSets.All(g).Select(x => SaveSets.Name(g, x) + " (" + x + ")").ToArray()) + ".", failed); return; }
+        if (set == SaveSets.Active(g)) { Play(g); return; }
+        string problem = null;
+        Busy("Switching saves", delegate { problem = SwitchSave(g, set); return null; }, delegate(string e) {
+            ReplaceMain();
+            if (e != null || problem != null) { ShowText("Couldn't switch saves", e ?? problem, failed); return; }
+            Play(g);
+        });
     }
     void PickCurrent() {
         string last = Config.Read("last-game.txt", "");
@@ -2269,6 +2328,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.SaveTools), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
+        p.Items.Add(new Item("Controls", "", true, delegate { pages.Push(ControlsPage()); }) { Icon = '\uE765', Info = "The keys each engine uses while you play: saving, fast forward, snapshots, screenshots." });
         p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, and DS games on Fulldex. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
@@ -3669,10 +3729,17 @@ class LauncherForm : Form {
             string f = folder;
             p.Items.Add(new Item(Path.GetFileName(f.TrimEnd('\\')), "", true, delegate { pages.Push(RemoveFolderPage(f)); }) { Icon = '', Info = f + "\n\nSelect to stop searching this folder. Your ROMs stay where they are." });
         }
-        p.Items.Add(new Item("Add a folder", "", true, delegate {
-            AddFolder();
-        }) { Icon = '', Info = "nativeMons finds games by reading each ROM, so file names don't matter. No games are included: you need your own ROMs." });
-        if (Config.RomFolders().Count > 0) p.Items.Add(new Item(FinishFoldersLabel, "", true, FinishFolders) { Icon = '', Info = "Go back to the main screen. Your folders are saved." });
+        foreach (var file in Config.RomFiles()) {
+            string f = file;
+            p.Items.Add(new Item(Path.GetFileName(f), "", true, delegate { pages.Push(RemoveRomFilePage(f)); }) { Icon = '', Info = f + (File.Exists(f) ? "" : "\n\nNot found there any more.") + "\n\nA ROM added on its own. Select to stop using it. The file stays where it is." });
+        }
+        if (Directory.Exists(Config.Unzipped)) foreach (var dir in Directory.GetDirectories(Config.Unzipped)) {
+            string d = dir;
+            p.Items.Add(new Item(Path.GetFileName(d) + ".zip", "", true, delegate { pages.Push(RemoveUnzippedPage(d)); }) { Icon = '', Info = "ROMs taken out of this zip, kept by nativeMons in its own folder.\n\nSelect to delete these copies. The zip itself was never changed." });
+        }
+        p.Items.Add(new Item("Add a folder", "", true, delegate { AddFolder(); }) { Icon = '', Info = "nativeMons finds games by reading each ROM, so file names don't matter. No games are included: you need your own ROMs.\n\nYou can also drop a folder, a ROM or a .zip on this window." });
+        p.Items.Add(new Item("Add a ROM file", "", true, delegate { AddRomFile(); }) { Icon = '', Info = "One .gb, .gbc, .gba or .nds ROM, used where it is. A .zip works too: its ROMs are copied out, and the zip isn't changed." });
+        if (Config.RomFolders().Count > 0 || Config.RomFiles().Count > 0 || Library.Games.Exists(g => g.Playable)) p.Items.Add(new Item(FinishFoldersLabel, "", true, FinishFolders) { Icon = '', Info = "Go back to the main screen. Your folders are saved." });
         return p;
     }
     bool firstSetup;   // the ROM folders page opened by itself because nothing is set up yet
@@ -3709,6 +3776,158 @@ class LauncherForm : Form {
         }
         return p;
     }
+    Page RemoveRomFilePage(string file) {
+        var p = new Page { Title = "Stop using this ROM?", Body = file };
+        p.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '' });
+        p.Items.Add(new Item("Stop using it", "Nothing is deleted.", true, delegate {
+            var l = Config.RomFiles(); l.RemoveAll(x => string.Equals(x, file, StringComparison.OrdinalIgnoreCase)); Config.SaveRomFiles(l);
+            pages.Pop(); pages.Pop();
+            Rescan(delegate { pages.Push(FoldersPage()); });
+        }) { Icon = '' });
+        return p;
+    }
+    Page RemoveUnzippedPage(string dir) {
+        var p = new Page { Title = "Delete these copies?", Body = "The ROMs taken out of " + Path.GetFileName(dir) + ".zip. The zip itself stays as it is, and your saves are kept." };
+        p.Items.Add(new Item("Keep them", "", true, delegate { pages.Pop(); }) { Icon = '' });
+        p.Items.Add(new Item("Delete the copies", "", RunningGames() == "", delegate {
+            pages.Pop(); pages.Pop();
+            Busy("Deleting", delegate { Directory.Delete(dir, true); return null; }, delegate(string e) {
+                Rescan(delegate { pages.Push(FoldersPage()); if (e != null) ShowText("Not deleted", e, null); });
+            });
+        }) { Icon = '' });
+        return p;
+    }
+    void AddRomFile() {
+        using (var d = new OpenFileDialog { Filter = "ROM or zip (*.gb, *.gbc, *.gba, *.nds, *.zip)|*.gb;*.gbc;*.gba;*.nds;*.zip|All files (*.*)|*.*", Title = "Choose a ROM", Multiselect = true }) {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            TakeDrop(d.FileNames);
+        }
+    }
+    // ---------- dropped files ----------
+    // Only on the menu: never while a game, a task or the splash is running.
+    bool CanTakeDrop() { return job == null && !starting && pages.Count > 0 && pages.Peek().Boxes == null; }
+    // Folders become ROM folders, ROMs are used where they are, a .zip's ROMs are copied out, and saves go to Import saves.
+    // Nothing dropped is ever changed.
+    void TakeDrop(string[] paths) {
+        if (!CanTakeDrop()) return;
+        Native.Front(Handle);
+        var folders = paths.Where(Directory.Exists).ToList();
+        var roms = paths.Where(x => File.Exists(x) && Library.IsRom(x)).ToList();
+        var zips = paths.Where(x => File.Exists(x) && Path.GetExtension(x).ToLowerInvariant() == ".zip").ToList();
+        var saves = paths.Where(x => File.Exists(x) && Path.GetExtension(x).ToLowerInvariant() == ".sav").ToList();
+        var other = paths.Where(x => !folders.Contains(x) && !roms.Contains(x) && !zips.Contains(x) && !saves.Contains(x)).ToList();
+        if (folders.Count + roms.Count + zips.Count == 0) {
+            if (saves.Count > 0) { ImportSaveFiles(saves); return; }
+            bool packed = other.Any(x => new[] { ".7z", ".rar" }.Contains(Path.GetExtension(x).ToLowerInvariant()));
+            ShowText("Can't use that", string.Join(", ", other.Select(Path.GetFileName).ToArray()) + "\n\nDrop a folder of ROMs, a .gb, .gbc, .gba or .nds ROM, a .zip of ROMs, or a .sav save." + (packed ? "\n\n.7z and .rar can't be opened here: extract it first, then drop the ROM." : ""), null);
+            return;
+        }
+        var notes = new List<string>();
+        var added = new List<string>();   // every ROM this drop brought in, to say what each one turned out to be
+        Busy("Adding your games", delegate { AddPaths(folders, roms, zips, added, notes); return null; }, delegate(string e) {
+            PickCurrent();
+            ReplaceMain();
+            if (e != null) { ShowText("Something went wrong", e, null); return; }
+            var lines = new List<string>();
+            foreach (var f in folders) lines.Add("Folder added: " + f);
+            foreach (var f in added) lines.Add(Path.GetFileName(f) + ": " + WhatRomIs(f));
+            lines.AddRange(notes);
+            if (other.Count > 0) lines.Add("Not used: " + string.Join(", ", other.Select(Path.GetFileName).ToArray()));
+            int have = Library.Games.Count(g => g.Playable);
+            var p = new Page { Title = "Added", Body = string.Join("\n\n", lines.ToArray()) + "\n\nYou have " + have + " of " + Library.Games.Count + " games ready." };
+            p.Items.Add(new Item("Done", "Back to where you were.", true, delegate { pages.Pop(); }) { Icon = '' });
+            if (saves.Count > 0) p.Items.Add(new Item("Import the saves too", saves.Count + (saves.Count == 1 ? " save" : " saves") + " dropped with them.", File.Exists(Config.MonBridge), delegate { pages.Pop(); ImportSaveFiles(saves); }) { Icon = '' });
+            pages.Push(p);
+            AskAboutEncrypted();
+        });
+    }
+    // The work of a drop, apart from the window, so --add-roms can run it too.
+    public static void AddPaths(List<string> folders, List<string> roms, List<string> zips, List<string> added, List<string> notes) {
+        if (folders.Count > 0) {
+            var l = Config.RomFolders();
+            foreach (var f in folders) if (!l.Contains(f, StringComparer.OrdinalIgnoreCase)) l.Add(f);
+            Config.SaveRomFolders(l);
+        }
+        if (roms.Count > 0) {
+            var l = Config.RomFiles();
+            foreach (var f in roms) {
+                string full = Path.GetFullPath(f);
+                // Already inside a ROM folder: it's found there, so it needn't be listed on its own.
+                bool covered = Config.RomFolders().Any(dir => full.StartsWith(Path.GetFullPath(dir).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase));
+                if (!covered && !l.Contains(full, StringComparer.OrdinalIgnoreCase)) l.Add(full);
+                added.Add(full);
+            }
+            Config.SaveRomFiles(l);
+        }
+        foreach (var z in zips) {
+            string problem = Unzip(z, added);
+            if (problem != null) notes.Add(Path.GetFileName(z) + ": " + problem);
+        }
+        Library.Scan(Gen1Cli);
+        // A ROM no game here uses isn't kept in the list: it would only be read again at every start.
+        if (roms.Count > 0) {
+            var used = new HashSet<string>(Library.Games.SelectMany(g => g.Roms).Select(r => r.File), StringComparer.OrdinalIgnoreCase);
+            var l = Config.RomFiles();
+            if (l.RemoveAll(f => added.Contains(f, StringComparer.OrdinalIgnoreCase) && !used.Contains(f)) > 0) Config.SaveRomFiles(l);
+        }
+    }
+    // Which game a ROM turned out to be, or why it can't be used, with its SHA-1 when nothing knows it.
+    public static string WhatRomIs(string file) {
+        foreach (var g in Library.Games) {
+            var rom = g.Roms.Find(r => string.Equals(r.File, file, StringComparison.OrdinalIgnoreCase));
+            if (rom == null) continue;
+            if (g.Playable) return g.Title + ", ready to play." + (g.Roms.Count > 1 ? " With more than one copy, its ROM version page picks which." : "");
+            return g.Title + ". " + Library.WhyNotPlayable(g);
+        }
+        string sha = "";
+        try { using (var f = File.OpenRead(file)) using (var h = SHA1.Create()) sha = BitConverter.ToString(h.ComputeHash(f)).Replace("-", "").ToLowerInvariant(); } catch { }
+        // The same dump found somewhere else first: the list keeps one file per dump.
+        foreach (var g in Library.Games) {
+            var same = g.Roms.Find(r => r.Sha1 == sha);
+            if (same != null) return g.Title + ". You already have this exact ROM: " + same.File;
+        }
+        return "not one of the games nativeMons runs" + (sha != "" ? " (SHA-1 " + sha + ")" : "") + ", so it wasn't added. The README lists the versions each engine accepts.";
+    }
+    // Copies a zip's ROMs out into state\roms\<zip name>. Other files in it are left alone.
+    static string Unzip(string zip, List<string> added) {
+        try {
+            string to = Path.Combine(Config.Unzipped, Path.GetFileNameWithoutExtension(zip));
+            int n = 0;
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(zip)) {
+                foreach (var entry in archive.Entries) {
+                    if (entry.Name == "" || !Library.IsRom(entry.Name)) continue;
+                    Directory.CreateDirectory(to);
+                    string target = Path.Combine(to, entry.Name);
+                    n++; added.Add(target);
+                    if (File.Exists(target) && new FileInfo(target).Length == entry.Length) continue;
+                    System.IO.Compression.ZipFileExtensions.ExtractToFile(entry, target + ".part", true);
+                    if (File.Exists(target)) File.Delete(target);
+                    File.Move(target + ".part", target);
+                }
+            }
+            return n == 0 ? "no .gb, .gbc, .gba or .nds ROM inside." : null;
+        } catch (Exception x) { return "couldn't be opened (" + x.Message + ")."; }
+    }
+    // One dropped save goes straight to importing, as Choose a file does; several get a list to pick from.
+    void ImportSaveFiles(List<string> files) {
+        if (!File.Exists(Config.MonBridge)) { ShowText("Can't import saves", "This copy of nativeMons is missing its save tools.", null); return; }
+        var found = new List<FoundSave>();
+        Busy("Reading the saves", delegate {
+            foreach (var f in files) { var one = Identify(f) ?? IdentifySlot(f); if (one != null) { one.Info = ReadSaveInfo(f); found.Add(one); } }
+            return null;
+        }, delegate(string e) {
+            if (e != null) { ShowText("Can't read that save", e, null); return; }
+            if (found.Count == 0) { ShowText("Can't read that save", "PKHeX doesn't recognise " + (files.Count == 1 ? "this file" : "these files") + " as a save.", null); return; }
+            if (found.Count == 1 && files.Count == 1) {
+                var one = found[0];
+                if (one.Game == null || !one.Game.Playable) { ShowText("Can't import that save", ((one.Note ?? "") + " Its game isn't in your ROM folders.").Trim(), null); return; }
+                ImportSave(one); return;
+            }
+            var p = new Page { Title = "Import saves" };
+            foreach (var one in found) p.Items.Add(SaveRow(one));
+            pages.Push(p);
+        });
+    }
     Page RemoveFolderPage(string folder) {
         var p = new Page { Title = "Stop searching this folder?", Body = folder };
         p.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '' });
@@ -3730,6 +3949,28 @@ class LauncherForm : Form {
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
+    }
+    // Keys each engine answers to while a game runs, from each project's own README (Infinite Fusion: its scripts), in
+    // our words. Every engine also has its own menu for changing them.
+    static readonly string[][] ControlSheets = {
+        new[] { "Fulldex", "DS and GBA games in widescreen.",
+            "Move: arrow keys\nA: X    B: Z\nX: S    Y: A\nL: Q    R: W\nStart: Enter\nSelect: Backspace\nTouch screen: the mouse\n\nPause menu: Esc\nFast forward: hold Left Shift\nSave state: F5\nLoad state: F8\nWindow or fullscreen: F11\n\nA controller plays as a DS: hold its right trigger to fast forward, Start opens the pause menu.\n\nChange any key in the pause menu, under Controls, then Keys and buttons." },
+        new[] { "Gen1Recomp", "Game Boy, Game Boy Color and GBA games.",
+            "Move: arrow keys or W A S D\nA: Z, Enter or Space\nB: X or Backspace\nStart: Esc\nSelect: Tab or Shift\n\nSave: F1\nLoad: F2\nGame speed up, down: 1, 0\nColours: 2\nTilt: 3\nZoom: 4, or - and =, or the mouse wheel\nMods: F10\n\nOn a controller, R2 and L2 change the game speed.\n\nChange any key in the game's Options, under Controls." },
+        new[] { "nativeplat", "Diamond, Pearl and Platinum, native.",
+            "Move: arrow keys or W A S D\nA: Z, Enter or Space\nB: X or Backspace\nX: C    Y: V\nL: Q    R: E\nStart: Esc\nSelect: Tab or Shift\nTouch screen: the mouse on the lower screen\n\nOptions: F10\nFast forward: hold F, or G to turn it on and off\nSpeed 1x to uncapped: 1\nRewind: hold R\nSave in the game: F1\nBack to the last save: F2 twice\nSnapshot: F5 to take, F6 for the next of 4, F7 to go back\nCamera: - and =, tilt 3 and 4, reset 0\nTouch controls: F9\nFullscreen: F11\nScreenshot: F12\n\nChange any key in Options, under Controls." },
+        new[] { "Platinum PC port", "Platinum, native.",
+            "Settings and debug tools: the ` key (grave, under Esc).\n\nIts other keys are listed in its own settings." },
+        new[] { "Infinite Fusion", "Its own program.",
+            "Speed up: the A key\nScreenshot: F8\nKeys and controller: F1\n\nWhether A holds or toggles the speed is set in the game's Options." },
+    };
+    Page ControlsPage() {
+        var p = new Page { Title = "Controls" };
+        foreach (var sheet in ControlSheets) {
+            var s = sheet;
+            p.Items.Add(new Item(s[0], "", true, delegate { ShowText(s[0] + " controls", s[2], null); }) { Icon = '', Info = s[1] + " The keys it answers to while you play." });
+        }
+        return p;
     }
     void ShowText(string title, string body, Action back) { ShowText(title, body, back, null); }
     void ShowText(string title, string body, Action back, string mono) {
@@ -5014,6 +5255,7 @@ class LauncherForm : Form {
                 Play(Library.Games.Find(g => g.Id == id));
             }
             WatchGame();
+            RequestTick();
             QuickStartTick();
             // A launcher left open still finds out.
             if (job == null && (DateTime.Now - updateCheckedAt).TotalHours >= 6) { updateCheckedAt = DateTime.Now; Task.Run(() => Updater.Check()); }
@@ -6263,12 +6505,25 @@ class LauncherForm : Form {
 }
 
 static class NativeMonsLauncher {
+    // Another copy of nativeMons, elsewhere on the PC, is a different launcher with its own games and saves.
+    static bool SameFolder(Process other) {
+        try { return string.Equals(Path.GetFullPath(Path.GetDirectoryName(other.MainModule.FileName)).TrimEnd('\\'), Path.GetFullPath(Config.Here).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
+    }
     [STAThread]
     static void Main(string[] argv) {
         Application.EnableVisualStyles();
         Config.Load();
         // --export <game id> <plain|checkpoint> <folder> [checkpoint backup]: exports without opening the window; the result goes in <folder>\export-result.txt.
         // --sync <game id> <result file> [fulldex|gen1]: shares one game's save without opening the window.
+        // --add-roms <result file> <path>...: adds folders, ROMs and zips as a drop on the window does, and says what each ROM is.
+        if (argv.Length >= 3 && argv[0] == "--add-roms") {
+            var paths = argv.Skip(2).ToList();
+            var added = new List<string>(); var notes = new List<string>();
+            LauncherForm.AddPaths(paths.Where(Directory.Exists).ToList(), paths.Where(x => File.Exists(x) && Library.IsRom(x)).ToList(), paths.Where(x => File.Exists(x) && x.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList(), added, notes);
+            File.WriteAllLines(argv[1], added.Select(f => f + "\t" + LauncherForm.WhatRomIs(f)).Concat(notes).ToArray());
+            return;
+        }
         if (argv.Length >= 3 && argv[0] == "--sync") {
             Library.Scan(LauncherForm.Gen1Cli);
             var shared = Library.Games.Find(x => x.Id == argv[1]);
@@ -6361,14 +6616,24 @@ static class NativeMonsLauncher {
         string folder = Path.GetFullPath(Config.Here).TrimEnd('\\').ToLowerInvariant().Replace('\\', '/');
         bool first;
         using (var instance = new System.Threading.Mutex(true, "Local\\NativeMonsLauncher-" + folder, out first)) {
+            // Shortcut flags: --game <id> (or --play <id>) starts that game, --slot <save> picks which of its saves first,
+            // --launcher opens the menu with that game chosen instead of starting it.
+            Func<string, string> flag = delegate(string name) { int i = Array.IndexOf(argv, name); return i >= 0 && i + 1 < argv.Length ? argv[i + 1] : null; };
+            string game = flag("--game") ?? flag("--play"), slot = flag("--slot");
+            bool menu = Array.IndexOf(argv, "--launcher") >= 0;
             if (!first) {
+                // The one already open does it: it's told through a file in state\ and a message to its window.
+                if (game != null) try { File.WriteAllText(Path.Combine(Config.State, "request.txt"), (menu ? "show" : "play") + "\n" + game + "\n" + (slot ?? "")); } catch { }
                 int me = Process.GetCurrentProcess().Id;
                 foreach (var other in Process.GetProcessesByName("NativeMonsLauncher"))
-                    if (other.Id != me && other.MainWindowHandle != IntPtr.Zero && Native.IsWindowVisible(other.MainWindowHandle)) { Native.Front(other.MainWindowHandle); break; }
+                    if (other.Id != me && other.MainWindowHandle != IntPtr.Zero && SameFolder(other)) {
+                        if (game != null) Native.PostMessage(other.MainWindowHandle, LauncherForm.WM_REQUEST, IntPtr.Zero, IntPtr.Zero);
+                        if (Native.IsWindowVisible(other.MainWindowHandle)) Native.Front(other.MainWindowHandle);
+                        break;
+                    }
                 return;
             }
-            int play = Array.IndexOf(argv, "--play");
-            Application.Run(new LauncherForm(play >= 0 && play + 1 < argv.Length ? argv[play + 1] : null));
+            Application.Run(new LauncherForm(menu ? null : game, slot, menu ? game : null));
         }
     }
 }
