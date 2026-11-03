@@ -1614,6 +1614,7 @@ class LauncherForm : Form {
         Text = "nativeMons";
         // The exe's own icon, for the taskbar and Alt+Tab.
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+        FormClosing += delegate { DropReady(); };
         // A device standing upright: no window frame, the window's own outline is the shell's.
         var area = Screen.PrimaryScreen.WorkingArea;
         int h = area.Height * 94 / 100;
@@ -1722,6 +1723,9 @@ class LauncherForm : Form {
             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Config.Gen1,
             RedirectStandardOutput = true, RedirectStandardError = true };
         psi.EnvironmentVariables["POKEPORT_IDENTITY"] = Identity;
+        // The launcher shows its own Discord status (DiscordPresence), so Gen1Recomp's isn't shown beside it, nor by a
+        // game quick start keeps waiting.
+        psi.EnvironmentVariables["POKEPORT_NO_DISCORD"] = "1";
         return psi;
     }
     // Asks the Gen1Recomp fork something (src/nativemons/ModsCli.lua). Null when it can't run.
@@ -1760,7 +1764,8 @@ class LauncherForm : Form {
         foreach (var p in native) p.Dispose();
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
-            if (found.Length > 0) names.Add(n);
+            // The game quick start keeps waiting isn't running for the player.
+            if (found.Any(p => p.Id != readyPid)) names.Add(n);
             foreach (var p in found) p.Dispose();
         }
         return string.Join(", ", names.ToArray());
@@ -1872,6 +1877,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.Playable), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
+        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Game Boy, Game Boy Color and GBA games on Gen1Recomp for now. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
@@ -3492,6 +3498,9 @@ class LauncherForm : Form {
     // ---------- running things ----------
     void Play(GameEntry g) {
         if (g == null || !g.Playable) return;
+        // The waiting game is kept through everything before it starts (a picture job finishing, the backup and sharing);
+        // PlayGen1 decides whether it's still good.
+        if (ready != null && readyFor.Id == g.Id) readyHeld = true;
         if (AfterCapture(delegate { Play(g); })) return;
         string running = RunningGames();
         if (running != "") {
@@ -3591,10 +3600,93 @@ class LauncherForm : Form {
         try { File.AppendAllText(PrepareFailedFile, PrepareKey(rom) + Environment.NewLine); } catch { }
     }
     void PlayGen1(GameEntry g) {
+        // The game kept ready is used only if nothing it loaded has changed since: its options, and its save after the
+        // backup and sharing that just ran. A GBA game reads its save while it starts.
+        // By id: the library makes new entries when it scans again.
+        if (ready != null && readyUp && readyFor.Id == g.Id && !ready.HasExited && readyOptions == Gen1Options(g) && readySave == SaveGuard.Hash(CurrentSave(g))) {
+            UseReady(g); return;
+        }
+        if (ready != null) QuickNote("not used for " + g.Id);
+        DropReady();
         var psi = Gen1Start(" --game=" + g.Gen1);
-        var wanted = GameOptions.ForGame(g);
-        if (wanted.Count > 0) psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = string.Join(",", wanted.Select(x => x.Key + "=" + x.Value).ToArray());
+        string options = Gen1Options(g);
+        if (options != "") psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = options;
+        if (QuickStart) psi.EnvironmentVariables["NATIVEMONS_TO_TITLE"] = "1";
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+    }
+    static string Gen1Options(GameEntry g) { return string.Join(",", GameOptions.ForGame(g).Select(x => x.Key + "=" + x.Value).ToArray()); }
+
+    // ---------- quick start ----------
+    // The last game waits at its title screen, out of sight, silent and stopped, while the menu is up: Play shows it at
+    // once. Gen1Recomp's side is src/nativemons/QuickStart.lua. Anything that could change what it loaded throws it away,
+    // and it's made again once the menu has been idle a moment.
+    public static bool QuickStart { get { return Config.Read("quick-start.txt", "on").Trim() != "off"; } set { Config.Write("quick-start.txt", value ? "on" : "off"); } }
+    Process ready; GameEntry readyFor; string readyOptions, readySave, readyFailed; bool readyUp, readyHeld;
+    static volatile int readyPid;
+    DateTime menuSince = DateTime.MaxValue;
+    static void QuickNote(string what) { if (TestLog != null) try { File.AppendAllText(TestLog, "quick-start: " + what + Environment.NewLine); } catch { } }
+    static bool CanQuickStart(GameEntry g) { return g != null && g.Playable && g.Engine() == "gen1" && g.Imported && g.Gen1 != null; }
+    void QuickStartTick() {
+        bool menu = job == null && !starting && waiting == null && playDirect == null && pages.Count > 0 && pages.Peek().Main;
+        if (menu) readyHeld = false;
+        if (!menu) menuSince = DateTime.MaxValue; else if (menuSince == DateTime.MaxValue) menuSince = DateTime.Now;
+        bool wanted = menu && QuickStart && CanQuickStart(current);
+        if (ready != null) {
+            bool stale = current == null || readyFor.Id != current.Id || readyOptions != Gen1Options(current) || ready.HasExited;
+            if ((!wanted && !readyHeld) || stale) DropReady();
+            return;
+        }
+        if (!wanted || (DateTime.Now - menuSince).TotalSeconds < 1.5 || RunningGames() != "") return;
+        string key = current.Id + "|" + Gen1Options(current) + "|" + current.Gen1Rom;
+        if (readyFailed == key) return;
+        StartReady(current, key);
+    }
+    void StartReady(GameEntry g, string key) {
+        var psi = Gen1Start(" --game=" + g.Gen1);
+        string options = Gen1Options(g);
+        if (options != "") psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = options;
+        psi.EnvironmentVariables["NATIVEMONS_QUICK_START"] = "1";
+        psi.RedirectStandardInput = true;
+        var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        DataReceivedEventHandler line = delegate(object s, DataReceivedEventArgs e) {
+            if (e.Data == null) return;
+            string text = e.Data;
+            BeginInvoke((Action)delegate {
+                if (job == p) { AddLine(text); dirty = true; return; }
+                if (ready != p) return;
+                if (text.Contains("nativemons: quick-start ready")) { readyUp = true; QuickNote("ready " + g.Id); }
+                else if (text.Contains("nativemons: quick-start failed")) { readyFailed = key; QuickNote("failed " + g.Id + ": " + text); DropReady(); }
+            });
+        };
+        p.OutputDataReceived += line; p.ErrorDataReceived += line;
+        p.Exited += delegate { BeginInvoke((Action)delegate { if (job == p) JobEnded(); else if (ready == p) DropReady(); }); };
+        try { p.Start(); } catch (Exception x) { readyFailed = key; QuickNote("could not start: " + x.Message); return; }
+        // Behind whatever the player has open while it gets ready.
+        try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+        p.BeginOutputReadLine(); p.BeginErrorReadLine();
+        ready = p; readyPid = p.Id; readyFor = g; readyOptions = options; readyUp = false;
+        readySave = SaveGuard.Hash(CurrentSave(g));
+        QuickNote("starting " + g.Id + " pid " + p.Id);
+    }
+    // Ends the waiting game: closing its input tells it to quit, and it's stopped if it doesn't.
+    void DropReady() {
+        var p = ready;
+        if (p == null) return;
+        ready = null; readyPid = 0; readyUp = false; readyFor = null;
+        QuickNote("dropped");
+        Task.Run(() => { try { p.StandardInput.Close(); if (!p.WaitForExit(3000)) p.Kill(); p.WaitForExit(2000); p.Dispose(); } catch { } });
+    }
+    void UseReady(GameEntry g) {
+        var p = ready; ready = null; readyPid = 0; readyUp = false; readyHeld = false;
+        try { p.PriorityClass = ProcessPriorityClass.Normal; } catch { }
+        log.Clear(); jobTitle = g.Title; jobIsGame = true; jobHid = false; jobStart = DateTime.Now; gameStart = jobStart; progress = -1;
+        jobDone = delegate(int code) { Finished(g, code); };
+        if (!Native.Quiet) Native.AllowSetForegroundWindow(-1);
+        job = p;
+        DiscordPresence.Playing(g);
+        QuickNote("used " + g.Id);
+        try { p.StandardInput.WriteLine("play"); p.StandardInput.Flush(); } catch { }
+        Invalidate();
     }
     // Explicit arguments, as Fulldex's own list builds them: it then skips that list, and QUIT ends the program.
     void PlayFulldex(GameEntry g) {
@@ -3924,6 +4016,7 @@ class LauncherForm : Form {
                 Play(Library.Games.Find(g => g.Id == id));
             }
             WatchGame();
+            QuickStartTick();
             // A launcher left open still finds out.
             if (job == null && (DateTime.Now - updateCheckedAt).TotalHours >= 6) { updateCheckedAt = DateTime.Now; Task.Run(() => Updater.Check()); }
         }
