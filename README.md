@@ -26,7 +26,7 @@ GAME FREAK inc. or The Pokémon Company.
 
 **Not supported yet:** Generation 6 and later (3DS and Switch games).
 
-**Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them. GBA ROM hacks that keep the original game's code can be chosen there too. They run on Fulldex only, with their own save. Widescreen depends on the hack.
+**Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them. GBA ROM hacks that keep the original game's code can be chosen there too. They run on Fulldex only, with their own save. Widescreen depends on the hack. Tested: [Pokémon Rocket Edition](https://rocket-edition.com/) FINAL v1.0.2, a FireRed hack, which opens straight into the game and plays with no graphical issues.
 
 Where a game has more than one engine it starts in Fulldex, and you can switch on its page. Each engine accepts certain versions of a ROM, mostly the US release: the launcher tells you if yours isn't one. Windows only for now.
 

@@ -343,7 +343,7 @@ static class GameArt {
         if (lab != null) { psi.EnvironmentVariables["PC_LAB"] = lab; psi.EnvironmentVariables["PC_LAB_AT"] = "300"; }
         if (warp != null) psi.EnvironmentVariables["PC_WARP"] = warp;
         using (var p = Process.Start(psi)) { Watch(p);
-            try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+            try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
             p.BeginOutputReadLine(); p.BeginErrorReadLine();
             if (!p.WaitForExit(600000)) { try { p.Kill(); } catch { } return -1; }
             return p.ExitCode;
@@ -363,7 +363,7 @@ static class GameArt {
             string args = "\"" + g.FulldexRom + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --input \"" + script + "\" --shot-dir \"" + temp + "\" --shot-at " + g.TownFrame + " --frames " + (g.TownFrame + 10) + " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             using (var p = Process.Start(psi)) { Watch(p);
-                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
             }
@@ -590,7 +590,7 @@ static class GameArt {
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TitleArt.lua";
             psi.EnvironmentVariables["NATIVEMONS_TITLE_ART"] = temp.Replace('\\', '/');
             using (var p = Process.Start(psi)) { Watch(p);
-                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
             }
@@ -629,7 +629,7 @@ static class GameArt {
             psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
             psi.EnvironmentVariables["NP_AUTOTEST"] = "frames=" + (1500 + Count * Step) + ",shots=" + Step + ",size=512x384,layout=top,game=" + g.Nativeplat + ",png=" + Path.Combine(temp, "s.png") + ",rom=" + LauncherForm.NativeplatRomCopy(g) + ",press=1200:start:10";
             using (var p = Process.Start(psi)) { Watch(p);
-                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
             }
@@ -673,7 +673,7 @@ static class GameArt {
             if (g.FulldexCode != "IPGE" && g.FulldexCode != "IPKE") args += " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             using (var p = Process.Start(psi)) { Watch(p);
-                try { p.PriorityClass = ProcessPriorityClass.Idle; } catch { }
+                try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
             }
@@ -704,15 +704,48 @@ static class GameArt {
         }
     }
     static readonly object BackgroundLock = new object();
+    // At the start, behind the splash: at normal priority, since nothing else is happening yet.
+    public static volatile bool Eager;
+    class Job { public GameEntry Game; public bool Town; }
+    static List<Job> Missing(GameEntry first) {
+        var jobs = Library.Games.Where(x => CanCapture(x) && !Has(x.Id) && !Failed(x, false)).Select(x => new Job { Game = x })
+            .Concat(Library.Games.Where(x => CanCaptureTown(x) && !HasTown(x.Id) && !Failed(x, true)).Select(x => new Job { Game = x, Town = true }));
+        // The game the launcher opens on comes first, so its screen is ready even if the rest is stopped.
+        return jobs.OrderBy(j => j.Game == first ? 0 : 1).ToList();
+    }
+    static string Run(Job j) {
+        string why = j.Town ? CaptureTown(j.Game) : Capture(j.Game);
+        if (why != null && !Hold) NoteFailed(j.Game, j.Town);
+        return why;
+    }
+    public static void CaptureAtStart(GameEntry first, Action<int, int> progress) {
+        Background(delegate {
+            // Only the game the menu opens on: the rest take minutes, so they're made in the background once the menu is up.
+            var jobs = Missing(first).Where(j => j.Game == first).ToList();
+            Eager = true;
+            try { for (int i = 0; i < jobs.Count && !Hold; i++) { progress(i, jobs.Count); Run(jobs[i]); } }
+            finally { Eager = false; }
+        });
+    }
     static void CaptureAll(Func<bool> busy) {
-        foreach (var g in Library.Games.Where(x => CanCapture(x) && !Has(x.Id)).ToList()) {
+        foreach (var j in Missing(null)) {
             if (busy()) return;
-            Capture(g);
+            Run(j);
         }
-        foreach (var g in Library.Games.Where(x => CanCaptureTown(x) && !HasTown(x.Id)).ToList()) {
-            if (busy()) return;
-            CaptureTown(g);
-        }
+    }
+    // A picture that can't be made isn't tried at every start: only after the ROM or the launcher changes.
+    static string FailedFile { get { return Path.Combine(Config.State, "game-art", "failed.txt"); } }
+    static string FailKey(GameEntry g, bool town) {
+        var parts = new List<string> { g.Id, town ? "town" : "title" };
+        foreach (var rom in new[] { g.FulldexRom, g.Gen1Rom }) if (rom != null) try { var f = new FileInfo(rom); parts.Add(rom + "|" + f.Length + "|" + f.LastWriteTimeUtc.Ticks); } catch { }
+        try { parts.Add(File.GetLastWriteTimeUtc(System.Reflection.Assembly.GetExecutingAssembly().Location).Ticks.ToString()); } catch { }
+        return string.Join("|", parts.ToArray());
+    }
+    static bool Failed(GameEntry g, bool town) {
+        try { return File.Exists(FailedFile) && File.ReadAllLines(FailedFile).Contains(FailKey(g, town)); } catch { return false; }
+    }
+    static void NoteFailed(GameEntry g, bool town) {
+        try { Directory.CreateDirectory(Path.GetDirectoryName(FailedFile)); File.AppendAllText(FailedFile, FailKey(g, town) + Environment.NewLine); } catch { }
     }
 }
 
@@ -1171,7 +1204,7 @@ static class Updater {
     public static string Name(string channel) { return channel == StableTag ? "Stable" : "Dev"; }
     public static string InstalledName { get { return Name(Installed ?? DevTag); } }
     public static bool Switching { get { return Installed != null && Installed != Channel; } }
-    public static bool Ready { get { var r = Latest; if (r == null || string.IsNullOrEmpty(r.sha256)) return false; return Installed != null && r.channel != Installed ? r.revision != Revision : r.build > Build; } }
+    public static bool Ready { get { var r = Latest; if (r == null || string.IsNullOrEmpty(r.sha256) || r.revision == Revision) return false; return Installed != null && r.channel != Installed ? r.revision != Revision : r.build > Build; } }
     static System.Net.WebClient Web() {
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
         var web = new System.Net.WebClient();
@@ -1652,6 +1685,9 @@ class LauncherForm : Form {
         Task.Run(() => {
             string err = null;
             try { Library.Scan(Gen1Cli); RecoverSwitches(); } catch (Exception e) { err = e.Message; }
+            try { PrepareAll(); } catch { }
+            // A shortcut straight to a game doesn't wait for pictures; they're made in the background instead.
+            if (playDirect == null) try { WallpapersAtStart(); } catch { }
             // Title screens are gathered afterwards, without holding up the menu.
             Updater.CleanUp();
             Task.Run(() => { System.Threading.Thread.Sleep(2000); Updater.Check(); });
@@ -3007,22 +3043,39 @@ class LauncherForm : Form {
             ShowText("Install a mod", message, null);
         }
     }
-    static string ExtractMod(string zip) {
+    public static string ExtractMod(string zip) {
         string paths = Gen1Cli("paths");
         if (paths == null) return "Gen1Recomp was not found.";
         string mods = paths.Split('\n').Select(l => l.TrimEnd('\r').Split('\t')).Where(f => f[0] == "mods").Select(f => f[1]).First().Replace('/', '\\');
-        string temp = Path.Combine(Config.State, "mod-unpack");
-        if (Directory.Exists(temp)) Directory.Delete(temp, true);
-        System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
-        // The manifest is at the top of the archive, or inside one folder.
-        string root = File.Exists(Path.Combine(temp, "manifest.json")) ? temp : Directory.GetDirectories(temp).FirstOrDefault(x => File.Exists(Path.Combine(x, "manifest.json")));
-        if (root == null) { Directory.Delete(temp, true); return "This archive has no manifest.json, so it is not a Gen1Recomp mod."; }
-        string target = Path.Combine(mods, root == temp ? Path.GetFileNameWithoutExtension(zip) : Path.GetFileName(root));
+        // Unpacked beside the mods folder, so the last step is a move on one drive. Not inside it, where the game would see it.
         Directory.CreateDirectory(mods);
-        if (Directory.Exists(target)) Directory.Delete(target, true);
-        Directory.Move(root, target);
-        if (Directory.Exists(temp)) Directory.Delete(temp, true);
-        return "Installed " + Path.GetFileName(target) + ".";
+        string parent = Path.GetDirectoryName(mods.TrimEnd('\\'));
+        string temp = Path.Combine(parent, "nativemons-mod-unpack"), old = Path.Combine(parent, "nativemons-mod-old");
+        try {
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
+            // The manifest is at the top of the archive, or inside one folder.
+            string root = File.Exists(Path.Combine(temp, "manifest.json")) ? temp : Directory.GetDirectories(temp).FirstOrDefault(x => File.Exists(Path.Combine(x, "manifest.json")));
+            if (root == null) return "This archive has no manifest.json, so it is not a Gen1Recomp mod.";
+            string target = Path.Combine(mods, root == temp ? Path.GetFileNameWithoutExtension(zip) : Path.GetFileName(root));
+            // An older copy steps aside first and comes back if the new one can't go in.
+            if (Directory.Exists(old)) Directory.Delete(old, true);
+            bool replacing = Directory.Exists(target);
+            if (replacing) Directory.Move(target, old);
+            try { MoveTree(root, target); }
+            catch { if (Directory.Exists(target)) Directory.Delete(target, true); if (replacing) Directory.Move(old, target); throw; }
+            if (replacing) Directory.Delete(old, true);
+            return (replacing ? "Updated " : "Installed ") + Path.GetFileName(target) + ".";
+        }
+        finally { try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+    }
+    // A move, or a copy then delete when the folders are on different drives.
+    static void MoveTree(string from, string to) {
+        if (string.Equals(Path.GetPathRoot(from), Path.GetPathRoot(to), StringComparison.OrdinalIgnoreCase)) { Directory.Move(from, to); return; }
+        Directory.CreateDirectory(to);
+        foreach (var f in Directory.GetFiles(from)) File.Copy(f, Path.Combine(to, Path.GetFileName(f)));
+        foreach (var d in Directory.GetDirectories(from)) MoveTree(d, Path.Combine(to, Path.GetFileName(d)));
+        Directory.Delete(from, true);
     }
     Page FoldersPage() {
         var p = new Page { Title = "ROM folders" };
@@ -3127,6 +3180,7 @@ class LauncherForm : Form {
         psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
         using (var p = Process.Start(psi)) { if (GameArt.OnCaptureThread) GameArt.Watch(p);
+            if (GameArt.OnCaptureThread) try { p.PriorityClass = GameArt.Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
             var err = p.StandardError.ReadToEndAsync();
             var o = p.StandardOutput.ReadToEndAsync();
             if (!p.WaitForExit(seconds * 1000)) { try { p.Kill(); } catch { } code = -1; return "That took too long and was stopped."; }
@@ -3387,6 +3441,65 @@ class LauncherForm : Form {
             g.Imported = true;
             if (then != null) then(); else ShowText("Ready", g.Title + " is prepared.", null);
         });
+    }
+    // Gen1Recomp builds a game's data from its ROM before the first play, which takes up to a minute for a GBA game. Doing every
+    // game here, behind the splash, means Play starts straight away. A ROM that fails is noted and left to Play, which says why.
+    // Each game has its own data folder and the fork's import writes nothing shared, so a few run at once. The first runs alone,
+    // as an older install may move its Red data on the first import.
+    void PrepareAll() {
+        if (RunningGames() != "") return;
+        var todo = Library.Games.Where(g => g.Gen1 != null && !g.Imported && g.Gen1Rom != null && !PrepareFailed(g.Gen1Rom)).ToList();
+        if (todo.Count == 0) return;
+        // Three games at once, two extract workers each: as each one finishes, the next in line starts, so three are always
+        // running until the list is done. A game is prepared once. Most of the PC's load here isn't the engine (1 to 4 cores)
+        // but Windows Defender scanning the ~60,000 small files 11 games write (about 12 cores on a 28-thread PC). One at a time
+        // only spreads that out: 70 seconds instead of 49, still peaking near 60%.
+        int lanes = Math.Max(1, Math.Min(3, Environment.ProcessorCount / 6));
+        int workers = Math.Max(1, Math.Min(2, Environment.ProcessorCount / (lanes * 4)));
+        int done = 0;
+        Action<GameEntry> one = g => {
+            if (PrepareNow(g, workers)) g.Imported = true; else NotePrepareFailed(g.Gen1Rom);
+            int n = System.Threading.Interlocked.Increment(ref done);
+            startStage = n < todo.Count ? "Preparing your games (" + n + " of " + todo.Count + " ready)" : "Almost ready";
+        };
+        startStage = todo.Count == 1 ? "Preparing " + todo[0].Title : "Preparing your games";
+        one(todo[0]);
+        // Biggest ROMs first: a GBA game takes several times longer than a Game Boy one, so the slow ones overlap.
+        var rest = todo.Skip(1).OrderByDescending(g => { try { return new FileInfo(g.Gen1Rom).Length; } catch { return 0L; } }).ToList();
+        Parallel.ForEach(System.Collections.Concurrent.Partitioner.Create(rest, true), new ParallelOptions { MaxDegreeOfParallelism = lanes }, one);
+    }
+    // The title screen and town of the game the menu opens on are made here, so Play shows that game's own screen straight away,
+    // and loaded before the menu appears. Each is made once.
+    void WallpapersAtStart() {
+        string last = Config.Read("last-game.txt", "");
+        var first = Library.Games.Find(g => g.Id == last && g.Playable) ?? Library.Games.Find(g => g.Playable);
+        if (RunningGames() == "")
+            GameArt.CaptureAtStart(first, delegate(int n, int total) { startStage = "Making wallpapers (" + (n + 1) + " of " + total + ")"; });
+        if (first != null) { GameArt.Frame(first.Id, 0); GameArt.Town(first.Id); }
+    }
+    static bool PrepareNow(GameEntry g, int workers) {
+        var psi = Gen1Start("");
+        psi.EnvironmentVariables["POKEPORT_EXTRACT_WORKERS"] = workers.ToString();
+        psi.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
+        psi.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
+        using (var rom = new PlainPath(g.Gen1Rom)) {
+            psi.EnvironmentVariables["POKEPORT_IMPORT_ROM"] = rom.Path_;
+            using (var p = Process.Start(psi)) {
+                // Below whatever the player has open, so a video or game they're running keeps its CPU.
+                try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+                p.StandardError.ReadToEndAsync(); p.StandardOutput.ReadToEndAsync();
+                if (!p.WaitForExit(300000)) { try { p.Kill(); p.WaitForExit(5000); } catch { } return false; }
+                return p.ExitCode == 0;
+            }
+        }
+    }
+    static string PrepareFailedFile { get { return Path.Combine(Config.State, "prepare-failed.txt"); } }
+    static string PrepareKey(string rom) { var f = new FileInfo(rom); return rom + "|" + f.Length + "|" + f.LastWriteTimeUtc.Ticks; }
+    static bool PrepareFailed(string rom) {
+        try { return File.Exists(PrepareFailedFile) && File.ReadAllLines(PrepareFailedFile).Contains(PrepareKey(rom)); } catch { return false; }
+    }
+    static void NotePrepareFailed(string rom) {
+        try { File.AppendAllText(PrepareFailedFile, PrepareKey(rom) + Environment.NewLine); } catch { }
     }
     void PlayGen1(GameEntry g) {
         var psi = Gen1Start(" --game=" + g.Gen1);
@@ -4910,6 +5023,13 @@ static class NativeMonsLauncher {
             else if (verb == "caught") { var c = LauncherForm.CaughtInAllSaves(saved); outcome = null; File.WriteAllText(argv[2] + ".caught", c == null ? "none" : string.Join(",", c.OrderBy(x => x))); }
             File.WriteAllText(argv[2], (outcome ?? "ok") + "\nactive=" + SaveSets.Active(saved) + "\nall=" + string.Join(",", SaveSets.All(saved)));
             Environment.ExitCode = outcome == null ? 0 : 2;
+            return;
+        }
+        // --install-mod <zip> <result file>: installs a Gen1Recomp mod as the Mods page does, without a window.
+        if (argv.Length >= 3 && argv[0] == "--install-mod") {
+            string result;
+            try { result = LauncherForm.ExtractMod(argv[1]); } catch (Exception e) { result = "Could not install it: " + e.Message; }
+            File.WriteAllText(argv[2], result);
             return;
         }
         if (argv.Length >= 4 && argv[0] == "--export") {

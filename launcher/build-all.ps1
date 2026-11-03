@@ -47,6 +47,25 @@ Step 'Launcher'
 if ($LASTEXITCODE -ne 0) { throw 'The launcher did not build.' }
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE'), (Join-Path $repo 'README.md') -Destination $out
 
+# A copy built here says which published build it already contains, so the updater only offers a newer one. Any release
+# that is part of this checkout counts; one that isn't (or can't be checked) leaves build 0, so updates are offered.
+Step 'Version'
+$versionFile = Join-Path $out 'version.txt'
+$channel = 'bleeding-edge'
+if (Test-Path -LiteralPath $versionFile) {
+    $line = Get-Content -LiteralPath $versionFile | Where-Object { $_ -like 'channel=*' } | Select-Object -First 1
+    if ($line -eq 'channel=stable') { $channel = 'stable' }
+}
+$head = (& git -C $repo rev-parse HEAD).Trim()
+$build = 0
+try {
+    $release = Invoke-RestMethod "https://github.com/Hailey-Ross/nativeMons/releases/download/$channel/release.json"
+    & git -C $repo merge-base --is-ancestor $release.revision HEAD 2>$null
+    if ($LASTEXITCODE -eq 0) { $build = [int]$release.build }
+} catch { }
+"channel=$channel`nbuild=$build`nrevision=$head`nlocal=yes" | Set-Content -LiteralPath $versionFile -Encoding ascii
+Write-Host "Local build of $($head.Substring(0, 7)), includes $channel build $build."
+
 Step 'Gen1Recomp'
 $gen1 = Join-Path $out 'engines\gen1recomp'
 if (Test-Path -LiteralPath $gen1) { Remove-Item -LiteralPath $gen1 -Recurse -Force }
