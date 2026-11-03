@@ -157,6 +157,8 @@ Each engine has its own page of options (**Fulldex**, **Gen1Recomp**), stored wh
 
 **Controls** lists the keys each engine uses while you play (Fulldex, Gen1Recomp, nativeplat, the Platinum PC port and Infinite Fusion): saving, fast forward, snapshots, screenshots and where to change them.
 
+**Screenshots** opens the folders where nativeplat (F12) and Infinite Fusion (F8) put the screenshots you take. Fulldex and Gen1Recomp have no screenshot key; Windows + Shift + S works in any game.
+
 **Import saves**, **Export saves**, **Download Pokedex**, **Credits** and **Last session** (how the last game ended) are here too.
 
 ## nativeplat

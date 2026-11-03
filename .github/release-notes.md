@@ -23,7 +23,7 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **D-pad or left stick:** move. **A:** select. **B:** back.
 - **Keyboard:** arrow keys or WASD, Enter, Esc.
 - **Mouse:** hover to select, click to choose, right-click to go back. The D-pad and buttons on the device can be clicked too, and dragging its shell moves the window.
-- **In a game:** **Settings > Controls** lists each engine's keys, such as saving, fast forward, snapshots and screenshots.
+- **In a game:** **Settings > Controls** lists each engine's keys, such as saving, fast forward, snapshots and screenshots. **Settings > Screenshots** opens the folders they're saved in.
 
 ## What's in it
 
