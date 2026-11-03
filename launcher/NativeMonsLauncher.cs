@@ -70,10 +70,9 @@ static class DiscordPresence {
     public static bool Enabled { get { return Config.Read("discord.txt", "on").Trim() != "off"; } set { Config.Write("discord.txt", value ? "on" : "off"); if (!value) Stop(); } }
     static string Id { get { string own = Config.Read("discord-app.txt", "").Trim(); return own != "" ? own : AppId; } }
     public static bool Available { get { return Id != ""; } }
-    public static string EngineLabel(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "the Platinum PC port" : engine == "nativeplat" ? "nativeplat" : "Gen1Recomp"; }
     public static void Playing(GameEntry g) {
         if (g == null || !Enabled || !Available) return;
-        string title = g.Title, engine = EngineLabel(g.Engine()), id = Id;
+        string title = g.Title, id = Id;
         long started = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
         int mine;
         lock (gate) mine = ++generation;
@@ -81,15 +80,14 @@ static class DiscordPresence {
             try {
                 var p = Connect(id);
                 if (p == null) return;
-                // The picture, both lines and the button all lead to the project's GitHub page.
+                // The game, and a button to the project's GitHub page; the picture and the game's name lead there too. Discord
+                // shows the button to everyone but the player.
                 var activity = new Dictionary<string, object> {
                     { "details", title.StartsWith("Pokemon ") ? "Pokémon " + title.Substring(8) : title },
                     { "details_url", Home },
-                    { "state", "via nativeMons launcher, on " + engine },
-                    { "state_url", Home },
                     { "timestamps", new Dictionary<string, object> { { "start", started } } },
                     { "assets", new Dictionary<string, object> { { "large_image", ImageKey }, { "large_text", "nativeMons launcher" }, { "large_url", Home } } },
-                    { "buttons", new object[] { new Dictionary<string, object> { { "label", "Get nativeMons" }, { "url", Home } } } },
+                    { "buttons", new object[] { new Dictionary<string, object> { { "label", "nativeMons on GitHub" }, { "url", Home } } } },
                 };
                 Send(p, 1, new Dictionary<string, object> { { "cmd", "SET_ACTIVITY" }, { "nonce", Guid.NewGuid().ToString() },
                     { "args", new Dictionary<string, object> { { "pid", Process.GetCurrentProcess().Id }, { "activity", activity } } } });
