@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner.jpg" alt="A cherry-blossom river town" width="100%"></p>
+
 # nativeMons
 
 <p align="center"><img src="assets/logo-512.png" alt="nativeMons logo" width="256"></p>

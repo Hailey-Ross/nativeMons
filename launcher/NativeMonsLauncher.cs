@@ -63,7 +63,7 @@ static class DiscordPresence {
     // The application registered at discord.com/developers. Its name is what Discord shows as "Playing ...". A file in state
     // overrides it, for testing another application.
     const string AppId = "1566980838325747914";
-    const string ImageKey = "nativemons";
+    const string ImageKey = "nativemons", Home = "https://github.com/Hailey-Ross/nativeMons";
     static readonly object gate = new object();
     static System.IO.Pipes.NamedPipeClientStream pipe;
     static int generation;
@@ -81,12 +81,15 @@ static class DiscordPresence {
             try {
                 var p = Connect(id);
                 if (p == null) return;
+                // The picture, both lines and the button all lead to the project's GitHub page.
                 var activity = new Dictionary<string, object> {
                     { "details", title.StartsWith("Pokemon ") ? "Pokémon " + title.Substring(8) : title },
+                    { "details_url", Home },
                     { "state", "via nativeMons launcher, on " + engine },
+                    { "state_url", Home },
                     { "timestamps", new Dictionary<string, object> { { "start", started } } },
-                    { "assets", new Dictionary<string, object> { { "large_image", ImageKey }, { "large_text", "nativeMons launcher" } } },
-                    { "buttons", new object[] { new Dictionary<string, object> { { "label", "Get nativeMons" }, { "url", "https://github.com/Hailey-Ross/nativeMons" } } } },
+                    { "assets", new Dictionary<string, object> { { "large_image", ImageKey }, { "large_text", "nativeMons launcher" }, { "large_url", Home } } },
+                    { "buttons", new object[] { new Dictionary<string, object> { { "label", "Get nativeMons" }, { "url", Home } } } },
                 };
                 Send(p, 1, new Dictionary<string, object> { { "cmd", "SET_ACTIVITY" }, { "nonce", Guid.NewGuid().ToString() },
                     { "args", new Dictionary<string, object> { { "pid", Process.GetCurrentProcess().Id }, { "activity", activity } } } });
