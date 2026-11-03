@@ -1,0 +1,41 @@
+# Nightly: upstream engine updates into the forks, and their pins onto dev (notes/engine-sync.md).
+name: Engine sync
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # 1:00 AM MST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.ENGINE_SYNC_APP_ID }}
+          private-key: ${{ secrets.ENGINE_SYNC_APP_KEY }}
+          owner: Hailey-Ross
+          repositories: nativeMons,gen1recomp,pokemon-fulldex,gen4recomp
+
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Sync
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          export BOT_NAME="$SLUG[bot]"
+          export BOT_EMAIL="$(gh api "/users/$SLUG%5Bbot%5D" --jq .id)+$SLUG[bot]@users.noreply.github.com"
+          bash .github/engine-sync/sync.sh

@@ -1,9 +1,5 @@
-// Converts one Pokemon between game formats using OpenHome's code (github.com/andrewbenington/OpenHome, GPL-3.0).
-// mon-bridge calls this for moves with no real transfer between the games, and PKHeX checks whatever comes out.
-//
-//   node convert.cjs <from format> <input file> <to format> <output file>     formats: pk1 pk2 pk3 pk4 pk5
-//
-// Exits 0 with the output file written, otherwise prints why and exits non-zero. Licensed under the GNU GPL v3 or later.
+// Converts one Pokemon between formats with OpenHome's code (github.com/andrewbenington/OpenHome, GPL-3.0).
+// node convert.cjs <from pk1-pk5> <input> <to> <output>. Exits 0 when written. GPL v3 or later.
 import { OHPKM } from '@openhome-core/pkm/OHPKM'
 import { PK1, PK2, PK3, PK4, PK5 } from '@openhome-core/pkm'
 import { R } from '@openhome-core/util/functional'

@@ -1,6 +1,4 @@
-# Builds the whole of nativeMons into one folder that's ready to run. launcher\build.bat runs this when it's opened
-# with no arguments. Output goes to the folder named in build-output.txt at the repo root (not committed), otherwise to
-# build\nativeMons. Rebuilding keeps state\ and Fulldex's saves.
+# Builds all of nativeMons into one ready-to-run folder: the one named in build-output.txt, else build\nativeMons.
 # The versions below match .github\actions\build-package\action.yml: change them together.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -47,8 +45,7 @@ Step 'Launcher'
 if ($LASTEXITCODE -ne 0) { throw 'The launcher did not build.' }
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE'), (Join-Path $repo 'README.md') -Destination $out
 
-# A copy built here says which published build it already contains, so the updater only offers a newer one. Any release
-# that is part of this checkout counts; one that isn't (or can't be checked) leaves build 0, so updates are offered.
+# Records which published build this already contains, so the updater only offers newer ones.
 Step 'Version'
 $versionFile = Join-Path $out 'version.txt'
 $channel = 'bleeding-edge'
@@ -105,8 +102,7 @@ else {
     Write-Host 'Downloaded.'
 }
 
-# The Platinum PC port: the program only. Its game data is unpacked from the player's own ROM on their PC, and its save lives
-# in this folder too, so nothing is removed.
+# The Platinum PC port: the program only. Its game data comes from the player's ROM.
 Step "Platinum PC port $platinumRelease"
 $port = Join-Path $out 'engines\pokeplatinum'
 $mark = Join-Path $port '.nativemons-version'
@@ -120,8 +116,7 @@ else {
     Write-Host 'Downloaded.'
 }
 
-# nativeplat: Platinum, Diamond and Pearl, built by our fork's public workflow. The program only: the player's ROMs and saves
-# go in userdata beside it, so nothing is removed.
+# nativeplat: the program only, from our fork's workflow. ROMs and saves go in userdata.
 Step "nativeplat $nativeplatRelease"
 $nativeplat = Join-Path $out 'engines\nativeplat'
 $mark = Join-Path $nativeplat '.nativemons-version'
@@ -141,6 +136,20 @@ New-Item -ItemType Directory -Force $patcher | Out-Null
 Copy-Item -Path (Join-Path $repo 'tools\nds-patcher\*.py') -Destination $patcher -Force
 Copy-Item -LiteralPath (Join-Path $repo 'tools\nds-patcher\LICENSE') -Destination $patcher -Force
 Write-Host 'Copied.'
+
+# Optional: mGBA's libretro core, for romhacks' title screens. Without it they show their base game's.
+Step 'mGBA core'
+$mgba = Join-Path $out 'tools\mgba'
+if (Test-Path -LiteralPath (Join-Path $mgba 'mgba_libretro.dll')) { Write-Host 'Already there.' }
+else {
+    try {
+        $unpacked = Fetch 'https://buildbot.libretro.com/nightly/windows/x86_64/latest/mgba_libretro.dll.zip' 'mgba'
+        New-Item -ItemType Directory -Force $mgba | Out-Null
+        Copy-Item -LiteralPath (Join-Path $unpacked 'mgba_libretro.dll') -Destination $mgba -Force
+        Invoke-WebRequest 'https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE' -OutFile (Join-Path $mgba 'LICENSE-mGBA.txt') -UseBasicParsing
+        Write-Host 'Downloaded.'
+    } catch { Write-Host "Skipped: $($_.Exception.Message) Romhacks show their base game's title screen." }
+}
 
 Step 'mon-bridge'
 $bridgeProject = Join-Path $repo 'tools\mon-bridge\MonBridge.csproj'
