@@ -2073,6 +2073,7 @@ class LauncherForm : Form {
         if (screen == "credits") pages.Push(CreditsPage());
         if (screen == "settings") pages.Push(SettingsPage());
         if (screen == "controls") pages.Push(ControlsPage());
+        if (screen == "screenshots") pages.Push(ScreenshotsPage());
         if (screen.StartsWith("controls-")) { int n = int.Parse(screen.Substring(9)); pages.Push(ControlsPage()); pages.Push(new Page { Title = ControlSheets[n][0] + " controls", Body = ControlSheets[n][2] }); }
         var sample = Library.Games.Find(g => g.Playable) ?? (Library.Games.Count > 0 ? Library.Games[0] : null);
         if (screen == "game" && sample != null) pages.Push(GamePage(sample));
@@ -2329,6 +2330,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
         p.Items.Add(new Item("Controls", "", true, delegate { pages.Push(ControlsPage()); }) { Icon = '\uE765', Info = "The keys each engine uses while you play: saving, fast forward, snapshots, screenshots." });
+        p.Items.Add(new Item("Screenshots", "", true, delegate { pages.Push(ScreenshotsPage()); }) { Icon = '', Info = "Open the folders where nativeplat and Infinite Fusion put the screenshots you take while you play." });
         p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, and DS games on Fulldex. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
@@ -3964,6 +3966,34 @@ class LauncherForm : Form {
         new[] { "Infinite Fusion", "Its own program.",
             "Speed up: the A key\nScreenshot: F8\nKeys and controller: F1\n\nWhether A holds or toggles the speed is set in the game's Options." },
     };
+    // Where each engine's screenshot key writes. nativeplat: F12, into userdata\screenshots (portable.txt keeps it beside the
+    // exe). Infinite Fusion: F8, into its save folder (RTP.getSaveFileName). Fulldex and Gen1Recomp have no screenshot key.
+    static List<KeyValuePair<string, string>> ScreenshotFolders() {
+        var list = new List<KeyValuePair<string, string>>();
+        if (File.Exists(Config.Nativeplat)) list.Add(new KeyValuePair<string, string>("nativeplat", Path.Combine(NativeplatDir, "userdata", "screenshots")));
+        foreach (var g in Library.Games.Where(x => x.Pc == "infinitefusion" && PcGames.Installed(x)))
+            list.Add(new KeyValuePair<string, string>(g.Title, PcGames.SaveDir(g)));
+        return list;
+    }
+    static int CountPictures(string dir) {
+        try { return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.png").Length : 0; } catch { return 0; }
+    }
+    Page ScreenshotsPage() {
+        var p = new Page { Title = "Screenshots" };
+        foreach (var kv in ScreenshotFolders()) {
+            string dir = kv.Value; int n = CountPictures(dir);
+            string key = kv.Key == "nativeplat" ? "F12" : "F8";
+            string count = n == 0 ? "None yet: press " + key + " in the game." : n + (n == 1 ? " picture" : " pictures") + ", taken with " + key + ".";
+            p.Items.Add(new Item(kv.Key, "", true, delegate {
+                Directory.CreateDirectory(dir);
+                try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+            }) { Icon = '', Info = count + " Select to open the folder: " + dir });
+        }
+        p.Items.Add(new Item("Other games", "", true, delegate {
+            ShowText("Screenshots in other games", "Fulldex and Gen1Recomp have no screenshot key of their own.\n\nWindows can take one of any game, these and the Platinum PC port too: Windows + Shift + S picks an area, and Windows + Alt + Print Screen saves the game's window to Videos\\Captures.", null);
+        }) { Icon = '', Info = "Taking screenshots in Fulldex, Gen1Recomp and the Platinum PC port." });
+        return p;
+    }
     Page ControlsPage() {
         var p = new Page { Title = "Controls" };
         foreach (var sheet in ControlSheets) {
