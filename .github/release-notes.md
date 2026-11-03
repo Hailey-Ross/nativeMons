@@ -5,7 +5,7 @@
 3. **Start** `NativeMonsLauncher.exe`. Choose **ROM folders** and add the folder with your `.gb`, `.gbc`, `.gba` and `.nds` files. File names don't matter: games are found by reading each ROM.
 4. **Your saves:** **Settings > Import saves** brings in saves from other emulators. The originals aren't changed.
 
-The first time you play a Game Boy or GBA game with Gen1Recomp, the launcher prepares it from your ROM, which takes a minute or two.
+The launcher prepares your Game Boy and GBA games for Gen1Recomp from your ROMs while it starts, so they open straight away when you press Play. It also makes the title screen and town wallpaper of the game it opens on, so Play shows that game straight away; the other games' pictures are made in the background once the menu is up. All of this runs out of sight at low priority. The first start after adding ROMs takes longer, about a minute for a full set; after that it opens in about a second. Windows Defender scans the many small files preparing writes, which is most of the load during that first start.
 
 ## Games
 
