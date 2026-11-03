@@ -12,6 +12,10 @@
 //   mon-bridge families                                     evolution families: comma-separated dex numbers
 //   mon-bridge moves <save>                                 the moves that game has: id, name
 //   mon-bridge move <from save> <box> <slot> <to save> <backup folder> [move:<1-4>:<id, 0 deletes>]... [dropitem]
+//                   [at:<box>:<slot>]                       into that empty slot, instead of the first free one
+//   mon-bridge layout <save>                                boxes, slots per box, then a row per box: index, name
+//   mon-bridge relocate <save> <box> <slot> <to box> <to slot> <backup folder>
+//                                                           within one save: moves it, or swaps it with what's there
 //
 // Exit codes: 0 done, 1 usage or unreadable save, 2 the move is not possible (saves untouched).
 using System;
@@ -29,6 +33,8 @@ static class Program
         try
         {
             if (args.Length == 2 && args[0] == "list") return List(args[1]);
+            if (args.Length == 2 && args[0] == "layout") return Layout(args[1]);
+            if (args.Length == 7 && args[0] == "relocate") return Relocate(args[1], int.Parse(args[2]), int.Parse(args[3]), int.Parse(args[4]), int.Parse(args[5]), args[6]);
             if (args.Length == 2 && args[0] == "info") { var i = Open(args[1]); Console.WriteLine(i.GetType().Name + "\t" + i.Version + "\t" + i.Generation + "\t" + Clean(i.OT)); return 0; }
             if (args.Length >= 6 && args[0] == "move") return Move(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4], args[5], args.Skip(6).ToArray());
             if (args.Length == 5 && args[0] == "plan") return Plan(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4]);
@@ -98,6 +104,57 @@ static class Program
                 Console.WriteLine(string.Join('\t', box, slot, names[pk.Species], Clean(pk.Nickname), pk.CurrentLevel, Clean(pk.OriginalTrainerName), pk.Species, pk.IsShiny ? "shiny" : "normal"));
             }
         }
+        return 0;
+    }
+
+    // The boxes as the game shows them, for the launcher's box screen.
+    static int Layout(string path)
+    {
+        var sav = Open(path);
+        Console.WriteLine(string.Join('\t', "boxes", sav.BoxCount, sav.BoxSlotCount));
+        for (int box = 0; box < sav.BoxCount; box++)
+        {
+            string name;
+            try { name = sav is IBoxDetailNameRead named ? named.GetBoxName(box) : ""; } catch { name = ""; }
+            if (string.IsNullOrWhiteSpace(name)) name = "Box " + (box + 1);
+            Console.WriteLine(string.Join('\t', "box", box, Clean(name)));
+        }
+        return 0;
+    }
+
+    // Where a move goes: the slot asked for (at:<box>:<slot>), which must be empty, or else the first free one.
+    // -1 the boxes are full, -2 no such slot, -3 that slot is taken.
+    static int Target(SaveFile to, string[] options)
+    {
+        foreach (var o in options)
+        {
+            var p = o.Split(':');
+            if (p.Length != 3 || p[0] != "at") continue;
+            int b = int.Parse(p[1]), s = int.Parse(p[2]);
+            if (b < 0 || b >= to.BoxCount || s < 0 || s >= to.BoxSlotCount) return -2;
+            return to.GetBoxSlotAtIndex(b, s).Species == 0 ? b * to.BoxSlotCount + s : -3;
+        }
+        return to.NextOpenBoxSlot();
+    }
+
+    static int Unplaced(int open, SaveFile to) => Refuse(open == -3 ? "That slot isn't empty any more." : open == -2 ? "That box slot doesn't exist in " + to.Version + "." : "The boxes in " + to.Version + " are full.");
+
+    // Within one save: no conversion, one read and one write. Into an empty slot it moves; onto another Pokemon they swap.
+    static int Relocate(string path, int box, int slot, int toBox, int toSlot, string backups)
+    {
+        var sav = Open(path);
+        if (box < 0 || box >= sav.BoxCount || toBox < 0 || toBox >= sav.BoxCount || slot < 0 || slot >= sav.BoxSlotCount || toSlot < 0 || toSlot >= sav.BoxSlotCount)
+            return Refuse("That box slot doesn't exist.");
+        if (box == toBox && slot == toSlot) { Console.WriteLine("ok\tsame"); return 0; }
+        var a = sav.GetBoxSlotAtIndex(box, slot);
+        if (a.Species == 0) return Refuse("That box slot is empty.");
+        var b = sav.GetBoxSlotAtIndex(toBox, toSlot);
+        Directory.CreateDirectory(backups);
+        File.Copy(path, Path.Combine(backups, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-boxes-" + Path.GetFileName(path)), true);
+        sav.SetBoxSlotAtIndex(a, toBox, toSlot);
+        sav.SetBoxSlotAtIndex(b.Species == 0 ? sav.BlankPKM : b, box, slot);
+        WriteSafely(path, sav);
+        Console.WriteLine("ok\t" + GameInfo.Strings.Species[a.Species] + "\t" + (b.Species == 0 ? "moved" : "swapped"));
         return 0;
     }
 
@@ -349,7 +406,7 @@ static class Program
         if (!SpeciesFits(pk.Species, to)) return Refuse(name + " doesn't exist in " + to.Version + ", so it can't go there.");
         string originals = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(backups))!, "pokemon-originals");
         string? home = FindOriginal(pk, to, originals);
-        if (home is not null) return MoveHome(from, to, pk, box, slot, fromPath, toPath, backups, home, name);
+        if (home is not null) return MoveHome(from, to, pk, box, slot, fromPath, toPath, backups, home, name, options);
 
         // The player's answers: move:<1-4>:<new id, 0 deletes>. dropitem agrees to losing a held item.
         var moves = new[] { pk.Move1, pk.Move2, pk.Move3, pk.Move4 };
@@ -400,8 +457,8 @@ static class Program
         if (moved is null)
             return Refuse(name + " can't go from " + from.Version + " to " + to.Version + ": PKHeX has no conversion between those games.");
 
-        int open = to.NextOpenBoxSlot();
-        if (open < 0) return Refuse("The boxes in " + to.Version + " are full.");
+        int open = Target(to, options);
+        if (open < 0) return Unplaced(open, to);
 
         Directory.CreateDirectory(backups);
         string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
@@ -444,7 +501,7 @@ static class Program
         return File.Exists(file) ? file : null;
     }
 
-    static int MoveHome(SaveFile from, SaveFile to, PKM pk, int box, int slot, string fromPath, string toPath, string backups, string file, string name)
+    static int MoveHome(SaveFile from, SaveFile to, PKM pk, int box, int slot, string fromPath, string toPath, string backups, string file, string name, string[] options)
     {
         var original = EntityFormat.GetFromBytes(File.ReadAllBytes(file), to.Context);
         if (original is null || original.GetType() != to.PKMType) return Refuse("The original copy of " + name + " couldn't be read.");
@@ -454,8 +511,8 @@ static class Program
         to.AdaptToSaveFile(original);
         original.RefreshChecksum();
         bool legal = new LegalityAnalysis(original).Valid;
-        int open = to.NextOpenBoxSlot();
-        if (open < 0) return Refuse("The boxes in " + to.Version + " are full.");
+        int open = Target(to, options);
+        if (open < 0) return Unplaced(open, to);
         Directory.CreateDirectory(backups);
         string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
         File.Copy(fromPath, Path.Combine(backups, stamp + "-from-" + Path.GetFileName(fromPath)), true);
