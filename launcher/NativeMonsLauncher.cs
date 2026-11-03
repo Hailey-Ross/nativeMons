@@ -269,7 +269,11 @@ static class PcGames {
     public static string Existing(GameEntry g) { string d = Config.Read("pc-" + g.Id + ".txt", "").Trim(); return d != "" ? d : null; }
     public static bool IsExisting(GameEntry g) { return Existing(g) != null; }
     static string OwnExe(GameEntry g) { return g.Pc == "infinitefusion" ? Config.InfiniteFusion : null; }
-    public static string Exe(GameEntry g) { string e = Existing(g); return e != null ? Path.Combine(e, "Game.exe") : OwnExe(g); }
+    public static bool IsCustom(GameEntry g) { return g.Pc == "custom"; }
+    public static string Exe(GameEntry g) {
+        if (IsCustom(g)) { var c = CustomGames.Find(g.Id); return c != null ? CustomGames.Exe(c) : null; }
+        string e = Existing(g); return e != null ? Path.Combine(e, "Game.exe") : OwnExe(g);
+    }
     public static string Dir(GameEntry g) { string e = Exe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static string OwnDir(GameEntry g) { string e = OwnExe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static bool Installed(GameEntry g) { string e = Exe(g); return e != null && File.Exists(e); }
@@ -290,7 +294,7 @@ static class PcGames {
         + "  end\n"
         + "end\n";
     public static void PrepareSaves(GameEntry g, ProcessStartInfo psi) {
-        if (IsExisting(g)) return;
+        if (IsExisting(g) || IsCustom(g)) return;
         string dir = OwnDir(g), saves = SaveDir(g);
         Directory.CreateDirectory(saves);   // the game falls back to its own folder when this doesn't exist
         File.WriteAllText(Path.Combine(dir, PreloadName), Preload);
@@ -323,6 +327,13 @@ static class PcGames {
             try { if (string.Equals(p.MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase)) return true; } catch { } finally { p.Dispose(); }
         return false;
     }
+    // Any program running from inside that folder.
+    public static bool RunningFrom(string dir) {
+        string root = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
+        foreach (var p in Process.GetProcesses())
+            try { if (p.MainModule.FileName.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return true; } catch { } finally { p.Dispose(); }
+        return false;
+    }
     public static bool AnyRunning() { return Library.Games.Any(g => g.Pc != null && Installed(g) && Running(g)); }
     // The program on the PC, or null: installing and updating use it, as the game's own updater does with its bundled one.
     public static string Git() {
@@ -345,6 +356,7 @@ static class PcGames {
     }
     // "6.8.2" and the release's own words, from the last commit's subject ("[6.8.2] Safari Zone crash patch").
     public static string Version(GameEntry g) {
+        if (IsCustom(g)) { try { string v = Installed(g) ? FileVersionInfo.GetVersionInfo(Exe(g)).ProductVersion : null; return string.IsNullOrWhiteSpace(v) ? null : v.Trim(); } catch { return null; } }
         if (!Installed(g) || Git() == null || !Directory.Exists(Path.Combine(Dir(g), ".git"))) return null;
         string subject = null;
         try { RunGit("log -1 --format=%s", Dir(g), delegate(string l) { if (subject == null) subject = l.Trim(); }); } catch { }
@@ -432,6 +444,7 @@ static class PcGames {
     // Before each session: the save files copied aside, newest 30 kept, in state\save-backups\<id>\<time>. The game keeps
     // backups of its own too, in its save folder.
     public static void Backup(GameEntry g) {
+        if (IsCustom(g)) return;   // where an added game keeps its saves is its own business
         string from = SaveDir(g);
         if (!Directory.Exists(from)) return;
         var files = Directory.GetFiles(from, "*.rxdata");
@@ -440,6 +453,76 @@ static class PcGames {
         Directory.CreateDirectory(to);
         foreach (var f in files) File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
         foreach (var old in Directory.GetDirectories(root).OrderByDescending(x => x, StringComparer.Ordinal).Skip(30)) try { Directory.Delete(old, true); } catch { }
+    }
+}
+
+// PC games the player adds themselves: any self-contained game with its own .exe, no support written for it. They
+// are kept in state\pc-games.json: a name, the program, and whether the launcher holds its own copy (in games\<id>,
+// removed with it) or runs the player's where it is. They have none of the extras (captured title, wallpaper, save
+// handling): the launcher can't know where such a game keeps its saves, so it leaves them to the game.
+static class CustomGames {
+    public class Entry { public string id, title, exe; public bool copy; }
+    static string File_ { get { return Path.Combine(Config.State, "pc-games.json"); } }
+    public static List<Entry> All() {
+        try { return File.Exists(File_) ? new JavaScriptSerializer().Deserialize<List<Entry>>(File.ReadAllText(File_)) ?? new List<Entry>() : new List<Entry>(); }
+        catch { return new List<Entry>(); }
+    }
+    static void Save(List<Entry> all) { Directory.CreateDirectory(Config.State); File.WriteAllText(File_, new JavaScriptSerializer().Serialize(all)); }
+    public static Entry Find(string id) { return All().Find(e => e.id == id); }
+    // Their themes come from this set in turn, so they don't all look alike.
+    static readonly string[][] Looks = {
+        new[] { "#4F6D8F", "#243447", "#9CC3E6" }, new[] { "#5E8C61", "#2C4430", "#A9D8A3" }, new[] { "#8A5A9E", "#41284D", "#D6B0E6" },
+        new[] { "#B5793A", "#5A3A16", "#F0C48A" }, new[] { "#3E8A8A", "#1C4242", "#9BDADA" }, new[] { "#9E4F5E", "#4A2129", "#E6A7B3" } };
+    public static GameEntry ToGame(Entry e, int n) {
+        var look = Looks[n % Looks.Length];
+        var g = new GameEntry { Id = e.id, Title = e.title, Console = "PC", Pc = "custom" };
+        g.Theme = Theme.Make(look[0], look[1], look[2], "plain"); g.Theme.GameId = g.Id;
+        return g;
+    }
+    public static string Dir(Entry e) { return e.copy ? Path.Combine(Config.Here, "games", e.id) : Path.GetDirectoryName(e.exe); }
+    public static string Exe(Entry e) { return e.copy ? Path.Combine(Dir(e), Path.GetFileName(e.exe)) : e.exe; }
+    // A new game: copied into the launcher, or run where it is. Its name comes from the program's own product name, else
+    // its folder's.
+    public static string Add(string exe, bool copy, Action<string, float> report, out Entry added) {
+        added = null;
+        if (!File.Exists(exe)) return "That program isn't there.";
+        string title = null;
+        try { title = FileVersionInfo.GetVersionInfo(exe).ProductName; } catch { }
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 40) title = new DirectoryInfo(Path.GetDirectoryName(exe)).Name;
+        string slug = System.Text.RegularExpressions.Regex.Replace(title.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        if (slug == "") slug = "game";
+        var all = All();
+        string id = "pc-" + slug; for (int i = 2; all.Any(x => x.id == id) || Library.Games.Any(x => x.Id == id); i++) id = "pc-" + slug + "-" + i;
+        var e = new Entry { id = id, title = title, exe = Path.GetFullPath(exe), copy = copy };
+        if (copy) {
+            string from = Path.GetDirectoryName(e.exe), to = Dir(e), work = to + ".adding";
+            if (Path.GetPathRoot(from).TrimEnd('\\') == from.TrimEnd('\\')) return "That program sits at the top of a drive, so its folder can't be copied. Add it where it is instead.";
+            try {
+                if (Directory.Exists(work)) PcGames.Remove(work);
+                var files = Library.FilesUnder(from);
+                long total = Math.Max(1, files.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } })), done = 0;
+                foreach (var f in files) {
+                    string rel = f.Substring(from.TrimEnd('\\').Length + 1), target = Path.Combine(work, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    File.Copy(f, target, true);
+                    File.SetAttributes(target, File.GetAttributes(target) & ~FileAttributes.ReadOnly);
+                    try { done += new FileInfo(f).Length; } catch { }
+                    report("Copying " + rel, (float)done / total);
+                }
+                Directory.Move(work, to);
+            } catch (Exception x) { try { if (Directory.Exists(work)) PcGames.Remove(work); } catch { } return "Copying stopped: " + x.Message + " Nothing was added."; }
+        }
+        all.Add(e); Save(all); added = e;
+        return null;
+    }
+    public static void Rename(string id, string title) { var all = All(); var e = all.Find(x => x.id == id); if (e == null) return; e.title = title; Save(all); }
+    // Forgets the game; a copy the launcher held is deleted, the player's own never is.
+    public static string Remove(string id) {
+        var all = All(); var e = all.Find(x => x.id == id);
+        if (e == null) return null;
+        if (e.copy && Directory.Exists(Dir(e))) try { PcGames.Remove(Dir(e)); } catch (Exception x) { return "Couldn't delete its copy: " + x.Message; }
+        all.Remove(e); Save(all);
+        return null;
     }
 }
 
@@ -610,7 +693,7 @@ static class GameArt {
         }
     }
     // A game nativeplat can show but doesn't run for the player names its core as townCore: its wallpaper comes from there.
-    public static bool CanCaptureTown(GameEntry g) { return g.Pc != null ? g.OnPc : ((g.TownFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom)) || g.OnNativeplat || (g.TownCore != null && g.FulldexRom != null && File.Exists(Config.Nativeplat) && !Library.NeedsPatch(g.FulldexRom)) || (g.Gen1 != null && g.Gen1Rom != null)); }
+    public static bool CanCaptureTown(GameEntry g) { return g.Pc != null ? g.OnPc && !PcGames.IsCustom(g) :((g.TownFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom)) || g.OnNativeplat || (g.TownCore != null && g.FulldexRom != null && File.Exists(Config.Nativeplat) && !Library.NeedsPatch(g.FulldexRom)) || (g.Gen1 != null && g.Gen1Rom != null)); }
     // nativeplat's test mode, which uses saves of its own and never the player's. At its furthest camera the whole of Twinleaf
     // fits and the people, the player included, are too far off to be drawn. Diamond and Pearl play a scripted new game (from
     // gen4recomp's tests/dp) until they can walk, then jump to the town. Platinum's save lab makes a save standing there.
@@ -888,7 +971,8 @@ static class GameArt {
         } catch (Exception x) { return x.Message; }
     }
     public static bool CanCapture(GameEntry g) {
-        if (g.Pc != null) return g.OnPc;
+        // Added PC games go without a captured title screen or wallpaper.
+        if (g.Pc != null) return g.OnPc && !PcGames.IsCustom(g);
         if (g.IsDs && g.FulldexCode == null) return g.OnNativeplat;
         if (g.IsDs) return g.ArtFrame > 0 && g.FulldexRom != null && File.Exists(Config.Fulldex) && (!Library.NeedsPatch(g.FulldexRom) || File.Exists(Config.Patcher));
         return g.Gen1 != null && (g.Imported || g.Gen1Rom != null);
@@ -1305,6 +1389,9 @@ static class Library {
             }
             list.Add(e);
         }
+        // PC games the player added (CustomGames), after the built-in ones.
+        int added = 0;
+        foreach (var c in CustomGames.All()) if (!list.Any(x => x.Id == c.id)) list.Add(CustomGames.ToGame(c, added++));
         Theme.Parade = list.Select(x => x.Theme).ToArray();
 
         // version -> accepted hashes and whether it is imported, from the engine itself.
@@ -1348,6 +1435,7 @@ static class Library {
     }
     // Why a game can't start: a ROM with no engine to run it is a different problem from a missing or wrong ROM.
     public static string WhyNotPlayable(GameEntry g) {
+        if (g.Pc == "custom") return "Its program has moved or been deleted.";
         if (g.Pc != null) return "Not installed yet. Select it to install.";
         string rom = g.FulldexRom ?? g.FoundUnsupported;
         bool canRun = (g.Gen1 != null && Gen1Found) || (g.FulldexCode != null && File.Exists(Config.Fulldex)) || (g.Nativeplat != null && File.Exists(Config.Nativeplat));
@@ -1840,7 +1928,8 @@ class Page {
 
 class LauncherForm : Form {
     const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, A = 0x1000, B = 0x2000;
-    // Term 1 of Gen1Recomp's LICENSE.MD sets the last sentence's exact wording, "at minimum", while we ship its engine. The rest says what it applies to.
+    // Gen1Recomp's credit, shown on the Credits page (user, 2026-11-02: not on the splash or atop the README). The last
+    // sentence keeps the wording term 1 of its LICENSE.MD gives; the rest says what it applies to.
     public const string Gen1Credit = "Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).";
     const string Identity = "nativemons";   // Gen1Recomp's save folder, apart from any other install's saves
 
@@ -3270,6 +3359,7 @@ class LauncherForm : Form {
             p.Items.Add(it);
         }
         if (p.Items.Count == 0) p.Items.Add(new Item("No games listed", Library.Note, false, null));
+        p.Items.Add(new Item("Add a PC game", "Any game with its own program, such as a fan game.", true, delegate { AddPcGame(); }) { Icon = '', Info = "Choose the game's .exe. It's run as it is, with no extras: the launcher starts it and shows it on Discord, and leaves its saves to the game." });
         return p;
     }
     string[] GameRecords(GameEntry g) {
@@ -3872,11 +3962,84 @@ class LauncherForm : Form {
     void PlayPc(GameEntry g) {
         var psi = new ProcessStartInfo(PcGames.Exe(g)) { UseShellExecute = false, WorkingDirectory = PcGames.Dir(g), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         try { PcGames.PrepareSaves(g, psi); } catch (Exception x) { ShowText("Could not start " + g.Title, "Its save folder couldn't be set up: " + x.Message, null); return; }
-        RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+        DateTime started = DateTime.Now;
+        RunJob(g.Title, psi, true, delegate(int code) {
+            // Some games start through a small program that hands over to the real one and quits. If an added game's
+            // program ends that soon, the session lasts while anything run from its folder is still open.
+            if (!PcGames.IsCustom(g) || (DateTime.Now - started).TotalSeconds > 15) { Finished(g, code); return; }
+            string dir = PcGames.Dir(g);
+            Busy("Playing " + g.Title, delegate {
+                DateTime quietSince = DateTime.Now;
+                while ((DateTime.Now - quietSince).TotalSeconds < 3) {
+                    if (PcGames.RunningFrom(dir)) quietSince = DateTime.Now;
+                    System.Threading.Thread.Sleep(500);
+                }
+                return null;
+            }, delegate(string e) { Finished(g, 0); });
+        });
     }
     // A PC game: imported into the launcher (its files and saves in the launcher's folders, updated by it), or an existing
     // installation added as it is (run in place, saves where the game keeps them). Either can become the other.
+    // ---------- PC games the player adds (CustomGames) ----------
+    void AddPcGame() {
+        string exe;
+        using (var d = new OpenFileDialog { Filter = "Programs (*.exe)|*.exe", Title = "Choose the game's program (.exe)" }) {
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            exe = d.FileName;
+        }
+        var p = new Page { Title = "Add " + Path.GetFileNameWithoutExtension(exe) };
+        p.Body = exe + "\n\nRun it where it is, or let the launcher keep its own copy of the game's folder (removed again with it). Either way the game keeps its saves wherever it always does.";
+        Action<bool> add = delegate(bool copy) {
+            CustomGames.Entry added = null; string problem = null;
+            Busy(copy ? "Copying the game" : "Adding the game", delegate {
+                problem = CustomGames.Add(exe, copy, delegate(string what, float at) { BeginInvoke((Action)delegate { progress = at; AddLine("nativemons: " + what); dirty = true; }); }, out added);
+                return null;
+            }, delegate(string e) {
+                if (e != null || problem != null) { ShowText("Not added", e ?? problem, null); return; }
+                string id = added.id;
+                Rescan(delegate {
+                    while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+                    pages.Push(GamesPage());
+                    var g = Library.Games.Find(x => x.Id == id);
+                    if (g != null) pages.Push(GamePage(g));
+                });
+            });
+        };
+        p.Items.Add(new Item("Run it where it is", "Nothing is copied.", true, delegate { pages.Pop(); add(false); }) { Icon = '' });
+        p.Items.Add(new Item("Copy it into the launcher", "Its whole folder, kept in games\\.", true, delegate { pages.Pop(); add(true); }) { Icon = '' });
+        p.Items.Add(new Item("Cancel", "", true, delegate { pages.Pop(); }) { Icon = '' });
+        pages.Push(p);
+    }
+    Page CustomGamePage(GameEntry g) {
+        var p = new Page { Title = g.Title, Theme = g.Theme };
+        var c = CustomGames.Find(g.Id);
+        if (c == null) { p.Body = "This game is no longer in the launcher."; return p; }
+        string version = PcGames.Version(g);
+        if (!g.OnPc) p.Body = "Its program isn't at " + CustomGames.Exe(c) + " any more. Remove it here, then add it again from where it is now.";
+        var play = new Item("Play", version != null ? "Version " + version + "." : "Start " + g.Title + ".", g.OnPc, delegate { Play(g); }) { Icon = '' };
+        play.Records = new[] { (c.copy ? "The launcher's copy: " : "Runs from: ") + CustomGames.Exe(c), "Saves: wherever the game keeps them" };
+        p.Items.Add(play);
+        p.Items.Add(new Item("Rename", "Shown as " + g.Title + ".", true, delegate {
+            string name = AskText("Rename", "Name for this game:", g.Title);
+            if (string.IsNullOrWhiteSpace(name)) return;
+            CustomGames.Rename(g.Id, name.Trim());
+            string id = g.Id;
+            Rescan(delegate { pages.Pop(); pages.Pop(); pages.Push(GamesPage()); var fresh = Library.Games.Find(x => x.Id == id); if (fresh != null) pages.Push(GamePage(fresh)); ReplaceMain(); });
+        }) { Icon = '' });
+        p.Items.Add(new Item("Open its folder", "", Directory.Exists(CustomGames.Dir(c)), delegate { try { Process.Start("explorer.exe", "\"" + CustomGames.Dir(c) + "\""); } catch { } }) { Icon = '', Info = CustomGames.Dir(c) });
+        p.Items.Add(new Item("Remove from the launcher", c.copy ? "Deletes the launcher's copy. Saves stay." : "Forgets it. Nothing is deleted.", true, delegate {
+            if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
+            string problem = null, id = g.Id;
+            Busy("Removing " + g.Title, delegate { problem = CustomGames.Remove(id); return null; }, delegate(string e) {
+                if (e != null || problem != null) { ShowText("Not removed", e ?? problem, null); return; }
+                if (Config.Read("last-game.txt", "") == id) Config.Write("last-game.txt", "");
+                Rescan(delegate { while (pages.Count > 1 && !pages.Peek().Main) pages.Pop(); pages.Push(GamesPage()); ReplaceMain(); });
+            });
+        }) { Icon = '' });
+        return p;
+    }
     Page PcGamePage(GameEntry g) {
+        if (PcGames.IsCustom(g)) return CustomGamePage(g);
         var p = new Page { Title = g.Title, Theme = g.Theme };
         Action pickExisting = delegate {
             string f = PickFolder("Choose your installation's folder, the one with Game.exe");
@@ -5103,17 +5266,20 @@ class LauncherForm : Form {
         int i = (int)k % Rainbow.Length;
         return Mix(Rainbow[i], Rainbow[(i + 1) % Rainbow.Length], k - (int)k);
     }
-    static void SpinningBall(Graphics g, float cx, float cy, float size, float t) {
+    static void SpinningBall(Graphics g, float cx, float cy, float size, float t) { SpinningBall(g, cx, cy, size, t, false); }
+    // dark: the page's own colours for a dark background (translucent white edges, a dark button); otherwise dark edges.
+    static void SpinningBall(Graphics g, float cx, float cy, float size, float t, bool dark) {
         var st = g.Save();
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.TranslateTransform(cx, cy); g.RotateTransform(t * 180f % 360f); g.ScaleTransform(size / 64f, size / 64f);
         var whole = new RectangleF(-30, -30, 60, 60);
-        using (var top = new SolidBrush(Fade(RainbowAt(t), 230))) g.FillPie(top, whole.X, whole.Y, whole.Width, whole.Height, 180, 180);
-        using (var bottom = new SolidBrush(Color.White)) g.FillPie(bottom, whole.X, whole.Y, whole.Width, whole.Height, 0, 180);
-        using (var band = new Pen(Fade(Line, 200), 3f)) g.DrawLine(band, -30, 0, 30, 0);
-        using (var edge = new Pen(Fade(Line, 220), 2f)) g.DrawEllipse(edge, whole);
-        using (var button = new SolidBrush(Color.White)) using (var ring = new Pen(Fade(Line, 200), 2f)) { g.FillEllipse(button, -8, -8, 16, 16); g.DrawEllipse(ring, -8, -8, 16, 16); }
-        using (var dot = new Pen(Fade(Line, 70), 1.5f)) g.DrawEllipse(dot, -4, -4, 8, 8);
+        using (var top = new SolidBrush(Fade(RainbowAt(t), dark ? 217 : 230))) g.FillPie(top, whole.X, whole.Y, whole.Width, whole.Height, 180, 180);
+        using (var bottom = new SolidBrush(dark ? Color.FromArgb(209, 255, 255, 255) : Color.White)) g.FillPie(bottom, whole.X, whole.Y, whole.Width, whole.Height, 0, 180);
+        using (var band = new Pen(dark ? Color.FromArgb(51, 255, 255, 255) : Fade(Line, 200), 3f)) g.DrawLine(band, -30, 0, 30, 0);
+        using (var edge = new Pen(dark ? Color.FromArgb(38, 255, 255, 255) : Fade(Line, 220), 2f)) g.DrawEllipse(edge, whole);
+        using (var button = new SolidBrush(dark ? Color.FromArgb(153, 0, 0, 0) : Color.White)) using (var ring = new Pen(dark ? Color.FromArgb(51, 255, 255, 255) : Fade(Line, 200), 2f)) { g.FillEllipse(button, -8, -8, 16, 16); g.DrawEllipse(ring, -8, -8, 16, 16); }
+        if (dark) using (var dot = new SolidBrush(Color.FromArgb(38, 255, 255, 255))) g.FillEllipse(dot, -4, -4, 8, 8);
+        else using (var dot = new Pen(Fade(Line, 70), 1.5f)) g.DrawEllipse(dot, -4, -4, 8, 8);
         g.Restore(st);
     }
     static void Cart(Graphics g, float x, float y, float len, Theme th) {
@@ -5576,7 +5742,8 @@ class LauncherForm : Form {
         using (var b = new SolidBrush(Color.Black)) g.FillRectangle(b, all);
         // A phone starting up: black glass, the mark, and one quiet line of progress.
         float cx = w / 2f, cy = h * 0.42f, rise = (1 - Ease(since / 0.6f)) * h * 0.012f;
-        Lens(g, cx, cy - h * 0.1f + rise, h * 0.052f, t, false);
+        // Starting up: the same rainbow Poke Ball as the working screen, in its own colours on this dark screen.
+        SpinningBall(g, cx, cy - h * 0.1f + rise, h * 0.104f, t, true);
         float size = h * 0.062f;
         using (var bold = new Font("Segoe UI Semibold", size, GraphicsUnit.Pixel)) using (var light = new Font("Segoe UI Light", size, GraphicsUnit.Pixel)) {
             var a1 = g.MeasureString("Native", bold); var a2 = g.MeasureString("Mons", light);
@@ -5592,8 +5759,6 @@ class LauncherForm : Form {
         using (var b = new SolidBrush(Color.White)) g.FillRectangle(b, track.X + at, track.Y, run, track.Height);
         g.Restore(clip);
         Write(g, startStage ?? "", smallFont, Color.FromArgb(170, 255, 255, 255), new RectangleF(0, track.Bottom + h * 0.018f, w, smallFont.Height * 1.4f), StringAlignment.Center, StringAlignment.Near, false);
-        // Gen1Recomp's LICENSE.MD, term 1: its credit must show visibly in any launcher. Here on every start, and on the Credits page.
-        Write(g, Gen1Credit, smallFont, Color.FromArgb(150, 255, 255, 255), new RectangleF(w * 0.07f, h - smallFont.Height * 5.6f, w * 0.86f, smallFont.Height * 5f), StringAlignment.Center, StringAlignment.Near, true);
         float fade = Ease(since / 0.45f);
         if (fade < 1) using (var veil = new SolidBrush(Color.FromArgb((int)(255 * (1 - fade)), 8, 10, 14))) g.FillRectangle(veil, all);
     }
