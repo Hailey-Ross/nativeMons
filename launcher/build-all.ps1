@@ -170,6 +170,13 @@ else {
         Copy-Item -LiteralPath (Join-Path $gbaSource 'README.md') -Destination (Join-Path $gba 'README.md') -Force
         Copy-Item -LiteralPath (Join-Path $repo 'engines\fulldex\LICENSE') -Destination (Join-Path $gba 'LICENSE.txt') -Force
         Invoke-WebRequest 'https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE' -OutFile (Join-Path $gba 'LICENSE-mGBA.txt') -UseBasicParsing
+        $rc = Join-Path $repo 'engines\fulldex\frontend\thirdparty\rcheevos\LICENSE'
+        if (Test-Path -LiteralPath $rc) { Copy-Item -LiteralPath $rc -Destination (Join-Path $gba 'LICENSE-rcheevos.txt') -Force }
+        $pd = Join-Path $gbaSource 'third_party\pokedaisy'
+        if (Test-Path -LiteralPath (Join-Path $pd 'NOTICE')) {
+            Copy-Item -LiteralPath (Join-Path $pd 'NOTICE') -Destination (Join-Path $gba 'NOTICE-PokeDaisy.txt') -Force
+            Copy-Item -LiteralPath (Join-Path $pd 'LICENSE') -Destination (Join-Path $gba 'LICENSE-PokeDaisy.txt') -Force
+        }
         Write-Host 'Built.'
     }
 }
