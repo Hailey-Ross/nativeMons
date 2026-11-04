@@ -300,7 +300,8 @@ static class PcGames {
         + "if ENV['NATIVEMONS_SAVE_DIR'] && !ENV['NATIVEMONS_SAVE_DIR'].empty?\n"
         + "  module System\n"
         + "    def self.data_directory\n"
-        + "      ENV['NATIVEMONS_SAVE_DIR'].tr('\\\\', '/')\n"
+        + "      d = ENV['NATIVEMONS_SAVE_DIR'].tr('\\\\', '/')\n"
+        + "      d.end_with?('/') ? d : d + '/'\n"
         + "    end\n"
         + "  end\n"
         + "end\n";
@@ -2314,7 +2315,10 @@ static class Updater {
     public static string Name(string channel) { return channel == StableTag ? "Stable" : "Dev"; }
     public static string InstalledName { get { return Name(Installed ?? DevTag); } }
     public static bool Switching { get { return Installed != null && Installed != Channel; } }
-    public static bool Ready { get { var r = Latest; if (r == null || string.IsNullOrEmpty(r.sha256) || r.revision == Revision) return false; return Installed != null && r.channel != Installed ? r.revision != Revision : r.build > Build; } }
+    // A copy built here (version.txt's local=, from build.bat or build-all.ps1): no update is offered over it, so a
+    // release can't replace newer work; Settings > Updates can still take one on request.
+    public static string Local { get { string v; return Version().TryGetValue("local", out v) ? v : null; } }
+    public static bool Ready { get { var r = Latest; if (Local != null || r == null || string.IsNullOrEmpty(r.sha256) || r.revision == Revision) return false; return Installed != null && r.channel != Installed ? r.revision != Revision : r.build > Build; } }
     static System.Net.WebClient Web() {
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
         var web = new System.Net.WebClient();
@@ -2665,7 +2669,7 @@ class BoxView {
 }
 
 class LauncherForm : Form {
-    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, A = 0x1000, B = 0x2000;
+    const ushort UP = 0x0001, DOWN = 0x0002, LEFT = 0x0004, RIGHT = 0x0008, A = 0x1000, B = 0x2000, X = 0x4000, LB = 0x0100, RB = 0x0200;
     // Gen1Recomp's credit, on the Credits page only. The last sentence keeps its LICENSE.MD term 1 wording.
     public const string Gen1Credit = "Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).";
     const string Identity = "nativemons";   // Gen1Recomp's save folder, apart from any other install's saves
@@ -2830,7 +2834,7 @@ class LauncherForm : Form {
                 var v = new BoxView(); v.Side[0] = LoadSide(a); v.Side[1] = b.Id == a.Id ? v.Side[0] : LoadSide(b);
                 var first = v.Side[0].Mons.Keys.Where(k => k / v.Side[0].Slots == 0).OrderBy(k => k).FirstOrDefault();
                 v.Cursor = first % v.Side[0].Slots;
-                if (screen == "boxheld" && v.Side[0].At(0, v.Cursor) != null) { v.HeldPane = 0; v.HeldBox = 0; v.HeldSlot = v.Cursor; v.Pane = 1; v.Cursor = 8; }
+                if (screen == "boxheld" && v.Side[0].At(0, v.Cursor) != null) { v.HeldPane = 0; v.HeldBox = 0; v.HeldSlot = v.Cursor; BoxOther(v); }
                 pages.Push(new Page { Title = "Move Pokemon", Boxes = v });
                 if (screen == "boxchoose") ChooseBoxGame(v, 1);
                 for (int i = 0; i < 2; i++) foreach (var mon in v.Side[i].Mons.Where(x => x.Key / v.Side[i].Slots == v.Box[i]).Select(x => x.Value)) Sprites.Get((mon.Shiny ? "shiny/" : "") + mon.Dex);
@@ -3169,12 +3173,19 @@ class LauncherForm : Form {
     void OpenUpdates() {
         string problem = null;
         Busy("Looking for updates", delegate { problem = Updater.Check(); return null; }, delegate(string e) {
-            string here = Updater.Build > 0 ? Updater.InstalledName + " build " + Updater.Build : "a local build, not from a release";
+            string local = Updater.Local;
+            string here = local != null ? "a local build" + (local.Length >= 7 && local != "yes" ? " of " + local.Substring(0, 7) : "") : Updater.Build > 0 ? Updater.InstalledName + " build " + Updater.Build : "a local build, not from a release";
             string chosen = Updater.Name(Updater.Channel);
             string other = Updater.Channel == Updater.StableTag ? Updater.DevTag : Updater.StableTag;
             var channel = new Item("Get updates from: " + chosen, "", true, delegate { Updater.Choose(other); pages.Pop(); OpenUpdates(); }) { Icon = '\uE895', Info = "Stable is the tested build. Dev gets every change first, and may have more problems. Select to switch to " + Updater.Name(other) + "." };
             var p = new Page { Title = "Updates" };
             if (problem != null || e != null) { p.Body = "This copy is " + here + ".\n\nCouldn't look for updates on " + chosen + ". " + (e ?? problem); p.Items.Add(channel); pages.Push(p); return; }
+            if (local != null && Updater.Latest != null && !string.IsNullOrEmpty(Updater.Latest.sha256)) {
+                p.Body = "This copy is " + here + ", so updates aren't offered: a release could replace newer work.\n\nThe newest on " + chosen + " is build " + Updater.Latest.build + ". Updating replaces this copy's launcher and engines with it; your saves and settings stay.";
+                p.Items.Add(new Item("Update anyway", "", true, delegate { pages.Pop(); StartUpdate(); }) { Icon = '' });
+                p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '' });
+                p.Items.Add(channel); pages.Push(p); return;
+            }
             if (!Updater.Ready) { p.Body = "This copy is " + here + ".\n\nThe newest on " + chosen + " is build " + Updater.Latest.build + ". You're up to date."; p.Items.Add(channel); pages.Push(p); return; }
             p.Body = "This copy is " + here + ".\n\n" + chosen + " build " + Updater.Latest.build + " is ready." + (Updater.Switching ? " It can be older than what you have now." : "") + " It updates the launcher and every engine together, downloading about 200 MB.\n\nYour saves, ROM copies, wallpapers and settings stay as they are. The launcher restarts when it's done.";
             p.Items.Add(new Item("Update now", "", true, delegate { pages.Pop(); StartUpdate(); }) { Icon = '\uE896' });
@@ -4251,7 +4262,7 @@ class LauncherForm : Form {
         boxHits.Clear();
         var accent = Accent(th);
         const int cols = 6;
-        float footH = smallFont.Height * 2.5f, gap = h * 0.008f, hh = itemFont.Height * 2.05f;
+        float footH = smallFont.Height * 3.1f, gap = h * 0.008f, hh = itemFont.Height * 2.05f;
         // On the tablet the two games sit side by side; on the phone, one above the other.
         v.Wide = w > h * 1.1f;
         float paneW = v.Wide ? (w - 2 * m - gap * 3) / 2f : w - 2 * m, paneH = v.Wide ? bottom - y - footH - gap : (bottom - y - footH - gap) / 2f;
@@ -4323,6 +4334,8 @@ class LauncherForm : Form {
                 }
                 if (heldCell == 0) heldCell = cell;
             }
+            // The game the cursor isn't in steps back, as HOME's does.
+            if (v.Pane != pane && !v.Dragging) using (var veil = new SolidBrush(Color.FromArgb(110, PhoneBg))) using (var path = Round(RectangleF.Inflate(well, cell * 0.02f, cell * 0.02f), cell * 0.16f)) g.FillPath(veil, path);
         }
         // The Pokemon in hand: under the pointer while dragging, else just above the cursor.
         BoxMon held = v.Holding ? v.Side[v.HeldPane].At(v.HeldBox, v.HeldSlot) : null;
@@ -4343,10 +4356,34 @@ class LauncherForm : Form {
         BoxMon under = side != null && v.Cursor >= 0 ? side.At(v.Box[v.Pane], v.Cursor) : null;
         var show = held ?? under;
         string first = v.Note ?? (show != null ? (show.Nick != "" && !string.Equals(show.Nick, show.Species, StringComparison.OrdinalIgnoreCase) ? show.Nick + " (" + show.Species + ")" : show.Species) + "   Lv " + show.Level + (show.Shiny ? "   ★ shiny" : "") + "   OT " + show.Trainer : "");
-        string second = v.Holding ? "Drop it on an empty slot. B puts it back." : "Drag a Pokemon, or A picks it up. The name changes the game.";
+        var hints = v.Holding ? new[] { "A", "Put down", "X", "Other game", "LB RB", "Box", "B", "Put back" }
+            : v.Cursor < 0 ? new[] { "A", "Change game", "◀ ▶", "Box", "X", "Other game", "B", "Back" }
+            : new[] { "A", "Pick up", "X", "Other game", "LB RB", "Box", "B", "Back" };
         Write(g, first, v.Note != null ? smallBold : smallBold, v.Note != null ? Color.FromArgb(200, 60, 50) : PhoneText, new RectangleF(foot.X, foot.Y, foot.Width, footH * 0.45f), StringAlignment.Center, StringAlignment.Center, false);
-        Write(g, second, smallFont, PhoneSub, new RectangleF(foot.X, foot.Y + footH * 0.45f, foot.Width, footH * 0.55f), StringAlignment.Center, StringAlignment.Center, true);
+        ButtonHints(g, hints, new RectangleF(foot.X, foot.Y + footH * 0.45f, foot.Width, footH * 0.55f));
         if (v.Dragging) spinning = true;   // keep drawing while the pointer moves
+    }
+    // Buttons and what they do, in a row: each button a dark chip, as the Switch shows them.
+    void ButtonHints(Graphics g, string[] pairs, RectangleF r) {
+        float chipH = smallBold.Height * 1.45f, sp = chipH * 0.3f, total = 0;
+        var widths = new float[pairs.Length];
+        for (int i = 0; i < pairs.Length; i++) {
+            widths[i] = g.MeasureString(pairs[i], smallBold).Width + (i % 2 == 0 ? chipH * 0.3f : 0);
+            if (i % 2 == 0) widths[i] = Math.Max(widths[i], chipH);
+            total += widths[i] + (i % 2 == 0 ? sp * 0.5f : sp * 2.2f);
+        }
+        float x = r.X + (r.Width - total) / 2, cy = r.Y + (r.Height - chipH) / 2;
+        for (int i = 0; i < pairs.Length; i++) {
+            var cr = new RectangleF(x, cy, widths[i], chipH);
+            if (i % 2 == 0) {
+                Card(g, cr, chipH / 2, Color.FromArgb(60, 60, 67), Color.FromArgb(40, 40, 46), Color.Empty, 0);
+                Write(g, pairs[i], smallBold, Color.White, cr, StringAlignment.Center, StringAlignment.Center, false);
+                x += widths[i] + sp * 0.5f;
+            } else {
+                Write(g, pairs[i], smallBold, PhoneText, new RectangleF(x, cy - chipH, widths[i] + sp, chipH * 3), StringAlignment.Near, StringAlignment.Center, false);
+                x += widths[i] + sp * 2.2f;
+            }
+        }
     }
     void RenderDexEntry(Graphics g, Page p, int w, int h, float m, float y, float bottom, float t, Theme th) {
         int id = p.DexId; bool caught = DexCaught(id, p.DexOnly);
@@ -5372,6 +5409,8 @@ class LauncherForm : Form {
         var from = v.Side[fromPane]; var to = v.Side[toPane];
         var mon = from.At(fromBox, fromSlot);
         if (mon == null) return;
+        // Moves go between the games: back on its own side, it goes back where it was.
+        if (fromPane == toPane) return;
         if (from.Game.Id == to.Game.Id) {
             if (fromBox == toBox && fromSlot == toSlot) return;
             if (AfterCapture(delegate { BoxDrop(v, toPane, toSlot); })) return;
@@ -5394,10 +5433,29 @@ class LauncherForm : Form {
         moveAfter = delegate { LoadBoxes(v, v.Side[0].Game, v.Side[1].Game, null); };
         MoveNow(from.Game, from.File, fromBox.ToString(), fromSlot.ToString(), mon.Species, to.Game);
     }
+    // The cursor to the other game, as HOME's button does: the same place, or holding, the nearest empty slot.
+    static void BoxOther(BoxView v) {
+        int at = v.Cursor; v.Pane = 1 - v.Pane; var s = v.Side[v.Pane];
+        if (s == null || s.Problem != null) { v.Cursor = -1; return; }
+        if (at < 0) return;
+        at = Math.Min(at, s.Slots - 1);
+        if (v.Holding && s.At(v.Box[v.Pane], at) != null)
+            for (int d = 1; d < s.Slots; d++) {
+                if (at + d < s.Slots && s.At(v.Box[v.Pane], at + d) == null) { at += d; break; }
+                if (at - d >= 0 && s.At(v.Box[v.Pane], at - d) == null) { at -= d; break; }
+            }
+        v.Cursor = at; v.Col = at % 6;
+    }
     void BoxAct(Page p, string a) {
         var v = p.Boxes; var side = v.Side[v.Pane];
         const int cols = 6;
         int count = side.Slots, rows = (count + cols - 1) / cols;
+        if (a == "switch") { BoxOther(v); v.Note = null; return; }
+        if (a == "boxprev" || a == "boxnext") {
+            if (side.Problem == null) { v.Box[v.Pane] = (v.Box[v.Pane] + (a == "boxnext" ? 1 : -1) + side.Boxes) % side.Boxes; v.Note = null; }
+            if (v.Holding && v.Cursor >= 0 && v.Pane != v.HeldPane) { v.Pane = 1 - v.Pane; BoxOther(v); }
+            return;
+        }
         if (a == "left" || a == "right") {
             int d = a == "right" ? 1 : -1;
             if (v.Cursor < 0) { v.Box[v.Pane] = (v.Box[v.Pane] + d + side.Boxes) % side.Boxes; v.Note = null; }
@@ -5427,7 +5485,7 @@ class LauncherForm : Form {
         } else if (a == "ok") {
             if (v.Cursor < 0) { if (!v.Holding) ChooseBoxGame(v, v.Pane); return; }
             if (!v.Holding) {
-                if (side.At(v.Box[v.Pane], v.Cursor) != null) { v.HeldPane = v.Pane; v.HeldBox = v.Box[v.Pane]; v.HeldSlot = v.Cursor; v.Note = null; }
+                if (side.At(v.Box[v.Pane], v.Cursor) != null) { v.HeldPane = v.Pane; v.HeldBox = v.Box[v.Pane]; v.HeldSlot = v.Cursor; v.Note = null; BoxOther(v); }
             } else BoxDrop(v, v.Pane, v.Cursor);
         }
     }
@@ -5624,8 +5682,11 @@ class LauncherForm : Form {
             // Destination first: any failure after this duplicates the Pokemon, it never loses it.
             string back = ImportBack(to, target) ?? ImportBack(from, file);
             ok = back == null;
-            notes = ok && f.Length > 2 && (f[2] == "not-legal" || (f.Length > 3 && f[3] == "restored"));
-            message = ok ? name + " is now in " + to.Title + "'s PC boxes." + (f.Length > 3 && f[3] == "restored" ? "\n\nIts original data is back: its origin, ball and moves, as they were before it left." : "") + (f.Length > 2 && f[2] == "not-legal" ? "\n\nPKHeX's legality check flags it as not legal, which matters only for online play." + (f.Length > 3 ? "" : " Its original data is kept, and comes back if it returns to its own generation.") : "") : back;
+            // ok, name, legal or not-legal, restored (or empty), and what PKHeX's legality check found
+            bool restored = f.Length > 3 && f[3] == "restored", notLegal = f.Length > 2 && f[2] == "not-legal";
+            string why = f.Length > 4 ? f[4].Trim() : "";
+            notes = ok && (notLegal || restored);
+            message = ok ? name + " is now in " + to.Title + "'s PC boxes." + (restored ? "\n\nIts original data is back: its origin, ball and moves, as they were before it left." : "") + (notLegal ? "\n\nPKHeX's legality check flags it as not legal, which matters only for online play." + (why != "" ? "\n\nWhat it found: " + why + "." : "") + (restored ? "" : "\n\nIts original data is kept, and comes back if it returns to its own generation.") : "") : back;
             return null;
         }, delegate(string e) {
             if (after != null) {
@@ -6584,6 +6645,8 @@ class LauncherForm : Form {
         else if ((pressed & DOWN) != 0) Act("down", true);
         else if ((pressed & LEFT) != 0) Act("left", true);
         else if ((pressed & RIGHT) != 0) Act("right", true);
+        else if (TopBoxes() != null && (pressed & X) != 0) Act("switch", true);
+        else if (TopBoxes() != null && (pressed & (LB | RB)) != 0) Act((pressed & LB) != 0 ? "boxprev" : "boxnext", true);
         else if ((b & (UP | DOWN)) != 0 && b == prevPad) { if (++held > 14 && held % 4 == 0) Act((b & UP) != 0 ? "up" : "down", true); }
         if (b != prevPad) held = 0;
         prevPad = b;
@@ -6597,6 +6660,12 @@ class LauncherForm : Form {
                 case Keys.Right: case Keys.D: Act("right", false); return true;
                 case Keys.Enter: Act("ok", false); return true;
                 case Keys.Escape: case Keys.Back: case Keys.Space: Act("back", false); return true;
+            }
+            // The box screen's own: Tab or X the other game, Q and E (or Page Up and Down) its boxes.
+            if (TopBoxes() != null) switch (key) {
+                case Keys.Tab: case Keys.X: Act("switch", false); return true;
+                case Keys.Q: case Keys.PageUp: Act("boxprev", false); return true;
+                case Keys.E: case Keys.PageDown: Act("boxnext", false); return true;
             }
         }
         return base.ProcessCmdKey(ref msg, key);
