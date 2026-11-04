@@ -6660,7 +6660,7 @@ class LauncherForm : Form {
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         // A highlighted app moves at the full rate, so its motion stays smooth.
-        if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 1 && frame % 2 == 0) Invalidate();
+        if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0) Invalidate();
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
@@ -8043,7 +8043,79 @@ class LauncherForm : Form {
         float fill = (bw - 4) * Math.Max(0.05f, Math.Min(1f, power.BatteryLifePercent));
         using (var path = Round(new RectangleF(bx + 2, by + 2, fill, bh - 4), (bh - 4) * 0.25f)) using (var b = new SolidBrush(ink)) g.FillPath(b, path);
     }
-    static readonly char[] AppIcons = { ' ', '\uE7FC', '\uE8F1', '\uE74C', '\uE8B7', '\uE8AB', '\uE713', '\uE7E8' };
+    // Highlighted Play: now and then its letters greet you with a soft, floaty move, picked at random, each a little different.
+    class HopMove { public float Start, Speed, Size; public int Kind, Pick; }
+    readonly List<HopMove> hops = new List<HopMove>(); Random hopRandom; float hopU;
+    // wave, wave back, float, nod, peek, catch, skip, dropped ball, bops, flip
+    static readonly float[] HopLength = { 1.05f, 1.05f, 1.35f, 0.95f, 1.1f, 2f, 0.85f, 0.8f, 0.72f, 0.75f };
+    static readonly int[] HopWeight = { 3, 2, 3, 3, 2, 2, 2, 1, 1, 1 };
+    HopMove NextHop(float start, int last) {
+        int next;
+        do { int roll = hopRandom.Next(HopWeight.Sum()); next = 0; while (roll >= HopWeight[next]) roll -= HopWeight[next++]; } while (next == last);
+        return new HopMove { Start = start, Kind = next, Pick = hopRandom.Next(4), Speed = 1.25f + (float)hopRandom.NextDouble() * 0.5f, Size = 0.7f + (float)hopRandom.NextDouble() * 0.45f };
+    }
+    void PlayHop(Graphics g, RectangleF r, Color c, float pillH, float u) {
+        const string s = "Play";
+        RectangleF[] at;
+        using (var sf = new StringFormat { LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap }) {
+            sf.SetMeasurableCharacterRanges(Enumerable.Range(0, s.Length).Select(i => new CharacterRange(i, 1)).ToArray());
+            at = g.MeasureCharacterRanges(s, itemBold, r, sf).Select(x => x.GetBounds(g)).ToArray();
+        }
+        if (hopRandom == null || u < hopU) { hopRandom = new Random(); hops.Clear(); hops.Add(NextHop(1.2f, -1)); }
+        hopU = u;
+        for (var h = hops[hops.Count - 1]; u > h.Start + HopLength[h.Kind] * h.Speed; h = hops[hops.Count - 1])
+            hops.Add(NextHop(h.Start + HopLength[h.Kind] * h.Speed + 7f + (float)hopRandom.NextDouble() * 13f, h.Kind));
+        var mv = hops[hops.Count - 1];
+        float tau = (u - mv.Start) / mv.Speed, lead = at[0].X - r.X;
+        int pick = mv.Pick;
+        for (int i = 0; i < s.Length; i++) {
+            float lift = 0, turn = 0, land = -1; bool pivot = false;
+            switch (mv.Kind) {
+                case 0: lift = 0.15f * Soft((tau - i * 0.12f) / 0.6f); break;              // a slow wave, left to right
+                case 1: lift = 0.15f * Soft((tau - (3 - i) * 0.12f) / 0.6f); break;        // and right to left
+                case 2: {                                                                   // floats up together, hangs, drifts down
+                    float x = tau - i * 0.04f;
+                    float e = x < 0.5f ? Smooth(x / 0.5f) : x < 0.7f ? 1 : 1 - Smooth((x - 0.7f) / 0.5f) - 0.12f * Soft((x - 1.05f) / 0.25f);
+                    lift = 0.13f * e; turn = (i - 1.5f) * 1.6f * Math.Max(0, e); break;
+                }
+                case 3: lift = -0.07f * Soft((tau - i * 0.08f) / 0.5f) + 0.03f * Soft((tau - i * 0.08f - 0.42f) / 0.3f); break;  // a little nod hello
+                case 4: {                                                                   // one leans out to peek at you
+                    float e = Soft(tau / 1.1f);
+                    if (i == pick) { lift = 0.1f * e; turn = (pick < 2 ? -11 : 11) * e; }
+                    else if (Math.Abs(i - pick) == 1) lift = 0.025f * e;
+                    break;
+                }
+                case 5: {                                                                   // a catch: three gentle rocks, then the click
+                    int rock = (int)(tau / 0.6f); float q = (tau - rock * 0.6f) / 0.4f;
+                    if (rock < 3 && q < 1) { turn = (rock % 2 == 0 ? -6 : 6) * Soft(q); pivot = true; }
+                    land = (tau - 1.8f) / 0.16f; lift = 0.05f * Hop(land); break;
+                }
+                case 6: land = (tau - i * 0.1f) / 0.42f; lift = 0.13f * Hop(land); turn = 5 * Hop(land); break;  // a follower's skip
+                case 7: if (i == pick) {                                                    // one bounces like a dropped ball
+                        if (tau < 0.34f) { land = tau / 0.34f; lift = 0.18f * Hop(land); } else if (tau < 0.58f) { land = (tau - 0.34f) / 0.24f; lift = 0.08f * Hop(land); } else { land = (tau - 0.58f) / 0.16f; lift = 0.03f * Hop(land); }
+                    } break;
+                case 8: if (tau < 0.34f) { land = tau / 0.34f; lift = 0.09f * Hop(land); } else { land = (tau - 0.4f) / 0.3f; lift = 0.07f * Hop(land); } break;  // two happy bops
+                case 9: if (i == pick) { land = tau / 0.7f; lift = 0.2f * Hop(land); turn = 360 * Smooth(land); } break;  // the rare flip
+            }
+            if (mv.Kind != 9) turn *= mv.Size;
+            lift *= pillH * mv.Size;
+            float squash = land > 1 && land < 1.3f ? 0.1f * (float)Math.Sin((land - 1) / 0.3f * Math.PI) : 0;
+            var box = new RectangleF(at[i].X - lead, r.Y - lift, r.Right - at[i].X + lead, r.Height);
+            var st = g.Save();
+            if (turn != 0 || squash != 0) {
+                float fx = at[i].X + at[i].Width / 2;
+                var o = pivot ? new PointF((at[0].X + at[s.Length - 1].Right) / 2, at[0].Bottom) : turn != 0 ? new PointF(fx, at[i].Y + at[i].Height / 2 - lift) : new PointF(fx, at[i].Bottom - lift);
+                g.TranslateTransform(o.X, o.Y); g.RotateTransform(turn); g.ScaleTransform(1 + squash, 1 - squash); g.TranslateTransform(-o.X, -o.Y);
+            }
+            Write(g, s.Substring(i, 1), itemBold, c, box, StringAlignment.Near, StringAlignment.Center, false);
+            g.Restore(st);
+        }
+    }
+    // A thrown ball's arc over k from 0 to 1, and a floaty one that starts and stops softly.
+    static float Hop(float k) { return k <= 0 || k >= 1 ? 0 : (float)Math.Sin(k * Math.PI); }
+    static float Soft(float k) { if (k <= 0 || k >= 1) return 0; float v = (float)Math.Sin(k * Math.PI); return v * v; }
+    static float Smooth(float k) { k = Math.Max(0, Math.Min(1, k)); return k * k * (3 - 2 * k); }
+    static readonly char[] AppIcons = {' ', '\uE7FC', '\uE8F1', '\uE74C', '\uE8B7', '\uE8AB', '\uE713', '\uE7E8' };
     static readonly string[] AppNames = { "", "Games", "Collection", "Mods", "ROMs", "Move", "Settings", "Exit" };
     static readonly Color[] AppColors = { Color.Empty, Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(124, 84, 214), Color.FromArgb(40, 124, 232), Color.FromArgb(24, 164, 150), Color.FromArgb(120, 124, 134), Color.FromArgb(58, 60, 68) };
     void RenderMain(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
@@ -8074,7 +8146,9 @@ class LauncherForm : Form {
         var pink = on ? Accent(th) : PhoneSub;
         float tri = pillH * 0.19f, tx = pill.X + pillW * 0.2f, ty = pill.Y + pillH / 2;
         using (var b = new SolidBrush(pink)) g.FillPolygon(b, new[] { new PointF(tx, ty - tri), new PointF(tx + tri * 1.6f, ty), new PointF(tx, ty + tri) });
-        Write(g, "Play", itemBold, pink, new RectangleF(tx + tri * 2.1f, pill.Y, pillW * 0.7f, pillH), StringAlignment.Near, StringAlignment.Center, false);
+        var word = new RectangleF(tx + tri * 2.1f, pill.Y, pillW * 0.7f, pillH);
+        if (p.Sel == 0 && on) PlayHop(g, word, pink, pillH, t - selAt);
+        else Write(g, "Play", itemBold, pink, word, StringAlignment.Near, StringAlignment.Center, false);
         float textW = pill.X - widget.X - pad * 1.4f, subH = smallFont.Height * 1.25f;
         string name = current != null ? current.Title.Replace("Pokemon ", "") : "No games yet";
         string sub = current != null ? GameEntry.EngineShort(current.Engine()) : "Add a ROM folder to start";
