@@ -154,6 +154,7 @@ static class Config {
     public static string GbaPlayer { get { return Get("gbawide", @"engines\gbawide\gbawide.exe"); } }
     // Installed PC games live beside the engines, where a launcher update never looks.
     public static string InfiniteFusion { get { return Get("infinitefusion", @"games\infinitefusion\Game.exe"); } }
+    public static string InfiniteFusion2 { get { return Get("infinitefusion2", @"games\infinitefusion2\InfiniteFusion2.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string MgbaCore { get { return Get("mgbacore", @"tools\mgba\mgba_libretro.dll"); } }
@@ -260,21 +261,38 @@ class GameEntry {
 
 // Games that are PC programs of their own, such as Infinite Fusion (notes/launcher.md, PC games).
 static class PcGames {
-    public const string Repo = "https://github.com/infinitefusion/infinitefusion-e18.git", Branch = "releases";
+    // Each PC game the launcher installs from its GitHub: Infinite Fusion and Infinite Fusion 2 (Hoenn), both Pokemon
+    // Essentials on mkxp-z, so they install, update and keep their saves the same way.
+    // Title*: its title screen's pieces under Graphics (background layers back to front, the one that drifts, the swirl,
+    // the logo); Town: the picture its wallpaper comes from.
+    public class Profile { public string Name, Repo, Branch, Exe, SaveFolder, Size, TitleSwirl, TitleLogo, Town; public string[] TitleBg; public int Drift = -1; public Func<string> OwnExe; }
+    static readonly Dictionary<string, Profile> Profiles = new Dictionary<string, Profile> {
+        { "infinitefusion", new Profile { Name = "Pokemon Infinite Fusion", Repo = "https://github.com/infinitefusion/infinitefusion-e18.git",
+            Branch = "releases", Exe = "Game.exe", SaveFolder = "infinitefusion", Size = "about 5 GB", OwnExe = () => Config.InfiniteFusion,
+            TitleBg = new[] { @"Titles\gen1_bg_v5.png" }, TitleSwirl = @"Titles\PokemonInfiniteFusionLogo_Back_25.png",
+            TitleLogo = @"Titles\PokemonInfiniteFusionLogo_Main_25.png", Town = @"Panoramas\Kanto_HGSS.png" } },
+        { "infinitefusion2", new Profile { Name = "Pokemon Infinite Fusion 2", Repo = "https://github.com/infinitefusion/infinitefusion-hoenn-public.git",
+            Branch = "releases", Exe = "InfiniteFusion2.exe", SaveFolder = "infinitefusion-hoenn", Size = "about 3 GB", OwnExe = () => Config.InfiniteFusion2,
+            TitleBg = new[] { @"Titles\bg_back.png", @"Titles\bg_clouds.png", @"Titles\bg_front.png" }, Drift = 1,
+            TitleSwirl = @"Titles\PokemonInfiniteFusionLogo_Back_25.png", TitleLogo = @"Titles\InfiniteFusionHoenn.png",
+            Town = @"Pictures\map\map_hoenn.png" } },
+    };
+    public static Profile Of(GameEntry g) { Profile p; return g.Pc != null && Profiles.TryGetValue(g.Pc, out p) ? p : null; }
+    public static bool IsFusion(GameEntry g) { return Of(g) != null; }
     // Imported (the launcher's copy) or existing (the player's, run in place). state\pc-<id>.txt names an existing one.
     static string ExistingFile(GameEntry g) { return Path.Combine(Config.State, "pc-" + g.Id + ".txt"); }
     public static string Existing(GameEntry g) { string d = Config.Read("pc-" + g.Id + ".txt", "").Trim(); return d != "" ? d : null; }
     public static bool IsExisting(GameEntry g) { return Existing(g) != null; }
-    static string OwnExe(GameEntry g) { return g.Pc == "infinitefusion" ? Config.InfiniteFusion : null; }
+    static string OwnExe(GameEntry g) { var p = Of(g); return p != null ? p.OwnExe() : null; }
     public static bool IsCustom(GameEntry g) { return g.Pc == "custom"; }
     public static string Exe(GameEntry g) {
         if (IsCustom(g)) { var c = CustomGames.Find(g.Id); return c != null ? CustomGames.Exe(c) : null; }
-        string e = Existing(g); return e != null ? Path.Combine(e, "Game.exe") : OwnExe(g);
+        string e = Existing(g); return e != null ? Path.Combine(e, Of(g).Exe) : OwnExe(g);
     }
     public static string Dir(GameEntry g) { string e = Exe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static string OwnDir(GameEntry g) { string e = OwnExe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static bool Installed(GameEntry g) { string e = Exe(g); return e != null && File.Exists(e); }
-    public static string GameSaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "infinitefusion"); }
+    public static string GameSaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Of(g).SaveFolder); }
     public static string SaveDir(GameEntry g) { return IsExisting(g) ? GameSaveDir(g) : Path.Combine(Config.State, "saves", g.Id); }
     // Keeps an imported copy's saves beside the launcher (notes/launcher.md, PC games).
     const string PreloadName = "nativemons-saves.rb";
@@ -291,8 +309,12 @@ static class PcGames {
         string dir = OwnDir(g), saves = SaveDir(g);
         Directory.CreateDirectory(saves);   // the game falls back to its own folder when this doesn't exist
         File.WriteAllText(Path.Combine(dir, PreloadName), Preload);
-        string json = Path.Combine(dir, "mkxp.json");
-        if (!File.Exists(json) || !File.ReadAllText(json).Contains(PreloadName)) File.WriteAllText(json, "{\n  \"preloadScript\": [\"" + PreloadName + "\"]\n}\n");
+        // The game's own mkxp.json settings (vsync, frame skip...) stay: the preload line goes in after its opening brace.
+        string json = Path.Combine(dir, "mkxp.json"), line = "  \"preloadScript\": [\"" + PreloadName + "\"],\n";
+        string had = File.Exists(json) ? File.ReadAllText(json) : null;
+        int brace = had == null ? -1 : had.IndexOf('{');
+        if (had == null || brace < 0) File.WriteAllText(json, "{\n" + line + "}\n");
+        else if (!had.Contains(PreloadName)) File.WriteAllText(json, had.Substring(0, brace + 1) + "\n" + line + had.Substring(brace + 1));
         psi.EnvironmentVariables["NATIVEMONS_SAVE_DIR"] = saves;
     }
     // Saves already in the game's usual folder are copied in; the originals stay.
@@ -305,7 +327,8 @@ static class PcGames {
         return files.Length > 0 ? files.Length + (files.Length == 1 ? " save was" : " saves were") + " copied in from " + from + "; the originals are still there." : null;
     }
     public static string AddExisting(GameEntry g, string folder) {
-        if (!File.Exists(Path.Combine(folder, "Game.exe"))) return "That folder has no Game.exe, so it isn't Pokemon Infinite Fusion.";
+        var pf = Of(g);
+        if (!File.Exists(Path.Combine(folder, pf.Exe))) return "That folder has no " + pf.Exe + ", so it isn't " + pf.Name + ".";
         if (string.Equals(Path.GetFullPath(folder).TrimEnd('\\'), Path.GetFullPath(OwnDir(g)).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return "That is the launcher's own copy.";
         Directory.CreateDirectory(Config.State);
         File.WriteAllText(ExistingFile(g), Path.GetFullPath(folder));
@@ -358,20 +381,21 @@ static class PcGames {
     public static string Saved;
     public static string Install(GameEntry g, string source, Action<string, float> report) {
         Saved = null;
+        var pf = Of(g);
         string target = OwnDir(g), work = target + ".installing";
         try {
             if (Directory.Exists(work)) Directory.Delete(work, true);
             if (source == null) {
                 if (Git() == null) return "Downloading needs Git for Windows (git-scm.com). Or install from your own copy of the game.";
                 Directory.CreateDirectory(Path.GetDirectoryName(work));
-                report("Downloading Pokemon Infinite Fusion from GitHub (a few GB)", -1);
-                int code = RunGit("clone --depth=1 --branch " + Branch + " --progress " + Repo + " \"" + work + "\"", null, delegate(string l) { report(l, -1); });
+                report("Downloading " + pf.Name + " from GitHub (" + pf.Size + ")", -1);
+                int code = RunGit("clone --depth=1 --branch " + pf.Branch + " --progress " + pf.Repo + " \"" + work + "\"", null, delegate(string l) { report(l, -1); });
                 if (code != 0) return "The download stopped (git said " + code + "). Nothing was changed.";
             } else if (File.Exists(source)) {
                 using (var zip = System.IO.Compression.ZipFile.OpenRead(source)) {
                     // The game's own zip has its files at the top; one inside a single folder is unwrapped.
-                    var exe = zip.Entries.Where(e => e.Name.Equals("Game.exe", StringComparison.OrdinalIgnoreCase)).OrderBy(e => e.FullName.Length).FirstOrDefault();
-                    if (exe == null) return "That zip has no Game.exe, so it isn't Pokemon Infinite Fusion.";
+                    var exe = zip.Entries.Where(e => e.Name.Equals(pf.Exe, StringComparison.OrdinalIgnoreCase)).OrderBy(e => e.FullName.Length).FirstOrDefault();
+                    if (exe == null) return "That zip has no " + pf.Exe + ", so it isn't " + pf.Name + ".";
                     string prefix = exe.FullName.Substring(0, exe.FullName.Length - exe.Name.Length);
                     var files = zip.Entries.Where(e => e.Name != "" && e.FullName.StartsWith(prefix)).ToList();
                     long total = Math.Max(1, files.Sum(e => e.Length)), done = 0;
@@ -385,7 +409,7 @@ static class PcGames {
                     }
                 }
             } else if (Directory.Exists(source)) {
-                if (!File.Exists(Path.Combine(source, "Game.exe"))) return "That folder has no Game.exe, so it isn't Pokemon Infinite Fusion.";
+                if (!File.Exists(Path.Combine(source, pf.Exe))) return "That folder has no " + pf.Exe + ", so it isn't " + pf.Name + ".";
                 if (string.Equals(Path.GetFullPath(source).TrimEnd('\\'), Path.GetFullPath(target).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return "That is the launcher's own copy.";
                 var files = Library.FilesUnder(source);
                 long total = Math.Max(1, files.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } })), done = 0;
@@ -399,7 +423,7 @@ static class PcGames {
                     report("Copying " + rel, (float)done / total);
                 }
             } else return "That file or folder isn't there any more.";
-            if (!File.Exists(Path.Combine(work, "Game.exe"))) return "Game.exe didn't arrive, so nothing was changed.";
+            if (!File.Exists(Path.Combine(work, pf.Exe))) return pf.Exe + " didn't arrive, so nothing was changed.";
             report("Finishing", 1f);
             if (Directory.Exists(target)) Remove(target);
             Directory.Move(work, target);
@@ -412,14 +436,15 @@ static class PcGames {
     }
     // A shallow fetch and hard reset, as the game's own updater does. Only the launcher's own copy.
     public static string Update(GameEntry g, Action<string> line) {
-        if (IsExisting(g)) return "This is your own installation, so the launcher leaves it alone. Use the game's INSTALL_OR_UPDATE, or import a copy into the launcher.";
+        if (IsExisting(g)) return "This is your own installation, so the launcher leaves it alone. Use the game's own updater, or import a copy into the launcher.";
         string dir = OwnDir(g);
         if (Git() == null) return "Updating needs Git for Windows (git-scm.com).";
         if (!Directory.Exists(Path.Combine(dir, ".git"))) return "This copy has no update history (.git). Install it again from GitHub to get updates.";
         try { File.Delete(Path.Combine(dir, ".git", "shallow.lock")); } catch { }
-        RunGit("remote set-url origin " + Repo, dir, null);
-        if (RunGit("fetch --depth=1 --progress origin " + Branch, dir, line) != 0) return "Couldn't reach the game's GitHub. Nothing was changed.";
-        if (RunGit("reset --hard origin/" + Branch, dir, line) != 0) return "The update didn't apply cleanly. Install it again to repair it.";
+        var pf = Of(g);
+        RunGit("remote set-url origin " + pf.Repo, dir, null);
+        if (RunGit("fetch --depth=1 --progress origin " + pf.Branch, dir, line) != 0) return "Couldn't reach the game's GitHub. Nothing was changed.";
+        if (RunGit("reset --hard origin/" + pf.Branch, dir, line) != 0) return "The update didn't apply cleanly. Install it again to repair it.";
         return null;
     }
     // Git marks its object files read-only, which Directory.Delete refuses.
@@ -1415,14 +1440,16 @@ static class GameArt {
     static string CapturePc(GameEntry g) {
         try {
             string gr = PcGraphics(g);
-            using (var bg = new Bitmap(Path.Combine(gr, "Titles", "gen1_bg_v5.png")))
-            using (var swirl = new Bitmap(Path.Combine(gr, "Titles", "PokemonInfiniteFusionLogo_Back_25.png")))
-            using (var logo = new Bitmap(Path.Combine(gr, "Titles", "PokemonInfiniteFusionLogo_Main_25.png"))) {
+            var pf = PcGames.Of(g);
+            var layers = pf.TitleBg.Select(f => new Bitmap(Path.Combine(gr, f))).ToList();
+            try {
+            using (var swirl = new Bitmap(Path.Combine(gr, pf.TitleSwirl)))
+            using (var logo = new Bitmap(Path.Combine(gr, pf.TitleLogo))) {
                 Directory.CreateDirectory(Folder(g.Id));
                 var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
                 var quality = new System.Drawing.Imaging.EncoderParameters(1);
                 quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 88L);
-                int w = bg.Width, h = bg.Height;
+                int w = layers[0].Width, h = layers[0].Height;
                 float lw = w * 0.62f, lh = lw * logo.Height / logo.Width;
                 for (int i = 0; i < Count; i++) {
                     // Played there and back, so the swirl sways a little behind the logo and the light breathes.
@@ -1430,7 +1457,12 @@ static class GameArt {
                     using (var frame = new Bitmap(w, h))
                     using (var f = Graphics.FromImage(frame)) {
                         f.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                        f.DrawImage(bg, 0, 0, w, h);
+                        for (int n = 0; n < layers.Count; n++) {
+                            var b = layers[n];
+                            // The drifting layer (clouds) slides along with the frames; the others fill the picture.
+                            if (n == pf.Drift) f.DrawImage(b, -(b.Width - w) * k, 0f, b.Width, h);
+                            else f.DrawImage(b, 0, 0, w, h);
+                        }
                         var st = f.Save();
                         f.TranslateTransform(w / 2f, h * 0.47f); f.RotateTransform(sway);
                         var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = glow };
@@ -1444,13 +1476,14 @@ static class GameArt {
                     }
                 }
             }
+            } finally { foreach (var b in layers) b.Dispose(); }
             return null;
         } catch (Exception x) { return x.Message; }
     }
     static string CapturePcTown(GameEntry g) {
         try {
             Directory.CreateDirectory(Folder(g.Id));
-            using (var map = new Bitmap(Path.Combine(PcGraphics(g), "Panoramas", "Kanto_HGSS.png"))) {
+            using (var map = new Bitmap(Path.Combine(PcGraphics(g), PcGames.Of(g).Town))) {
                 var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
                 var quality = new System.Drawing.Imaging.EncoderParameters(1);
                 quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
@@ -3968,7 +4001,7 @@ class LauncherForm : Form {
     }
     class DexGame { public HashSet<int> Caught = new HashSet<int>(), Seen = new HashSet<int>(), Shiny = new HashSet<int>(); public int FusionsCaught = -1, FusionsSeen = -1, LaterCaught, LaterSeen; }
     // Games whose Pokedex is read: those with save tools, and Infinite Fusion, read from its own saves.
-    static bool ReadsDex(GameEntry g) { return g.SaveTools || (g.Pc == "infinitefusion" && g.OnPc); }
+    static bool ReadsDex(GameEntry g) { return g.SaveTools || (PcGames.IsFusion(g) && g.OnPc); }
     static List<string> IfSaves(GameEntry g) {
         string dir = PcGames.SaveDir(g);
         return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.rxdata").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList() : new List<string>();
@@ -4041,7 +4074,7 @@ class LauncherForm : Form {
         var o = new StringBuilder(g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
         Action<string> file = delegate(string f) { try { var i = new FileInfo(f); if (i.Exists) o.Append("|" + i.Name + ":" + i.Length + ":" + i.LastWriteTimeUtc.Ticks); } catch { } };
         Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
-        if (g.Pc == "infinitefusion") { foreach (var f in IfSaves(g)) file(f); return o.ToString(); }
+        if (PcGames.IsFusion(g)) { foreach (var f in IfSaves(g)) file(f); return o.ToString(); }
         if (g.Save != null) file(MasterOf(g));
         folder(Path.Combine(Config.State, "save-sets", g.Id));
         if (g.Gen1 != null) folder(Path.Combine(Gen1Root, "saves", g.Gen1));
@@ -4142,7 +4175,7 @@ class LauncherForm : Form {
         return p;
     }
     // Romhacks you have, and Infinite Fusion once it's installed.
-    static bool OwnSection(GameEntry g) { return (g.IsHack && g.Playable) || (g.Pc == "infinitefusion" && g.OnPc); }
+    static bool OwnSection(GameEntry g) { return (g.IsHack && g.Playable) || (PcGames.IsFusion(g) && g.OnPc); }
     Page DexOtherPage() {
         var p = new Page { Title = "Romhacks and fan games" };
         foreach (var game in Library.Games.Where(OwnSection)) {
@@ -5117,7 +5150,7 @@ class LauncherForm : Form {
         return new Page { Title = "Credits", Body = "Pokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
             + "\n\nnativeplat by sohamb117 (github.com/sohamb117/gen4recomp), native Diamond, Pearl and Platinum from the pret decompilations. Not affiliated with nativeMons."
-            + "\n\nPokemon Infinite Fusion by chardub (Frogman) and its contributors (github.com/infinitefusion/infinitefusion-e18), made with Pokemon Essentials on RPG Maker XP. Its custom fusion sprites are by the Infinite Fusion artist community. Installed from your own copy or its GitHub; not included, and not affiliated with nativeMons."
+            + "\n\nPokemon Infinite Fusion and Infinite Fusion 2 by chardub (Frogman) and their contributors (github.com/infinitefusion/infinitefusion-e18, github.com/infinitefusion/infinitefusion-hoenn-public), made with Pokemon Essentials on RPG Maker XP. Its custom fusion sprites are by the Infinite Fusion artist community. Installed from your own copy or its GitHub; not included, and not affiliated with nativeMons."
             + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection. Pokedex entries from PokeAPI (pokeapi.co)."
             + "\n\nFind mods reads the Gen1Recomp community mod index (github.com/bryanthaboi/gen1recomp-mod-index). Its listings are by the mods' authors, and the mods are theirs."
@@ -5145,7 +5178,7 @@ class LauncherForm : Form {
     static List<KeyValuePair<string, string>> ScreenshotFolders() {
         var list = new List<KeyValuePair<string, string>>();
         if (File.Exists(Config.Nativeplat)) list.Add(new KeyValuePair<string, string>("nativeplat", Path.Combine(NativeplatDir, "userdata", "screenshots")));
-        foreach (var g in Library.Games.Where(x => x.Pc == "infinitefusion" && PcGames.Installed(x)))
+        foreach (var g in Library.Games.Where(x => PcGames.IsFusion(x) && PcGames.Installed(x)))
             list.Add(new KeyValuePair<string, string>(g.Title, PcGames.SaveDir(g)));
         return list;
     }
@@ -5905,7 +5938,7 @@ class LauncherForm : Form {
         if (PcGames.IsCustom(g)) return CustomGamePage(g);
         var p = new Page { Title = g.Title, Theme = g.Theme };
         Action pickExisting = delegate {
-            string f = PickFolder("Choose your installation's folder, the one with Game.exe");
+            string f = PickFolder("Choose your installation's folder, the one with " + PcGames.Of(g).Exe);
             if (f == null) return;
             string problem = PcGames.AddExisting(g, f);
             if (problem != null) { ShowText("Not added", problem, null); return; }
@@ -5913,14 +5946,14 @@ class LauncherForm : Form {
             Busy("Making its pictures", delegate { GameArt.Background(delegate { GameArt.Capture(g); GameArt.CaptureTown(g); }); return null; }, delegate(string e) { ReplaceMain(); });
         };
         Action<Page> importItems = delegate(Page into) {
-            into.Items.Add(new Item("Import from a folder", "Copies your installation into the launcher.", true, delegate { string f = PickFolder("Choose the folder with Game.exe (for example InfiniteFusion)"); if (f != null) InstallPc(g, f); }) { Icon = '' });
+            into.Items.Add(new Item("Import from a folder", "Copies your installation into the launcher.", true, delegate { string f = PickFolder("Choose the folder with " + PcGames.Of(g).Exe); if (f != null) InstallPc(g, f); }) { Icon = '' });
             into.Items.Add(new Item("Import from a zip", "Unpacks the game's download into the launcher.", true, delegate {
-                using (var d = new OpenFileDialog { Filter = "Zip (*.zip)|*.zip", Title = "Choose InfiniteFusion.zip" }) if (d.ShowDialog(this) == DialogResult.OK) InstallPc(g, d.FileName);
+                using (var d = new OpenFileDialog { Filter = "Zip (*.zip)|*.zip", Title = "Choose " + g.Title + "'s zip" }) if (d.ShowDialog(this) == DialogResult.OK) InstallPc(g, d.FileName);
             }) { Icon = '' });
             into.Items.Add(new Item("Download", "From the game's GitHub (a few GB). Needs Git for Windows.", PcGames.Git() != null, delegate { InstallPc(g, null); }) { Icon = '' });
         };
         if (!g.OnPc) {
-            p.Body = g.Title + " is a PC game of its own, about 5 GB.\n\nImport it, and the launcher keeps the game and its saves in its own folders and updates it from the game's GitHub. Saves you already have are copied in.\n\nOr add your existing installation: it runs where it is, unchanged, with its saves where the game keeps them (" + PcGames.GameSaveDir(g) + ").";
+            p.Body = g.Title + " is a PC game of its own, " + PcGames.Of(g).Size + ".\n\nImport it, and the launcher keeps the game and its saves in its own folders and updates it from the game's GitHub. Saves you already have are copied in.\n\nOr add your existing installation: it runs where it is, unchanged, with its saves where the game keeps them (" + PcGames.GameSaveDir(g) + ").";
             importItems(p);
             p.Items.Add(new Item("Add an existing installation", "Runs your own copy where it is.", true, pickExisting) { Icon = '' });
             return p;
@@ -5930,7 +5963,7 @@ class LauncherForm : Form {
         var play = new Item("Play", version != null ? "Version " + version + "." : "Start " + g.Title + ".", true, delegate { Play(g); }) { Icon = '' };
         play.Records = new[] { (existing ? "Your installation: " : "Imported into the launcher: ") + PcGames.Dir(g), "Saves in " + PcGames.SaveDir(g) };
         p.Items.Add(play);
-        if (!existing) p.Items.Add(new Item("Update", "Gets the newest release from the game's GitHub.", PcGames.Git() != null, delegate { UpdatePc(g); }) { Icon = '', Info = "The same update the game's own INSTALL_OR_UPDATE does. Your saves aren't touched." });
+        if (!existing) p.Items.Add(new Item("Update", "Gets the newest release from the game's GitHub.", PcGames.Git() != null, delegate { UpdatePc(g); }) { Icon = '', Info = "The same update the game's own updater does. Your saves aren't touched." });
         p.Items.Add(new Item("Saves folder", existing ? "Where the game keeps them." : "In the launcher's folder.", true, delegate {
             string dir = PcGames.SaveDir(g);
             Directory.CreateDirectory(dir);

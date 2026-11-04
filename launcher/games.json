@@ -39,5 +39,6 @@
   { "id": "white",     "title": "Pokemon White",      "console": "Nintendo DS", "townFrame": 8260, "artFrame": 5600, "fulldex": "IRAO", "header": "IRAO", "save": "white.sav", "dex": 649, "colors": ["#ECECEC", "#A8A8AE", "#FFFFFF"], "finish": "plain" },
   { "id": "black2",    "title": "Pokemon Black 2",    "console": "Nintendo DS", "townFrame": 9200, "artFrame": 5600, "fulldex": "IREO", "header": "IREO", "save": "black2.sav", "dex": 649, "colors": ["#2A3340", "#0E141C", "#3F7FB5"], "finish": "plain" },
   { "id": "white2",    "title": "Pokemon White 2",    "console": "Nintendo DS", "townFrame": 9200, "artFrame": 5600, "fulldex": "IRDO", "header": "IRDO", "save": "white2.sav", "dex": 649, "colors": ["#EFE8E8", "#B0868A", "#FFFFFF"], "finish": "plain" },
-  { "id": "infinitefusion", "title": "Pokemon Infinite Fusion", "console": "PC", "pc": "infinitefusion", "colors": ["#7E57D6", "#35206E", "#F2A6E4"], "finish": "crystal" }
+  { "id": "infinitefusion", "title": "Pokemon Infinite Fusion", "console": "PC", "pc": "infinitefusion", "colors": ["#7E57D6", "#35206E", "#F2A6E4"], "finish": "crystal" },
+  { "id": "infinitefusion2", "title": "Pokemon Infinite Fusion 2", "console": "PC", "pc": "infinitefusion2", "colors": ["#2FA36B", "#14503A", "#9EE8C4"], "finish": "tide" }
 ]
