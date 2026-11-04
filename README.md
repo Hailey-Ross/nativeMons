@@ -60,14 +60,30 @@ Fulldex and the Platinum PC port don't check a hash: they go by the game code in
 
 Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. nativeplat's own import screen refuses Platinum Rev 0, but nativeMons places the ROM itself. The two revisions share the same game files, differing only in a GTS screen, and Platinum runs nativeplat's Rev 1 code either way.
 
-## Download
+## Download and set up
 
-- **[Dev](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
-- **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable):** the latest working build, from `main`.
+**Which download?**
+- **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable)** (recommended): the latest build that's been checked.
+- **[Dev](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** the newest changes, built from every commit to `dev`. It may be broken, so back up your saves.
 
-Unzip it anywhere (not inside Program Files), start `NativeMonsLauncher.exe` and add your ROM folder under **ROMs**, or drop the folder onto the window. File names don't matter: games are found by reading each ROM. Patching `.nds` ROMs needs Python 3: without one, the launcher offers to fetch Python's official Windows package from python.org into its own `tools\python` folder (nothing is installed in Windows).
+**What you need:** a Windows 10 or 11 PC, and your own Pokémon game files (ROMs). No games come with nativeMons.
 
-**The first start** after adding ROMs takes about a minute behind the splash screen:
+1. **Download** the zip: on the release page, click **Download Windows ZIP**.
+2. **Unzip it.** Right-click the downloaded file and choose **Extract All...**, then **Extract**. Put the folder somewhere easy to find, such as your Documents or Desktop (not inside Program Files).
+3. **Open it.** In the new folder, double-click **NativeMonsLauncher**.
+   - If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**. This appears because nativeMons is a free project without a paid signing certificate.
+4. **Add your games.** On the home screen, choose **ROMs**, then **Add a folder**, and pick the folder your game files are in. Or just drag that folder onto the nativeMons window.
+   - It finds Game Boy, Game Boy Color, Game Boy Advance and DS games (`.gb`, `.gbc`, `.gba`, `.nds`, and `.zip` files holding them). The file names don't matter: games are found by reading each ROM.
+5. **Wait about a minute the first time.** nativeMons gets your games ready behind its loading screen. After that it opens in about a second.
+6. **Play.** Choose **Games**, pick a game, and press **Play**.
+
+**Already have saves from another emulator?** Choose **Settings**, then **Import saves**. Your original save files aren't changed.
+
+**A DS game that won't start?** Some DS ROMs need a small fix first (their secure area decrypted). nativeMons offers it when it finds one. The fix needs Python 3: if your PC has none, nativeMons can fetch Python's official Windows package from python.org into its own `tools\python` folder (nothing is installed in Windows).
+
+### What happens on the first start
+
+The first start after adding ROMs takes about a minute behind the splash screen:
 - Your Game Boy and GBA games are prepared for Gen1Recomp from your ROMs, three at a time.
 - The game the menu opens on gets its title screen and town wallpaper; the other games' pictures are made in the background once the menu is up.
 
