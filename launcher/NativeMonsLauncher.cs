@@ -2694,7 +2694,15 @@ class LauncherForm : Form {
         Text = "nativeMons";
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         // The waiting quick-start game goes with the launcher: waited for here, as a background task dies with the program.
-        FormClosing += delegate { Hide(); DropReady(true); StopSnapshot(); };
+        FormClosing += (o, e) => {
+            // Closed by the user, the device powers down first (PowerOffTick), then closes for real.
+            if (powerOff < 0 && Visible && playDirect == null && !Native.Quiet && WindowState == FormWindowState.Normal
+                && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None)) {
+                e.Cancel = true; powerOff = (float)clock.Elapsed.TotalSeconds; powerTop = Top; return;
+            }
+            if (e.Cancel) return;
+            Hide(); DropReady(true); StopSnapshot();
+        };
         // A device standing upright: no window frame, the window's own outline is the shell's.
         var area = Screen.PrimaryScreen.WorkingArea;
         int h = area.Height * 94 / 100;
@@ -2858,6 +2866,19 @@ class LauncherForm : Form {
         if (screen == "job") {
             job = new Process(); jobTitle = "Preparing Pokemon LeafGreen"; jobStart = DateTime.Now.AddSeconds(-14); progress = 0.62f;
             foreach (var l in new[] { "Reading the ROM", "Decoding maps", "Decoding Pokemon graphics" }) log.Add(l);
+        }
+        if (screen == "appicons") {
+            // Each app's highlighted motion, still first, then moments along it.
+            var times = new[] { -1f, 0.25f, 0.35f, 0.45f, 0.55f, 0.65f, 1.0f, 1.6f, 2.2f };
+            using (var bmp = new Bitmap(times.Length * 90, (AppNames.Length - 1) * 90)) using (var g = Graphics.FromImage(bmp)) {
+                g.Clear(Color.FromArgb(60, 60, 70));
+                for (int a = 1; a < AppNames.Length; a++) for (int k = 0; k < times.Length; k++) {
+                    var r = new RectangleF(k * 90 + 10, (a - 1) * 90 + 10, 70, 70);
+                    GlossTile(g, r, 70 * 0.24f, AppColors[a]); BallShake(-1); AppArt(g, a, r, AppColors[a], times[k]);
+                }
+                bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            return;
         }
         using (var bmp = new Bitmap(w, h)) {
             using (var g = Graphics.FromImage(bmp)) { Render(g, w, h); screenAt = selAt = -10; Render(g, w, h); }
@@ -6616,7 +6637,10 @@ class LauncherForm : Form {
     DateTime scannedAt; int spritesSeen;
     DateTime updateCheckedAt = DateTime.Now;
     void Poll() {
+        PowerOffTick();
+        if (powerOff >= 0) return;
         WatchGba();
+        OpenTick();
         if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
             scannedAt = DateTime.Now;
             if (waiting != null && job == null && RunningGames() == "") {
@@ -6635,6 +6659,8 @@ class LauncherForm : Form {
         if (ClashShowing() && (float.IsNaN(clashAt) || (float)clock.Elapsed.TotalSeconds - clashAt < 0.4f)) dirty = true;
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
+        // A highlighted app moves at the full rate, so its motion stays smooth.
+        if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 1 && frame % 2 == 0) Invalidate();
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
@@ -6732,7 +6758,7 @@ class LauncherForm : Form {
     void Act(string a, bool fromPad) {
         if (a == lastAction && fromPad != lastFromPad && (DateTime.Now - lastActionTime).TotalMilliseconds < 150) return;
         lastAction = a; lastFromPad = fromPad; lastActionTime = DateTime.Now;
-        if (pages.Count == 0) return;
+        if (pages.Count == 0 || openRun != null || powerOff >= 0) return;
         var p = pages.Peek();
         if (a == "back" && p.Boxes != null && p.Boxes.Holding) {
             // B puts a held Pokemon back where it was, before it leaves the boxes.
@@ -6751,7 +6777,12 @@ class LauncherForm : Form {
                 if (at >= 0 && next >= 0 && next < p.DexOrder.Length) { pages.Pop(); pages.Push(DexEntryPage(p.DexOrder[next], p.DexOrder, p.DexOnly)); }
             }
         } else if (p.Items.Count > 0) {
-            if (a == "ok") { var it = p.Items[p.Sel]; if (it.On && it.Run != null) it.Run(); }
+            if (a == "ok") {
+                var it = p.Items[p.Sel];
+                if (it.On && it.Run != null && p.Main && p.Sel >= 1 && p.Sel < AppNames.Length && AppNames[p.Sel] != "Move" && AppNames[p.Sel] != "Exit" && !appRects[p.Sel].IsEmpty) {
+                    openRun = it.Run; openApp = p.Sel; openFrom = appRects[p.Sel]; openAt = (float)clock.Elapsed.TotalSeconds;
+                } else if (it.On && it.Run != null) it.Run();
+            }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
             else if ((a == "left" && p.Items[p.Sel].Fold == 1) || (a == "right" && p.Items[p.Sel].Fold == 2)) p.Items[p.Sel].Run();
             else if ((a == "left" || a == "right") && p.Items[p.Sel].Fold != 0) { }
@@ -6799,7 +6830,53 @@ class LauncherForm : Form {
 
     string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
-    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null; }
+    // Power down on close: the screen (CrtTime), then the lights, then the device slides off the bottom.
+    const float CrtTime = 0.6f, LightsTime = 0.75f, SlideTime = 1.6f;
+    float powerOff = -1; int powerTop; bool poweredOff;
+    void PowerOffTick() {
+        if (powerOff < 0 || poweredOff) return;
+        float u = (float)clock.Elapsed.TotalSeconds - powerOff;
+        PowerLevel = PowerCurve(u - CrtTime);
+        if (u >= CrtTime && FrozenT < 0) FrozenT = powerOff + CrtTime;
+        float slide = (u - CrtTime - LightsTime) / SlideTime;
+        if (slide > 0) {
+            // Put away: it drops onto the bottom of the screen, bounces once, then slips down out of sight.
+            float k = Math.Min(1, slide) * SlideTime;
+            var scr = Screen.FromControl(this);
+            int rest = Math.Max(powerTop, scr.WorkingArea.Bottom - Height), gone = scr.Bounds.Bottom + 20;
+            float y;
+            if (k < 0.4f) { float q = k / 0.4f; y = powerTop + (rest - powerTop) * q * q; }
+            else if (k < 1.0f) y = rest - Height * 0.08f * (float)Math.Sin((k - 0.4f) / 0.6f * Math.PI);
+            else { float q = Math.Min(1, (k - 1.0f) / 0.6f); y = rest + (gone - rest) * q * q; }
+            Top = (int)y;
+        }
+        Invalidate();
+        if (slide >= 1) { poweredOff = true; Close(); }
+    }
+    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOff >= 0 || t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null || openRun != null || t - openAt < OpenTime + 0.3f || t - bounceAt < 1.4f; }
+    // An app opening: its icon grows to fill the screen, then the screen it opens has its rows pop in one by one.
+    const float OpenTime = 0.3f;
+    float openAt = -10, bounceAt = -10; int openApp; RectangleF openFrom; Action openRun; bool bounceArm;
+    readonly RectangleF[] appRects = new RectangleF[8];
+    static float BackOut(float x) { x = Math.Max(0, Math.Min(1, x)) - 1; return 1 + 2.4f * x * x * x + 1.4f * x * x; }
+    void OpenTick() {
+        if (openRun == null || (float)clock.Elapsed.TotalSeconds - openAt < OpenTime) return;
+        var run = openRun; openRun = null; bounceArm = true; run();
+    }
+    void RenderOpen(Graphics g, int w, int h, float t) {
+        float k = (t - openAt) / OpenTime;
+        if (k < 0 || openApp <= 0 || k > 1 + 0.25f / OpenTime) return;
+        var all = new RectangleF(0, 0, w, h);
+        float e = Ease(Math.Min(1, k)), fade = k <= 1 ? 1 : 1 - (k - 1) * OpenTime / 0.25f;
+        var r = new RectangleF(openFrom.X + (all.X - openFrom.X) * e, openFrom.Y + (all.Y - openFrom.Y) * e, openFrom.Width + (all.Width - openFrom.Width) * e, openFrom.Height + (all.Height - openFrom.Height) * e);
+        var c = AppColors[openApp];
+        if (fade >= 1) GlossTile(g, r, openFrom.Width * 0.24f * (1 - e), c);
+        else using (var b = new SolidBrush(Color.FromArgb((int)(255 * Math.Max(0, fade)), c))) g.FillRectangle(b, r);
+        if (fade >= 1) {
+            float size = openFrom.Width + (Math.Min(w, h) * 0.32f - openFrom.Width) * e;
+            AppArt(g, openApp, new RectangleF(r.X + (r.Width - size) / 2, r.Y + (r.Height - size) / 2, size, size), c);
+        }
+    }
     const int TileCols = 4;   // the home screen's app grid
     static System.Drawing.Drawing2D.GraphicsPath Round(RectangleF r, float rad) {
         var path = new System.Drawing.Drawing2D.GraphicsPath();
@@ -6830,15 +6907,37 @@ class LauncherForm : Form {
     }
     static readonly Color Ink = Color.FromArgb(40, 36, 52);
     // The home screen's app icons, drawn in the games' menu style: chunky dark outlines over two-tone fills. Original shapes.
-    static void AppArt(Graphics g, int app, RectangleF r, Color tile) {
+    // A highlighted app's ball shakes as in a catch: one shake, then a pause of 0.3 to 1 s, on its own random rhythm.
+    static readonly List<float> shakeStarts = new List<float>(); static Random shakeRandom; static float shakeU;
+    const float ShakeLength = 0.62f;
+    static float BallShake(float u) {
+        if (u < 0) { shakeRandom = null; return 0; }
+        if (shakeRandom == null || u < shakeU) { shakeRandom = new Random(); shakeStarts.Clear(); shakeStarts.Add(0.15f); }
+        shakeU = u;
+        while (shakeStarts[shakeStarts.Count - 1] + ShakeLength < u) shakeStarts.Add(shakeStarts[shakeStarts.Count - 1] + ShakeLength + 0.3f + (float)shakeRandom.NextDouble() * 0.7f);
+        float k = (u - shakeStarts[shakeStarts.Count - 1]) / ShakeLength;
+        if (k <= 0 || k >= 1) return 0;
+        return 24f * (float)(Math.Sin(k * Math.PI * 2) * Math.Sin(k * Math.PI));
+    }
+    // u: seconds since the app was highlighted, so its little motion plays; below 0 it's the still icon.
+    static void AppArt(Graphics g, int app, RectangleF r, Color tile, float u = -1) {
         float s = r.Width, lw = Math.Max(1.5f, s * 0.045f);
         Func<float, float, PointF> P = (x, y) => new PointF(r.X + x * s, r.Y + y * s);
         Func<float, float, float, float, RectangleF> R = (x, y, w2, h2) => new RectangleF(r.X + x * s, r.Y + y * s, w2 * s, h2 * s);
+        Action<PointF, float> Turn = (c, deg) => { g.TranslateTransform(c.X, c.Y); g.RotateTransform(deg); g.TranslateTransform(-c.X, -c.Y); };
+        float wave = u < 0 ? 0 : (float)Math.Sin(u * Math.PI * 2 / 1.4);
         var st = g.Save();
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         using (var ink = new Pen(Ink, lw) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round, StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) {
             switch (AppNames[app]) {
-                case "Games": Ball(g, P(0.5f, 0.5f), s * 0.33f, ink); break;
+                case "Games": {
+                    // Rocks on its base, the button glowing while it shakes.
+                    float a = u < 0 ? 0 : BallShake(u);
+                    if (a != 0) Turn(P(0.5f, 0.83f), a);
+                    Ball(g, P(0.5f, 0.5f), s * 0.33f, ink);
+                    if (Math.Abs(a) > 0.5f) using (var b = new SolidBrush(Color.FromArgb((int)Math.Min(200, Math.Abs(a) * 10), 255, 70, 60))) g.FillEllipse(b, R(0.5f - 0.075f, 0.5f - 0.075f, 0.15f, 0.15f));
+                    break;
+                }
                 case "Collection": {
                     var body = R(0.22f, 0.15f, 0.56f, 0.7f);
                     using (var path = Round(body, s * 0.07f)) {
@@ -6850,12 +6949,17 @@ class LauncherForm : Form {
                     var lens = R(0.35f, 0.21f, 0.2f, 0.2f);
                     using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(lens, Color.FromArgb(120, 200, 255), Color.FromArgb(30, 100, 210), 60f)) g.FillEllipse(b, lens);
                     g.FillEllipse(Brushes.White, R(0.39f, 0.25f, 0.06f, 0.06f));
+                    if (u >= 0) using (var b = new SolidBrush(Color.FromArgb((int)(70 + 70 * wave), 255, 255, 255))) g.FillEllipse(b, lens);
                     g.DrawEllipse(ink, lens);
                     var lights = new[] { Color.FromArgb(255, 90, 80), Color.FromArgb(255, 214, 64), Color.FromArgb(90, 210, 110) };
-                    for (int k = 0; k < 3; k++) { var dot = R(0.59f + k * 0.055f, 0.24f, 0.04f, 0.04f); using (var b = new SolidBrush(lights[k])) g.FillEllipse(b, dot); }
+                    int lit = u < 0 ? -1 : (int)(u * 3.5f) % 3;
+                    for (int k = 0; k < 3; k++) { var dot = R(0.59f + k * 0.055f, 0.24f, 0.04f, 0.04f); using (var b = new SolidBrush(u < 0 || k == lit ? lights[k] : Mix(lights[k], Color.Black, 0.45f))) g.FillEllipse(b, dot); }
                     var screen = R(0.34f, 0.5f, 0.36f, 0.25f);
                     using (var path = Round(screen, s * 0.03f)) { using (var b = new SolidBrush(Color.FromArgb(206, 240, 228))) g.FillPath(b, path); g.DrawPath(ink, path); }
-                    using (var pen = new Pen(Color.FromArgb(120, 170, 150), lw * 0.6f)) { g.DrawLine(pen, P(0.39f, 0.58f), P(0.6f, 0.58f)); g.DrawLine(pen, P(0.39f, 0.66f), P(0.54f, 0.66f)); }
+                    // Its entry being written out, line by line.
+                    float k1 = 1, k2 = 1;
+                    if (u >= 0) { float c = u % 2.2f / 1.6f; k1 = Math.Min(1, c * 2); k2 = Math.Max(0, Math.Min(1, c * 2 - 1)); }
+                    using (var pen = new Pen(Color.FromArgb(120, 170, 150), lw * 0.6f)) { if (k1 > 0.02f) g.DrawLine(pen, P(0.39f, 0.58f), P(0.39f + 0.21f * k1, 0.58f)); if (k2 > 0.02f) g.DrawLine(pen, P(0.39f, 0.66f), P(0.39f + 0.15f * k2, 0.66f)); }
                     break;
                 }
                 case "Mods": {
@@ -6863,16 +6967,22 @@ class LauncherForm : Form {
                     using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(disc, Color.FromArgb(250, 251, 255), Color.FromArgb(160, 168, 186), 45f)) g.FillEllipse(b, disc);
                     using (var pen = new Pen(Color.FromArgb(150, 255, 255, 255), lw * 1.2f)) g.DrawArc(pen, R(0.22f, 0.22f, 0.56f, 0.56f), 200, 60);
                     var label = R(0.31f, 0.31f, 0.38f, 0.38f);
+                    // Spinning: the label turns under the light, which stays put.
+                    var spin = g.Save();
+                    if (u >= 0) Turn(P(0.5f, 0.5f), u * 300f);
                     using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(label, Mix(tile, Color.White, 0.35f), Mix(tile, Color.Black, 0.15f), 90f)) g.FillEllipse(b, label);
+                    if (u >= 0) using (var pen = new Pen(Color.FromArgb(170, 255, 255, 255), lw * 0.9f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) g.DrawArc(pen, R(0.36f, 0.36f, 0.28f, 0.28f), 300, 70);
+                    g.Restore(spin);
                     g.DrawEllipse(ink, label);
                     var hole = R(0.44f, 0.44f, 0.12f, 0.12f);
                     using (var b = new SolidBrush(Mix(tile, Color.Black, 0.45f))) g.FillEllipse(b, hole);
                     g.DrawEllipse(ink, hole);
                     g.DrawEllipse(ink, disc);
-                    Sparkle(g, P(0.8f, 0.2f), s * 0.09f);
+                    Sparkle(g, P(0.8f, 0.2f), s * 0.09f * (u < 0 ? 1 : 0.75f + 0.4f * Math.Abs((float)Math.Sin(u * Math.PI / 0.9))));
                     break;
                 }
                 case "ROMs": {
+                    if (u >= 0) g.TranslateTransform(0, -s * 0.045f * (0.5f - 0.5f * (float)Math.Cos(u * Math.PI * 2 / 1.1)));
                     var body = new System.Drawing.Drawing2D.GraphicsPath();
                     body.AddLines(new[] { P(0.24f, 0.2f), P(0.6f, 0.2f), P(0.68f, 0.28f), P(0.76f, 0.28f), P(0.76f, 0.82f), P(0.24f, 0.82f) });
                     body.CloseFigure();
@@ -6889,8 +6999,9 @@ class LauncherForm : Form {
                     break;
                 }
                 case "Move": {
-                    Ball(g, P(0.3f, 0.62f), s * 0.16f, ink);
-                    Ball(g, P(0.7f, 0.62f), s * 0.16f, ink);
+                    Func<float, float> Hop = ph => u < 0 ? 0 : -0.07f * Math.Max(0, (float)Math.Sin((u / 1.2f + ph) * Math.PI * 2));
+                    Ball(g, P(0.3f, 0.62f + Hop(0)), s * 0.16f, ink);
+                    Ball(g, P(0.7f, 0.62f + Hop(0.5f)), s * 0.16f, ink);
                     var arc = new System.Drawing.Drawing2D.GraphicsPath();
                     arc.AddBezier(P(0.3f, 0.38f), P(0.36f, 0.12f), P(0.64f, 0.12f), P(0.7f, 0.36f));
                     var head = new[] { P(0.61f, 0.3f), P(0.705f, 0.4f), P(0.77f, 0.28f) };
@@ -6910,6 +7021,7 @@ class LauncherForm : Form {
                         }
                     }
                     gear.AddPolygon(pts.ToArray());
+                    if (u >= 0) Turn(c0, u * 45f);
                     using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(R(0.15f, 0.15f, 0.7f, 0.7f), Color.FromArgb(252, 252, 255), Color.FromArgb(184, 190, 204), 90f)) g.FillPath(b, gear);
                     g.DrawPath(ink, gear);
                     var hole = R(0.39f, 0.39f, 0.22f, 0.22f);
@@ -6921,7 +7033,7 @@ class LauncherForm : Form {
                 case "Exit": {
                     var ring = R(0.24f, 0.26f, 0.52f, 0.52f);
                     using (var back = new Pen(Ink, lw * 3.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawArc(back, ring, -60, 300); g.DrawLine(back, P(0.5f, 0.17f), P(0.5f, 0.47f)); }
-                    using (var front = new Pen(Color.FromArgb(255, 118, 110), lw * 1.5f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawArc(front, ring, -60, 300); g.DrawLine(front, P(0.5f, 0.17f), P(0.5f, 0.47f)); }
+                    using (var front = new Pen(u < 0 ? Color.FromArgb(255, 118, 110) : Mix(Color.FromArgb(255, 118, 110), Color.White, 0.25f + 0.25f * wave), lw * 1.5f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawArc(front, ring, -60, 300); g.DrawLine(front, P(0.5f, 0.17f), P(0.5f, 0.47f)); }
                     break;
                 }
             }
@@ -7470,13 +7582,29 @@ class LauncherForm : Form {
         using (var b = new SolidBrush(c)) g.FillPolygon(b, new[] { new PointF(x, cy - s), new PointF(x + s * 1.2f, cy), new PointF(x, cy + s) });
     }
     // The device's big lens, with its glint and the three small status lights.
+    // The lights as power is cut: 1 on, a surge above 1, a sputter, then a bulb's glow dying away to 0.
+    static float PowerLevel = 1, FrozenT = -1;
+    static readonly float[] Sputter = { 0.15f, 0.85f, 0.05f, 0.6f, 0.2f, 0.75f, 0.08f, 0.45f, 0.3f };
+    static float PowerCurve(float x) {
+        if (x < 0) return 1;
+        if (x < 0.05f) return 1.25f;
+        if (x < 0.05f + Sputter.Length * 0.03f) return Sputter[(int)((x - 0.05f) / 0.03f)];
+        return 0.4f * (float)Math.Exp(-(x - 0.05f - Sputter.Length * 0.03f) / 0.1f);
+    }
+    // A light at that power: brighter on the surge, warm and dim as it dies, then dark.
+    static Color Powered(Color c, Color off) {
+        float l = PowerLevel;
+        if (l >= 1) return Mix(c, Color.White, Math.Min(1, (l - 1) * 2));
+        return Mix(off, Mix(c, Color.FromArgb(255, 120, 40), (1 - l) * 0.5f), l);
+    }
     static void Lens(Graphics g, float cx, float cy, float r, float t, bool lights) {
         using (var b = new SolidBrush(Line)) g.FillEllipse(b, cx - r * 1.14f, cy - r * 1.14f, r * 2.28f, r * 2.28f);
         using (var b = new SolidBrush(Color.FromArgb(240, 242, 246))) g.FillEllipse(b, cx - r, cy - r, r * 2, r * 2);
         float i = r * 0.76f;
         var rect = new RectangleF(cx - i, cy - i, i * 2, i * 2);
+        if (FrozenT >= 0) t = FrozenT;
         float pulse = 0.5f + 0.5f * (float)Math.Sin(t * 1.8f);
-        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(rect, Mix(Color.FromArgb(70, 170, 245), Color.FromArgb(130, 215, 255), pulse), Color.FromArgb(16, 74, 160), 60f)) g.FillEllipse(b, rect);
+        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(rect, Powered(Mix(Color.FromArgb(70, 170, 245), Color.FromArgb(130, 215, 255), pulse), Color.FromArgb(14, 30, 60)), Powered(Color.FromArgb(16, 74, 160), Color.FromArgb(6, 14, 30)), 60f)) g.FillEllipse(b, rect);
         using (var b = new SolidBrush(Fade(Color.White, 200))) g.FillEllipse(b, cx - i * 0.58f, cy - i * 0.62f, i * 0.55f, i * 0.42f);
         if (!lights) return;
         float d = r * 0.42f, x = cx + r * 1.5f, y = cy - r * 0.86f;
@@ -7484,7 +7612,8 @@ class LauncherForm : Form {
         for (int k = 0; k < 3; k++) {
             int lit = ((int)(t * 1.5f)) % 3;
             using (var b = new SolidBrush(Line)) g.FillEllipse(b, x - 1.5f, y - 1.5f, d + 3, d + 3);
-            using (var b = new SolidBrush(k == lit ? on[k] : Mix(on[k], Line, 0.45f))) g.FillEllipse(b, x, y, d, d);
+            var off = Mix(on[k], Color.Black, 0.7f);
+            using (var b = new SolidBrush(k == lit ? Powered(on[k], off) : Mix(off, Mix(on[k], Line, 0.45f), Math.Min(1, PowerLevel)))) g.FillEllipse(b, x, y, d, d);
             x += d * 1.45f;
         }
     }
@@ -7658,7 +7787,27 @@ class LauncherForm : Form {
         using (var clip = Round(s, rad)) g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
         g.TranslateTransform(s.X, s.Y);
         int sw = (int)s.Width, sh = (int)s.Height;
-        if (starting && job == null && pages.Count == 0) RenderSplash(g, sw, sh);
+        float crt = powerOff < 0 ? -1 : (t - powerOff) / CrtTime;
+        if (crt >= 0) {
+            // An old tube switching off: the picture squeezes to a bright line, the line to a dot, and the dot blips out.
+            using (var b = new SolidBrush(Color.FromArgb(8, 8, 10))) g.FillRectangle(b, 0, 0, sw, sh);
+            float squash = Ease(Math.Min(1, crt / 0.45f)), narrow = Ease(Math.Max(0, Math.Min(1, (crt - 0.45f) / 0.3f)));
+            float lineH = Math.Max(2f, sh * (1 - squash)), lineW = Math.Max(3f, sw * (1 - narrow));
+            if (crt < 0.75f) {
+                var kept = g.Save();
+                g.TranslateTransform(sw / 2f, sh / 2f); g.ScaleTransform(lineW / sw, lineH / sh); g.TranslateTransform(-sw / 2f, -sh / 2f);
+                if (squash < 0.97f) RenderScreen(g, sw, sh, th, t);
+                g.Restore(kept);
+                using (var b = new SolidBrush(Color.FromArgb((int)(255 * Math.Min(1, squash * 1.1f)), 235, 245, 255))) g.FillRectangle(b, (sw - lineW) / 2, (sh - lineH) / 2, lineW, lineH);
+            }
+            float dot = crt < 0.75f ? 0 : 1 - Math.Min(1, (crt - 0.75f) / 0.25f);
+            if (dot > 0) {
+                float rr = Math.Max(2f, sw * 0.018f * (0.4f + 0.6f * dot));
+                using (var b = new SolidBrush(Color.FromArgb((int)(90 * dot), 200, 225, 255))) g.FillEllipse(b, sw / 2f - rr * 2.4f, sh / 2f - rr * 2.4f, rr * 4.8f, rr * 4.8f);
+                using (var b = new SolidBrush(Color.FromArgb((int)(255 * dot), 245, 250, 255))) g.FillEllipse(b, sw / 2f - rr, sh / 2f - rr, rr * 2, rr * 2);
+            }
+        }
+        else if (starting && job == null && pages.Count == 0) RenderSplash(g, sw, sh);
         else RenderScreen(g, sw, sh, th, t);
         g.Restore(outer);
         // One soft reflection across the glass.
@@ -7769,6 +7918,7 @@ class LauncherForm : Form {
             int depth = job != null ? pages.Count + 1 : pages.Count;
             screenDir = depth >= screenDepth ? 1 : -1;
             screenKey = key; screenDepth = depth; screenAt = t;
+            if (bounceArm) { bounceArm = false; bounceAt = t; }
             // Leaving the mods pages: what was switched there may have started or ended a clash.
             bool inMods = pages.Any(x => x.Mods);
             if (wasInMods && !inMods) ReadClashes();
@@ -7785,6 +7935,7 @@ class LauncherForm : Form {
             if (p.Main) RenderMain(g, p, w, h, m, top, bottom, t, th); else RenderPage(g, p, w, h, m, top, bottom, t, th);
         }
         g.Restore(content);
+        RenderOpen(g, w, h, t);
         StatusBar(g, w, h, home ? Color.White : PhoneText);
         float below = ClashBanner(g, w, h, t);
         UpdateBanner(g, w, h, t, below);
@@ -7935,6 +8086,7 @@ class LauncherForm : Form {
         int appRows = (Math.Min(p.Items.Count, AppNames.Length) - 1 + TileCols - 1) / TileCols;
         // At the bottom, where a thumb would reach, leaving the wallpaper's town in view above them.
         float gy = bottom - h * 0.012f - appRows * (icon + labelH) - (appRows - 1) * rowGap;
+        if (p.Sel < 1) BallShake(-1);
         for (int i = 1; i < p.Items.Count && i < AppNames.Length; i++) {
             var it = p.Items[i];
             int k = i - 1;
@@ -7947,7 +8099,9 @@ class LauncherForm : Form {
             Color c = it.On ? AppColors[i] : Mix(AppColors[i], Color.Gray, 0.7f);
             GlossTile(g, r, size * 0.24f, c);
             if (sel) using (var ring = Round(new RectangleF(r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6), size * 0.27f)) using (var pen = new Pen(Color.White, Math.Max(2.5f, w * 0.007f))) g.DrawPath(pen, ring);
-            AppArt(g, i, r, c);
+            appRects[i] = r;
+            if (openRun != null && i == openApp) continue;
+            AppArt(g, i, r, c, sel && it.On ? t - selAt : -1);
             if (!it.On) using (var path = Round(r, size * 0.24f)) using (var b = new SolidBrush(Color.FromArgb(110, c))) g.FillPath(b, path);
             if (AppNames[i] == "Settings" && Updater.Ready) {
                 float dot = size * 0.26f;
@@ -8055,7 +8209,12 @@ class LauncherForm : Form {
             for (int i = 0; i < p.Items.Count; i++) {
                 var r = new RectangleF(m, y + (i - p.ScrollRow) * rowH, width, rowH);
                 if (!r.IntersectsWith(group)) continue;
+                float pop = BackOut((t - bounceAt - 0.05f * Math.Max(0, i - p.ScrollRow)) / 0.36f);
+                if (pop <= 0.01f) continue;
+                var popped = g.Save();
+                if (t - bounceAt < 1.4f) { float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2; g.TranslateTransform(cx, cy + (1 - pop) * rowH * 0.5f); g.ScaleTransform(0.85f + 0.15f * pop, 0.85f + 0.15f * pop); g.TranslateTransform(-cx, -cy); }
                 ListRow(g, p.Items[i], i == p.Sel, r, i < p.Items.Count - 1, h, accent, th);
+                g.Restore(popped);
                 hits.Add(new KeyValuePair<RectangleF, int>(RectangleF.Intersect(r, group), i));
             }
             g.Restore(kept);
