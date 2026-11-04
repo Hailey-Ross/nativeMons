@@ -102,6 +102,8 @@ runs:
         cp engines/fulldex/LICENSE "$gba/LICENSE.txt"
         curl -fsSL https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE -o "$gba/LICENSE-mGBA.txt"
         cp engines/fulldex/frontend/thirdparty/rcheevos/LICENSE "$gba/LICENSE-rcheevos.txt"
+        cp engines/fulldex/gba/third_party/pokedaisy/NOTICE "$gba/NOTICE-PokeDaisy.txt"
+        cp engines/fulldex/gba/third_party/pokedaisy/LICENSE "$gba/LICENSE-PokeDaisy.txt"
 
     - name: Check the package
       shell: pwsh

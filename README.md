@@ -190,7 +190,7 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 |---|---|---|
 | `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks; our fork adds quick start and keeps the launcher's background jobs out of sight | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
 | `engines/fulldex` | DS and GBA games in widescreen at 60 fps. Packages use its published Windows build | [mamesj/pokemon-fulldex](https://github.com/mamesj/pokemon-fulldex), a fork of [ClickingMaster/ssrecomp](https://github.com/ClickingMaster/ssrecomp), using melonDS and mGBA |
-| GBA player (`engines/fulldex/gba`) | GBA games and hacks: FireRed, LeafGreen and Emerald in widescreen, everything else at 3:2. Ours, in our Fulldex fork; packages build it | [Hailey-Ross/pokemon-fulldex](https://github.com/Hailey-Ross/pokemon-fulldex/tree/hails-additions/gba), after Pokemon GBA Widescreen by mamesj |
+| GBA player (`engines/fulldex/gba`) | GBA games and hacks: FireRed, LeafGreen and Emerald in widescreen by our patches; Ruby, Sapphire, other languages and the romhacks PokeDaisy's EXPAND knows (Unbound, Radical Red, Rocket Edition, ...) widened by EXPAND; everything else at 3:2. Ours, in our Fulldex fork; packages build it | [Hailey-Ross/pokemon-fulldex](https://github.com/Hailey-Ross/pokemon-fulldex/tree/hails-additions/gba), after Pokemon GBA Widescreen by mamesj |
 | Platinum PC port | A native Platinum. Packages carry its published Windows release, program only | [cybervisi0n/pokeplatinum](https://github.com/cybervisi0n/pokeplatinum) |
 | nativeplat | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
 | `tools/nds-patcher` | Decrypts `.nds` secure areas | [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) |
@@ -217,6 +217,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors.
 - [mGBA](https://github.com/mgba-emu/mgba) by endrift and contributors (MPL-2.0), in the GBA player with our widescreen change, and as its [libretro](https://www.libretro.com) core for romhacks' title screens.
 - Pokemon GBA Widescreen by mamesj (in Pokémon Fulldex), whose idea and game protocol the GBA player follows; its widescreen patches are our own, written from the [pret](https://github.com/pret) decompilations' names.
+- Widescreen for romhacks and other versions in the GBA player: PokeDaisy's EXPAND (GPL-3.0), unchanged. Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy
 - [rcheevos](https://github.com/RetroAchievements/rcheevos) by the RetroAchievements team (MIT), for RetroAchievements in the GBA player, through Pokémon Fulldex's achievements code.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.

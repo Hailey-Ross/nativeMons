@@ -5033,6 +5033,7 @@ class LauncherForm : Form {
             + "\n\nMoving Pokemon between generations uses the conversion code of OpenHome by Andrew Benington (github.com/andrewbenington/OpenHome, GPL-3.0), running on Node.js. Open in OpenHome uses your own copy."
             + "\n\nPokemon pictures served by pogo.hails.app (hailsDotGO), from the PokeAPI sprites collection. Pokedex entries from PokeAPI (pokeapi.co)."
             + "\n\nFind mods reads the Gen1Recomp community mod index (github.com/bryanthaboi/gen1recomp-mod-index). Its listings are by the mods' authors, and the mods are theirs."
+            + "\n\nThe GBA player is ours, in our Fulldex fork, on mGBA by endrift and contributors (MPL-2.0), after Pokemon GBA Widescreen by mamesj. Widescreen for romhacks and the versions our patches don't cover comes from PokeDaisy's EXPAND (GPL-3.0). Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy"
             + "\n\nRomhacks' title screens are captured with mGBA by endrift and contributors (github.com/mgba-emu/mgba, MPL-2.0), as its libretro core."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
