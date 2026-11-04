@@ -151,6 +151,7 @@ static class Config {
     public static string OpenHomeTool { get { return Get("openhome", @"tools\openhome\convert.cjs"); } }
     public static string PlatinumPort { get { return Get("pokeplatinum", @"engines\pokeplatinum\main.exe"); } }
     public static string Nativeplat { get { return Get("nativeplat", @"engines\nativeplat\nativeplat.exe"); } }
+    public static string GbaPlayer { get { return Get("gbawide", @"engines\gbawide\gbawide.exe"); } }
     // Installed PC games live beside the engines, where a launcher update never looks.
     public static string InfiniteFusion { get { return Get("infinitefusion", @"games\infinitefusion\Game.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
@@ -6083,6 +6084,9 @@ class LauncherForm : Form {
             // Quick start: from the title-screen snapshot, only while the save is exactly the one it was made from.
             if (QuickStart && SnapshotGood(g)) { args += " --state-load \"" + SnapFile(g) + "\""; QuickNote("snapshot used " + g.Id); }
             else if (QuickStart && CanSnapshot(g)) QuickNote("snapshot not used " + g.Id);
+        } else if (File.Exists(Config.GbaPlayer)) {
+            PlayGba(g, saves);
+            return;
         } else {
             // GBA games are only found in Fulldex's roms folder. A copy goes there, the original stays put.
             string roms = Path.Combine(dir, "roms"), copy = Path.Combine(roms, Path.GetFileName(g.FulldexRom));
@@ -6106,6 +6110,16 @@ class LauncherForm : Form {
         var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         // That key press must never answer an update prompt, so update checks go nowhere.
         if (gbaPress && !g.IsDs) psi.EnvironmentVariables["FULLDEX_UPDATE_URL"] = "http://127.0.0.1:9/";
+        RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+    }
+    // Our GBA player (the Fulldex fork's gba folder): the ROM where it is, the shared save in Fulldex's saves folder.
+    void PlayGba(GameEntry g, string saves) {
+        string dir = Path.GetDirectoryName(Config.GbaPlayer);
+        string args = "--rom \"" + g.FulldexRom + "\" --saves \"" + saves + "\" --data \"" + dir + "\"";
+        if (!string.IsNullOrEmpty(g.Save)) args += " --save \"" + Path.Combine(saves, g.Save) + "\"";
+        string full;
+        if (!ReadFulldex().TryGetValue("fullscreen", out full) || full == "1") args += " --fullscreen";
+        var psi = new ProcessStartInfo(Config.GbaPlayer, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
     }
     // Fulldex opens its game list after a GBA game. Seeing it means the game has saved, so Fulldex can close.

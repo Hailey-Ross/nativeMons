@@ -77,6 +77,31 @@ runs:
       shell: pwsh
       run: tools\openhome-bridge\build.ps1 -Out dist\nativeMons\tools\openhome -Work openhome-work
 
+    # Our GBA player: the Fulldex fork's gba folder (mGBA fetched at its pinned commit and patched there).
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: false
+        install: >-
+          git
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja
+          mingw-w64-ucrt-x86_64-SDL2
+
+    - name: Build the GBA player
+      shell: msys2 {0}
+      run: |
+        set -e
+        cmake -S engines/fulldex/gba -B gbawide-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        cmake --build gbawide-build --parallel 4
+        gba=dist/nativeMons/engines/gbawide
+        mkdir -p "$gba"
+        cp gbawide-build/gbawide.exe "$gba/"
+        cp engines/fulldex/gba/README.md "$gba/README.md"
+        cp engines/fulldex/LICENSE "$gba/LICENSE.txt"
+        curl -fsSL https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE -o "$gba/LICENSE-mGBA.txt"
+
     - name: Check the package
       shell: pwsh
       run: |
@@ -85,6 +110,6 @@ runs:
         foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
           if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }
         }
-        foreach ($p in 'tools\mgba\mgba_libretro.dll', 'tools\mgba\LICENSE-mGBA.txt', 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe') {
+        foreach ($p in 'tools\mgba\mgba_libretro.dll', 'tools\mgba\LICENSE-mGBA.txt', 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'engines\gbawide\gbawide.exe') {
           if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
         }
