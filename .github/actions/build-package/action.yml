@@ -101,6 +101,7 @@ runs:
         cp engines/fulldex/gba/README.md "$gba/README.md"
         cp engines/fulldex/LICENSE "$gba/LICENSE.txt"
         curl -fsSL https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE -o "$gba/LICENSE-mGBA.txt"
+        cp engines/fulldex/frontend/thirdparty/rcheevos/LICENSE "$gba/LICENSE-rcheevos.txt"
 
     - name: Check the package
       shell: pwsh
