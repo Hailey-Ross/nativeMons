@@ -1524,6 +1524,7 @@ static class GameArt {
     const int GbaPress = 1000, GbaFirstShot = 1500;
     static string CaptureGba(GameEntry g) {
         string temp = Path.Combine(Config.State, "game-art", g.Id + "-shots"), rom = temp + ".gba";
+        if (Library.IsUltraVioletPatch((g.Chosen ?? g.Roms[0]).File)) return "A patch, not a ROM: no title screen to capture.";
         try {
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             Directory.CreateDirectory(temp);
@@ -1936,7 +1937,7 @@ static class Library {
         var files = Config.RomFiles().Where(File.Exists).ToList();
         foreach (var folder in folders) if (Directory.Exists(folder)) files.AddRange(FilesUnder(folder));
         foreach (var file in files) {
-            if (!IsRom(file)) continue;
+            if (!IsRom(file)) { if (IsUltraVioletPatch(file)) try { AddPatch(list, file); } catch { } continue; }
             try { Sort(list, file, Path.GetExtension(file).ToLowerInvariant(), accepted); } catch { }
         }
         SaveHashes();
@@ -1953,7 +1954,7 @@ static class Library {
             if (g.FulldexCode == null || g.Pc != null) continue;
             // Where no engine knows the clean dumps, only hacks known by their hash are told apart.
             bool clean = g.CanVerify && !(g.Gen1 != null && !Gen1Found);
-            foreach (var r in g.Roms.Where(r => !r.Encrypted && (clean ? !r.Verified : g.KnownHacks.ContainsKey(r.Sha1 ?? ""))).ToList()) {
+            foreach (var r in g.Roms.Where(r => !r.Encrypted && (IsUltraViolet(r.File) || (clean ? !r.Verified : g.KnownHacks.ContainsKey(r.Sha1 ?? "")))).ToList()) {
                 g.Roms.Remove(r);
                 result.Add(HackOf(g, r, list.Concat(result)));
             }
@@ -1992,6 +1993,8 @@ static class Library {
         // A known build is named by its hash, whatever its file is called. The player's own name still wins.
         bool isKnown = b.KnownHacks.TryGetValue(r.Sha1, out known);
         if (isKnown) title = known[1];
+        bool uv = !b.IsDs && IsUltraViolet(r.File);
+        if (uv && !isKnown) title = "Pokemon Ultra Violet";
         if (HackNames().TryGetValue(r.Sha1, out own)) title = own;
         // Otherwise the id comes from the file's name, as the game's save does, so renaming it here changes neither.
         string slug = System.Text.RegularExpressions.Regex.Replace((words != "" ? words : r.Sha1.Substring(0, 8)).ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
@@ -2004,9 +2007,22 @@ static class Library {
         h.Gen1Rom = null; h.FulldexRom = null; h.NativeplatRom = null; h.FoundUnsupported = null; h.FoundSha1 = null; h.Chosen = null;
         h.Roms = new List<RomFile> { r };
         // Its save is the one Fulldex already gives it (a GBA game's is named after its file), so nothing moves.
-        h.Save = b.IsDs ? id + ".sav" : FulldexKey(r.File) + ".sav";
+        h.Save = b.IsDs ? id + ".sav" : uv ? "ultraviolet.sav" : FulldexKey(r.File) + ".sav";
         h.Theme = b.Theme.Copy(); h.Theme.GameId = id;
         return h;
+    }
+    // Ultra Violet (a FireRed 1.0 hack), told by its file's name as Fulldex does; saved as ultraviolet.sav there.
+    public static bool IsUltraViolet(string file) {
+        return System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(file).ToLowerInvariant(), "[^a-z0-9]", "").Contains("ultraviolet");
+    }
+    public static bool IsUltraVioletPatch(string file) { return Path.GetExtension(file).ToLowerInvariant() == ".ips" && IsUltraViolet(file); }
+    // Its .ips plays over FireRed 1.0 (the GBA player's --base), so it is listed with FireRed's dumps until Hacks splits it off.
+    static void AddPatch(List<GameEntry> list, string file) {
+        var g = list.Find(x => x.Header == "BPRE");
+        if (g == null) return;
+        string sha = Sha1Cached(file);
+        if (g.Roms.Any(x => x.Sha1 == sha)) return;
+        g.Roms.Add(new RomFile { File = file, Sha1 = sha, Added = File.GetCreationTimeUtc(file) });
     }
     public static bool IsRom(string file) { string ext = Path.GetExtension(file).ToLowerInvariant(); return ext == ".nds" || ext == ".gb" || ext == ".gbc" || ext == ".gba"; }
     // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
@@ -6117,6 +6133,13 @@ class LauncherForm : Form {
         string dir = Path.GetDirectoryName(Config.GbaPlayer);
         string args = "--rom \"" + g.FulldexRom + "\" --saves \"" + saves + "\" --data \"" + dir + "\"";
         if (!string.IsNullOrEmpty(g.Save)) args += " --save \"" + Path.Combine(saves, g.Save) + "\"";
+        // RetroAchievements: the account Fulldex keeps.
+        if (Config.FulldexDir != null) args += " --config \"" + Path.Combine(Config.FulldexDir, "settings.cfg") + "\"";
+        if (Library.IsUltraVioletPatch(g.FulldexRom)) {
+            var b = Library.Games.Find(x => x.Id == g.BaseId);
+            var fr = b == null ? null : b.Roms.FirstOrDefault(r => r.Revision == 0 && Path.GetExtension(r.File).ToLowerInvariant() == ".gba");
+            if (fr != null) args += " --base \"" + fr.File + "\"";
+        }
         string full;
         if (!ReadFulldex().TryGetValue("fullscreen", out full) || full == "1") args += " --fullscreen";
         var psi = new ProcessStartInfo(Config.GbaPlayer, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
