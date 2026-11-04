@@ -10,7 +10,7 @@ the fan game Pokémon Infinite Fusion, and any other self-contained PC game you 
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
 
-<p align="center"><a href="https://assets.hails.cc/nativeMons/early-preview.gif"><img src="assets/early-preview.gif" alt="An early preview of the nativeMons launcher. Select it for the full-size version." width="360"></a></p>
+<p align="center"><a href="https://assets.hails.cc/nativeMons/main-screen-preview.gif"><img src="assets/main-screen-preview.gif" alt="The nativeMons home screen: a Pokédex-style launcher showing Platinum's title screen in the Play tile over a town wallpaper, with Games, Collection, Mods, ROMs, Move, Settings and Exit. Select it for the full-size version." width="360"></a></p>
 
 ## Supported games
 
@@ -150,11 +150,15 @@ Only some of this has been tried on a real 3DS, so back up your 3DS save first.
 
 ## Pokémon
 
+<p align="center"><a href="https://assets.hails.cc/nativeMons/collections-preview.gif"><img src="assets/collections-preview.gif" alt="My Collection: the Pokédex with its National and regional counts, and a Pokémon's page with its picture, type, size, entry and stats. Select it for the full-size version." width="360"></a></p>
+
 **My Collection** is a Pokédex built from all the saves of every game the launcher finds. It has a National list from 001 to 649, a list for each region from Kanto to Unova (by the generation that introduced each Pokémon), and your counts by game. Pokémon you haven't seen show as `???`. ROM hacks and fan games such as Infinite Fusion never count toward it: **Romhacks and fan games** lists them apart, each with a Pokédex of its own. Infinite Fusion's is read from its own saves: species caught and seen by National Dex number, later Pokémon than Unova counted beside them, and its fusions counted apart. The launcher only reads the game's species list and saves, and never changes them.
 
 A caught Pokémon's entry shows its picture, category, types, height, weight, base stats, abilities and the description from a game you caught it in, plus each game that has it. A gold star marks a shiny, and A switches between its shiny and normal pictures. Shinies are counted only while they're in a party or a box, because saves keep no record of the rest.
 
 Entries come from [PokéAPI](https://pokeapi.co) the first time you open them and are kept in `state\pokedex-cache`. No game text is included in nativeMons.
+
+<p align="center"><a href="https://assets.hails.cc/nativeMons/mover-preview.gif"><img src="assets/mover-preview.gif" alt="Move Pokemon: the launcher unfolded into a tablet, Yellow's and Crystal's PC boxes side by side, a Pokémon dragged from one game into the other. Select it for the full-size version." width="720"></a></p>
 
 **Move Pokemon** shows your games' PC boxes the way Pokémon HOME does. The Pokédex unfolds into a tablet for it, smoothly, and folds back into the phone when you leave: two games side by side, each showing one box as a grid of its Pokémon. Drag a Pokémon onto an empty slot of the other game, or of another box in the same game (there it can also swap with one). With a controller or keyboard, A picks it up, A puts it down and B puts it back; left and right cross from one game's box into the other's at the edge. ◀ ▶ step through a game's boxes, and holding a dragged Pokémon over them turns the box too; selecting the game's name switches to another game. It uses [PKHeX.Core](https://github.com/kwsch/PKHeX), and both saves are backed up to `state\save-backups` first. If a move is blocked, you choose whether to delete or change the attacks in the way, then retry. A Pokémon that doesn't exist in the destination game can't go there. Only Pokémon in the PC boxes can be moved, not your party.
 
