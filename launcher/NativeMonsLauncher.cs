@@ -1195,6 +1195,68 @@ static class GameArt {
     // The home screen's wallpaper: one of the game's towns.
     static string TownFile(string id) { return Path.Combine(Folder(id), "town.jpg"); }
     public static bool HasTown(string id) { return id != null && File.Exists(TownFile(id)); }
+    // Per town (games.json townView): the point of the picture to centre between the Play card and the apps, and a zoom
+    // where 1 shows its whole width. A hack without its own uses its base game's.
+    public static readonly Dictionary<string, float[]> TownViews = new Dictionary<string, float[]>();
+    static float[] TownView(string id) {
+        float[] v; string b;
+        if (id != null && TownViews.TryGetValue(id, out v)) return v;
+        if (id != null && BaseOf.TryGetValue(id, out b) && TownViews.TryGetValue(b, out v)) return v;
+        return new[] { 0.5f, 0.5f, 1f };
+    }
+    static string framedId; static Bitmap framedSoft, framedBlur;
+    // The town framed in band; where it doesn't reach the screen's edges, a blurred, darker copy fills in behind.
+    public static bool DrawTown(Graphics g, string gameId, RectangleF screen, RectangleF band) {
+        var pic = Town(gameId);
+        if (pic == null) return false;
+        // A wide window has no open band between them: the town just fills it.
+        if (screen.Width > screen.Height || band.Height < screen.Height * 0.08f) { Draw(g, pic, screen); return true; }
+        string id = Shown(gameId, HasTown);
+        var view = TownView(id);
+        lock (gate) if (framedId != id) {
+            if (framedSoft != null) framedSoft.Dispose(); if (framedBlur != null) framedBlur.Dispose();
+            framedSoft = Feathered(pic); framedBlur = Blurred(pic); framedId = id;
+        }
+        float scale = screen.Width / pic.Width * Math.Max(1f, view[2]), dw = pic.Width * scale, dh = pic.Height * scale;
+        float x = Math.Max(screen.Right - dw, Math.Min(screen.X, band.X + band.Width / 2 - view[0] * dw));
+        float y = band.Y + band.Height / 2 - view[1] * dh;
+        if (dh >= screen.Height) y = Math.Max(screen.Bottom - dh, Math.Min(screen.Y, y));
+        var st = g.Save();
+        if (y > screen.Y || y + dh < screen.Bottom) {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            float cover = Math.Max(screen.Width / framedBlur.Width, screen.Height / framedBlur.Height) * 1.1f;
+            g.DrawImage(framedBlur, screen.X + (screen.Width - framedBlur.Width * cover) / 2, screen.Y + (screen.Height - framedBlur.Height * cover) / 2, framedBlur.Width * cover, framedBlur.Height * cover);
+            using (var b = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) g.FillRectangle(b, screen);
+        }
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+        g.DrawImage(dh >= screen.Height ? pic : framedSoft, x, y, dw, dh);
+        g.Restore(st);
+        return true;
+    }
+    // Its top and bottom fade out, so the sharp picture meets the blurred one softly.
+    static Bitmap Feathered(Bitmap pic) {
+        var b = new Bitmap(pic.Width, pic.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(b)) g.DrawImage(pic, 0, 0, pic.Width, pic.Height);
+        var data = b.LockBits(new Rectangle(0, 0, b.Width, b.Height), System.Drawing.Imaging.ImageLockMode.ReadWrite, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var px = new byte[data.Stride * b.Height];
+        System.Runtime.InteropServices.Marshal.Copy(data.Scan0, px, 0, px.Length);
+        int edge = Math.Max(1, b.Height / 10);
+        for (int row = 0; row < b.Height; row++) {
+            int d = Math.Min(row, b.Height - 1 - row);
+            if (d >= edge) continue;
+            float k = d / (float)edge; byte a = (byte)(255 * k * k * (3 - 2 * k));
+            for (int col = 0; col < b.Width; col++) px[row * data.Stride + col * 4 + 3] = a;
+        }
+        System.Runtime.InteropServices.Marshal.Copy(px, 0, data.Scan0, px.Length);
+        b.UnlockBits(data);
+        return b;
+    }
+    static Bitmap Blurred(Bitmap pic) {
+        var small = new Bitmap(Math.Max(4, pic.Width / 24), Math.Max(4, pic.Height / 24));
+        using (var g = Graphics.FromImage(small)) { g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear; g.DrawImage(pic, 0, 0, small.Width, small.Height); }
+        return small;
+    }
     static string loadedTownId; static Bitmap loadedTown;
     public static Bitmap Town(string id) {
         id = Shown(id, HasTown);
@@ -1939,6 +2001,7 @@ static class Library {
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
             object tf; if (d.TryGetValue("townFrame", out tf)) e.TownFrame = Convert.ToInt32(tf);
+            object tv; if (d.TryGetValue("townView", out tv)) GameArt.TownViews[e.Id] = ((System.Collections.IEnumerable)tv).Cast<object>().Select(Convert.ToSingle).ToArray();
             object hk; if (d.TryGetValue("hacks", out hk)) foreach (var o in (System.Collections.IEnumerable)hk) {
                 var k = o as Dictionary<string, object>;
                 if (k != null && str(k, "id") != null && str(k, "title") != null && k.ContainsKey("sha1"))
@@ -2496,8 +2559,8 @@ static class Sprites {
             }
         } catch { }
     }
-    // Every picture for Generations 1 to 5, normal and shiny, for offline play. Safe to run again: it only fetches what's missing.
-    public const int MaxDex = 649;
+    // Every picture to the end of the National Dex, normal and shiny, for offline play. Safe to run again: it only fetches what's missing.
+    public const int MaxDex = 1025;
     public static void GetAll(Action<int, int, int, int> report) {
         var keys = new Queue<string>();
         for (int i = 1; i <= MaxDex; i++) { keys.Enqueue(i.ToString()); keys.Enqueue("shiny/" + i); }
@@ -2858,7 +2921,7 @@ class LauncherForm : Form {
         if (screen == "dex" || screen == "dexlist" || screen == "dexentry") {
             LoadDex();
             int species; if (!(colon > 0 && int.TryParse(previewId, out species))) species = 25;
-            var order = Enumerable.Range(1, 649).Where(DexSeen).ToArray();
+            var order = Enumerable.Range(1, Sprites.MaxDex).Where(DexSeen).ToArray();
             if (screen == "dex") pages.Push(DexHomePage());
             else if (screen == "dexlist") { var list = DexListPage("Kanto", 1, 151); list.Sel = Math.Min(species - 1, 150); pages.Push(list); for (int i = 0; i < 12 && list.Sel + i < 151; i++) if (DexSeen(list.Sel + i + 1)) Sprites.Get((list.Sel + i + 1).ToString()); Sprites.Wait(15); }
             else { pages.Push(DexEntryPage(species, order)); if (DexCaught(species)) DexInfos.Wait(species, 30); Sprites.Get((DexShiny(species) ? "shiny/" : "") + species); Sprites.Wait(15); }
@@ -3666,16 +3729,28 @@ class LauncherForm : Form {
             return x.Message;
         }
     }
-    // Only a save not in use. Its Fulldex file goes to its backups, and Gen1Recomp's slot stays, as the player's slots always do.
+    // Only a save not in use. Its Fulldex file and its Gen1Recomp slot go to its backups first, then both are removed (user, 2026-11-04).
     public static string DeleteSave(GameEntry g, string set) {
         if (set == SaveSets.Active(g)) return "That save is in use. Switch to another one first.";
         try {
+            string folder = SaveGuard.BackupFolder(g, set), stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
             string parked = ParkedSave(g, set);
             if (File.Exists(parked)) {
-                string folder = SaveGuard.BackupFolder(g, set);
                 Directory.CreateDirectory(folder);
-                string kept = Path.Combine(folder, DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-deleted.sav");
-                SaveGuard.WriteInPlace(parked, kept);
+                SaveGuard.WriteInPlace(parked, Path.Combine(folder, stamp + "-deleted.sav"));
+            }
+            string slot = HasGen1Slots(g) ? ReadSlot(g, set) : null;
+            if (slot != null) {
+                // Never the slot in use, nor one another save still points at.
+                if (slot == Gen1Slot(g, "active " + g.Gen1) || SaveSets.All(g).Any(s => s != set && ReadSlot(g, s) == slot)) slot = null;
+            }
+            if (slot != null) {
+                string file = Gen1SlotFile(g, slot);
+                if (file != null && File.Exists(file)) {
+                    Directory.CreateDirectory(folder);
+                    SaveGuard.WriteInPlace(file, Path.Combine(folder, stamp + "-deleted-gen1recomp.lua"));
+                }
+                if (Gen1Slot(g, "delete " + g.Gen1 + " " + slot) == null) return "Gen1Recomp couldn't delete that save's slot, so nothing was deleted.";
             }
             Directory.Delete(SaveSets.Dir(g, set), true);
             return null;
@@ -3718,7 +3793,7 @@ class LauncherForm : Form {
         }) { Icon = '' });
         p.Items.Add(new Item("Copy", "A separate save that starts from this point.", true, delegate { SaveAction(g, "Copying the save", delegate { return DuplicateSave(g, set); }, 2); }) { Icon = '' });
         if (!inUse) p.Items.Add(new Item("Delete", "Removes it from this list.", true, delegate {
-            var sure = new Page { Title = "Delete " + SaveSets.Name(g, set) + "?", Theme = g.Theme, Body = "It leaves this list. A last copy stays in the game's backups folder, and Gen1Recomp keeps its slot." };
+            var sure = new Page { Title = "Delete " + SaveSets.Name(g, set) + "?", Theme = g.Theme, Body = "It leaves this list. A last copy stays in the game's backups folder." };
             sure.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '' });
             sure.Items.Add(new Item("Delete it", "", true, delegate { SaveAction(g, "Deleting the save", delegate { return DeleteSave(g, set); }, 3); }) { Icon = '' });
             pages.Push(sure);
@@ -4083,8 +4158,8 @@ class LauncherForm : Form {
         return any ? all : null;
     }
     // ---------- the Pokedex ----------
-    static readonly string[] DexRegions = { "Kanto", "Johto", "Hoenn", "Sinnoh", "Unova" };
-    static readonly int[] DexRegionStart = { 1, 152, 252, 387, 494, 650 };
+    static readonly string[] DexRegions = { "Kanto", "Johto", "Hoenn", "Sinnoh", "Unova", "Kalos", "Alola", "Galar", "Paldea" };
+    static readonly int[] DexRegionStart = { 1, 152, 252, 387, 494, 650, 722, 810, 906, 1026 };
     Dictionary<GameEntry, DexGame> dexBy = new Dictionary<GameEntry, DexGame>();
     HashSet<GameEntry> dexNoSave = new HashSet<GameEntry>();
     readonly Dictionary<int, string> dexNames = new Dictionary<int, string>();
@@ -4106,7 +4181,8 @@ class LauncherForm : Form {
         var o = new StringBuilder(g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
         Action<string> file = delegate(string f) { try { var i = new FileInfo(f); if (i.Exists) o.Append("|" + i.Name + ":" + i.Length + ":" + i.LastWriteTimeUtc.Ticks); } catch { } };
         Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
-        if (PcGames.IsFusion(g)) { foreach (var f in IfSaves(g)) file(f); return o.ToString(); }
+        // Read again when the list grows (to 1025 on 2026-11-04), as its later Pokemon move into it.
+        if (PcGames.IsFusion(g)) { o.Append("|" + Sprites.MaxDex); foreach (var f in IfSaves(g)) file(f); return o.ToString(); }
         if (g.Save != null) file(MasterOf(g));
         folder(Path.Combine(Config.State, "save-sets", g.Id));
         if (g.Gen1 != null) folder(Path.Combine(Gen1Root, "saves", g.Gen1));
@@ -4165,6 +4241,7 @@ class LauncherForm : Form {
                 if (code != 0) return "Couldn't read the Pokemon names.";
                 foreach (var line in o.Split('\n')) { var f = line.TrimEnd('\r').Split('\t'); int id; if (f.Length == 2 && int.TryParse(f[0], out id)) dexNames[id] = f[1]; }
             }
+            ReadDexStats();
             bool changed = false;
             foreach (var g in Library.Games.Where(ReadsDex).ToList()) {
                 if (background && (GameArt.Hold || job != null || RunningGames() != "")) break;
@@ -4196,7 +4273,7 @@ class LauncherForm : Form {
     Page DexHomePage() {
         var p = new Page { Title = "Pokedex" };
         int last = DexRegionStart[DexRegions.Length] - 1;
-        p.Items.Add(new Item("National: " + DexCount(1, last), "", true, delegate { pages.Push(DexListPage("National", 1, last)); }) { Icon = '\uE8F1', Info = "Every Pokemon from 001 to " + last.ToString("000") + ", the Pokemon in the games nativeMons runs." });
+        p.Items.Add(new Item("National: " + DexCount(1, last), "", true, delegate { pages.Push(DexListPage("National", 1, last)); }) { Icon = '\uE8F1', Info = "Every Pokemon from 001 to " + last.ToString("0000") + "." });
         for (int i = 0; i < DexRegions.Length; i++) {
             int a = DexRegionStart[i], b = DexRegionStart[i + 1] - 1; string name = DexRegions[i];
             p.Items.Add(new Item(name + ": " + DexCount(a, b), "", true, delegate { pages.Push(DexListPage(name, a, b)); }) { Icon = '\uE707', Info = "Numbers " + a.ToString("000") + " to " + b.ToString("000") + ", the Pokemon introduced in " + name + "." });
@@ -4218,7 +4295,7 @@ class LauncherForm : Form {
                 int caughtAll = has ? d.Caught.Count + d.LaterCaught : 0, seenAll = has ? d.Seen.Count + d.LaterSeen : 0;
                 p.Items.Add(new Item(g.Title + ": " + (has ? caughtAll + " caught" : "no save"), "", has, delegate { pages.Push(DexListPage(g.Title, 1, DexRegionStart[DexRegions.Length] - 1, g)); }) {
                     Icon = '\uE7FC', Theme = g.Theme,
-                    Info = has ? "Its own Pokedex, read from its saves: " + caughtAll + " caught and " + seenAll + " seen" + (d.LaterSeen > 0 ? " (" + d.LaterSeen + " of them from after Unova, which the list here doesn't go up to)" : "") + ", and " + d.FusionsCaught + " fusions caught, " + d.FusionsSeen + " seen. It doesn't count toward your collection." : "No save to read yet, or its saves couldn't be read. Play and save once." });
+                    Info = has ? "Its own Pokedex, read from its saves: " + caughtAll + " caught and " + seenAll + " seen" + (d.LaterSeen > 0 ? " (" + d.LaterSeen + " of them outside the National Dex list)" : "") + ", and " + d.FusionsCaught + " fusions caught, " + d.FusionsSeen + " seen. It doesn't count toward your collection." : "No save to read yet, or its saves couldn't be read. Play and save once." });
                 if (has && d.FusionsSeen >= 0) p.Items[p.Items.Count - 1].Records = new[] { "Fusions: " + d.FusionsCaught + " caught, " + d.FusionsSeen + " seen" };
                 continue;
             }
@@ -4268,16 +4345,46 @@ class LauncherForm : Form {
         { "steel", Color.FromArgb(160, 160, 190) }, { "fairy", Color.FromArgb(226, 130, 170) },
     };
     static string Titled(string s) { return string.Join(" ", s.Split('-').Select(w => w.Length == 0 ? w : char.ToUpper(w[0]) + w.Substring(1)).ToArray()); }
-    // The game's own words: from a game you caught it in, otherwise the newest one nativeMons runs.
-    string DexFlavor(DexInfo info, int id, out string from) {
-        from = null;
+    // The game's own words: from a game you caught it in, otherwise the newest one nativeMons runs, otherwise the newest
+    // game that has any. gen: that game's generation, whose stats and abilities the entry shows.
+    string DexFlavor(DexInfo info, int id, out string from, out int gen) {
+        from = null; gen = 9;
         var mine = dexBy.Where(x => x.Value.Caught.Contains(id)).Select(x => x.Key).ToList();
         mine.AddRange(Library.Games.AsEnumerable().Reverse());
         foreach (var g in mine) {
             string gid = g.BaseId ?? g.Id, key = gid == "black2" ? "black-2" : gid == "white2" ? "white-2" : gid, text;
-            if (info.Flavor.TryGetValue(key, out text)) { from = g.Title; return text; }
+            if (info.Flavor.TryGetValue(key, out text)) { from = g.Title; gen = GenOfDex(g.Dex); return text; }
         }
-        return null;
+        if (info.Flavor.Count == 0) return null;
+        var last = info.Flavor.Last();
+        from = Titled(last.Key);
+        return last.Value;
+    }
+    static readonly int[] GenLast = { 151, 251, 386, 493, 649, 721, 809, 905, 1025 };
+    static int GenOfDex(int dex) { for (int i = 0; i < GenLast.Length; i++) if (dex > 0 && dex <= GenLast[i]) return i + 1; return 9; }
+    // Each Pokemon as each generation had it (mon-bridge stats, from PKHeX's tables). Key: generation * 10000 + dex number.
+    class DexStat { public string[] Types, Abilities; public int[] Stats; }
+    static readonly Dictionary<int, DexStat> dexStats = new Dictionary<int, DexStat>();
+    static void ReadDexStats() {
+        lock (dexStats) {
+            if (dexStats.Count > 0 || !File.Exists(Config.MonBridge)) return;
+            int code; string o = Bridge("stats", out code);
+            if (code != 0) return;
+            foreach (var line in o.Split('\n')) {
+                var f = line.TrimEnd('\r').Split('\t'); int gen, id;
+                if (f.Length < 5 || !int.TryParse(f[0], out gen) || !int.TryParse(f[1], out id)) continue;
+                dexStats[gen * 10000 + id] = new DexStat { Types = f[2].Split(','), Stats = f[3].Split(',').Select(int.Parse).ToArray(), Abilities = f[4] == "" ? new string[0] : f[4].Split(',') };
+            }
+        }
+    }
+    // As that generation had it, else the nearest later one that has it (Meltan isn't in any Generation 7 table).
+    static DexStat DexStatOf(int id, ref int gen) {
+        lock (dexStats) {
+            DexStat s;
+            for (int g = gen; g <= 9; g++) if (dexStats.TryGetValue(g * 10000 + id, out s)) { gen = g; return s; }
+            for (int g = gen - 1; g >= 1; g--) if (dexStats.TryGetValue(g * 10000 + id, out s)) { gen = g; return s; }
+            return null;
+        }
     }
     void RenderBoxes(Graphics g, BoxView v, int w, int h, float m, float y, float bottom, float t, Theme th) {
         boxHits.Clear();
@@ -4415,6 +4522,9 @@ class LauncherForm : Form {
         g.SetClip(area, System.Drawing.Drawing2D.CombineMode.Intersect);
         float top0 = y - p.BodyScroll, cy = top0;
         var info = caught ? DexInfos.Get(id) : null;
+        string from = null, flavor = null; int gen = 9; DexStat era = null;
+        if (info != null) { flavor = DexFlavor(info, id, out from, out gen); era = DexStatOf(id, ref gen); }
+        var types = era != null ? era.Types : info != null ? info.Types : new string[0];
         // The picture and the facts beside it.
         float pic = width * 0.42f, headH = pic + pad * 0.6f;
         Group(g, new RectangleF(m, cy, width, headH), rad);
@@ -4433,7 +4543,7 @@ class LauncherForm : Form {
             Write(g, info.Genus, itemFont, PhoneText, new RectangleF(fx, fy, fw, itemFont.Height * 2.4f), StringAlignment.Near, StringAlignment.Near, true);
             fy += g.MeasureString(info.Genus, itemFont, (int)fw).Height + pad * 0.4f;
             float tx = fx, chipH = smallBold.Height * 1.5f;
-            foreach (var type in info.Types) {
+            foreach (var type in types) {
                 string label = Titled(type); float cw = g.MeasureString(label, smallBold).Width + chipH * 0.5f;
                 if (tx + cw > fx + fw) { tx = fx; fy += chipH * 1.15f; }
                 Color tc; if (!TypeColors.TryGetValue(type, out tc)) tc = PhoneSub;
@@ -4451,7 +4561,6 @@ class LauncherForm : Form {
         cy += headH + gap;
         if (caught && info != null) {
             // The game's own description.
-            string from, flavor = DexFlavor(info, id, out from);
             if (flavor != null) {
                 float textW = width - 2 * pad, textH = g.MeasureString(flavor, bodyFont, (int)textW).Height + 2, boxH = textH + smallFont.Height * 1.5f + pad * 1.4f;
                 Group(g, new RectangleF(m, cy, width, boxH), rad);
@@ -4459,29 +4568,40 @@ class LauncherForm : Form {
                 Write(g, from.Replace("Pokemon ", ""), smallFont, PhoneSub, new RectangleF(m + pad, cy + pad * 0.7f + textH + 2, textW, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
                 cy += boxH + gap;
             }
-            // Base stats.
-            string[] names = { "HP", "Attack", "Defense", "Sp. Atk", "Sp. Def", "Speed" };
-            float rowH = smallFont.Height * 1.75f, statsH = rowH * 7 + pad * 0.8f, nameW = width * 0.22f, numW = width * 0.1f;
+            // Base stats, as that game's generation had them: Generation 1 had one Special.
+            int[] stats = era != null ? era.Stats : info.Stats;
+            bool special = era != null && gen == 1;
+            string[] names = special ? new[] { "HP", "Attack", "Defense", "Special", "Speed" } : new[] { "HP", "Attack", "Defense", "Sp. Atk", "Sp. Def", "Speed" };
+            int[] pick = special ? new[] { 0, 1, 2, 3, 5 } : new[] { 0, 1, 2, 3, 4, 5 };
+            string era0 = era == null ? "Base stats" : "Base stats" + (from != null ? ", as in " + from.Replace("Pokemon ", "") : "") + " (Generation " + gen + ")";
+            float rowH = smallFont.Height * 1.75f, statsH = rowH * (names.Length + 2) + pad * 0.8f, nameW = width * 0.22f, numW = width * 0.1f;
             Group(g, new RectangleF(m, cy, width, statsH), rad);
             float sy = cy + pad * 0.4f, barX = m + pad + nameW + numW, barW = width - 2 * pad - nameW - numW, barH = Math.Max(4f, h * 0.008f);
+            Write(g, era0, smallFont, PhoneSub, new RectangleF(m + pad, sy, width - 2 * pad, rowH), StringAlignment.Near, StringAlignment.Center, false);
+            sy += rowH;
             var stroke = Accent(th);
-            for (int i = 0; i < 6 && i < info.Stats.Length; i++) {
+            int total = 0;
+            for (int i = 0; i < names.Length && pick[i] < stats.Length; i++) {
+                int v = stats[pick[i]]; total += v;
                 Write(g, names[i], smallFont, PhoneSub, new RectangleF(m + pad, sy, nameW, rowH), StringAlignment.Near, StringAlignment.Center, false);
-                Write(g, info.Stats[i].ToString(), smallBold, PhoneText, new RectangleF(m + pad + nameW, sy, numW * 0.8f, rowH), StringAlignment.Far, StringAlignment.Center, false);
+                Write(g, v.ToString(), smallBold, PhoneText, new RectangleF(m + pad + nameW, sy, numW * 0.8f, rowH), StringAlignment.Far, StringAlignment.Center, false);
                 var bar = new RectangleF(barX, sy + (rowH - barH) / 2, barW, barH);
                 Card(g, bar, barH / 2, PhoneLine, PhoneLine, Color.Empty, 0);
-                Card(g, new RectangleF(bar.X, bar.Y, Math.Max(barH, barW * Math.Min(1f, info.Stats[i] / 255f)), barH), barH / 2, stroke, stroke, Color.Empty, 0);
+                Card(g, new RectangleF(bar.X, bar.Y, Math.Max(barH, barW * Math.Min(1f, v / 255f)), barH), barH / 2, stroke, stroke, Color.Empty, 0);
                 sy += rowH;
             }
             Write(g, "Total", smallBold, PhoneText, new RectangleF(m + pad, sy, nameW, rowH), StringAlignment.Near, StringAlignment.Center, false);
-            Write(g, info.Stats.Sum().ToString(), smallBold, PhoneText, new RectangleF(m + pad + nameW, sy, numW * 0.8f, rowH), StringAlignment.Far, StringAlignment.Center, false);
+            Write(g, total.ToString(), smallBold, PhoneText, new RectangleF(m + pad + nameW, sy, numW * 0.8f, rowH), StringAlignment.Far, StringAlignment.Center, false);
             cy += statsH + gap;
-            string abilities = string.Join(", ", info.Abilities.Select(Titled).ToArray());
-            float abH = g.MeasureString(abilities, itemFont, (int)(width - 2 * pad)).Height + smallFont.Height * 1.3f + pad;
-            Group(g, new RectangleF(m, cy, width, abH), rad);
-            Write(g, "Abilities", smallFont, PhoneSub, new RectangleF(m + pad, cy + pad * 0.5f, width - 2 * pad, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
-            Write(g, abilities, itemFont, PhoneText, new RectangleF(m + pad, cy + pad * 0.5f + smallFont.Height * 1.3f, width - 2 * pad, abH), StringAlignment.Near, StringAlignment.Near, true);
-            cy += abH + gap;
+            // Abilities came with Generation 3.
+            if (era == null || gen >= 3) {
+                string abilities = era != null ? string.Join(", ", era.Abilities) : string.Join(", ", info.Abilities.Select(Titled).ToArray());
+                float abH = g.MeasureString(abilities, itemFont, (int)(width - 2 * pad)).Height + smallFont.Height * 1.3f + pad;
+                Group(g, new RectangleF(m, cy, width, abH), rad);
+                Write(g, "Abilities", smallFont, PhoneSub, new RectangleF(m + pad, cy + pad * 0.5f, width - 2 * pad, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false);
+                Write(g, abilities, itemFont, PhoneText, new RectangleF(m + pad, cy + pad * 0.5f + smallFont.Height * 1.3f, width - 2 * pad, abH), StringAlignment.Near, StringAlignment.Near, true);
+                cy += abH + gap;
+            }
         }
         // Where you have it.
         var rows = dexBy.Where(x => (p.DexOnly != null ? x.Key == p.DexOnly : CountsInCollection(x.Key)) && (x.Value.Caught.Contains(id) || x.Value.Seen.Contains(id))).OrderBy(x => x.Value.Caught.Contains(id) ? 0 : 1).ToList();
@@ -5288,7 +5408,7 @@ class LauncherForm : Form {
                 if (done == total) summary = fresh + " downloaded, " + (total - fresh - failed) + " already here." + (failed > 0 ? "\n\n" + failed + " couldn't be fetched. Run this again when you're online: it only fetches what's missing." : "\n\nEvery picture is ready for offline play.");
             });
             log.Add("Pictures done. Now the Pokedex entries.");
-            DexInfos.GetAll(649, delegate(int done, int total, int fresh, int failed) {
+            DexInfos.GetAll(Sprites.MaxDex, delegate(int done, int total, int fresh, int failed) {
                 progress = done / (float)total;
                 if (done % 25 == 0 || done == total) BeginInvoke((Action)delegate { log.Add(done + " of " + total + " entries"); });
                 dirty = true;
@@ -7908,12 +8028,13 @@ class LauncherForm : Form {
     void RenderScreen(Graphics g, int w, int h, Theme th, float t) {
         bool home = job == null && pages.Count > 0 && pages.Peek().Main;
         var all = new RectangleF(0, 0, w, h);
-        if (home) {
-            var town = GameArt.Town(th.GameId);
-            if (town != null) GameArt.Draw(g, town, all); else VersionFill(g, all, 0, th, t);
-            using (var b = new SolidBrush(Color.FromArgb(town != null ? 30 : 80, 0, 0, 0))) g.FillRectangle(b, all);
-        } else using (var b = new SolidBrush(PhoneBg)) g.FillRectangle(b, all);
         float m = w * 0.045f, top = h * 0.055f, bottom = h * 0.965f;
+        if (home) {
+            float bandTop = top + (bottom - top) * 0.31f, bandBottom = AppsTop(pages.Peek(), w, h, m, bottom);
+            bool town = GameArt.DrawTown(g, th.GameId, all, new RectangleF(0, bandTop, w, Math.Max(1, bandBottom - bandTop)));
+            if (!town) VersionFill(g, all, 0, th, t);
+            using (var b = new SolidBrush(Color.FromArgb(town ? 30 : 80, 0, 0, 0))) g.FillRectangle(b, all);
+        } else using (var b = new SolidBrush(PhoneBg)) g.FillRectangle(b, all);
         string key = job != null ? "job" : pages.Count + "|" + (pages.Count > 0 ? pages.Peek().Title : "");
         if (key != screenKey) {
             if (TestLog != null) try { File.AppendAllText(TestLog, key + Environment.NewLine); } catch { }
@@ -8118,6 +8239,12 @@ class LauncherForm : Form {
     static readonly char[] AppIcons = {' ', '\uE7FC', '\uE8F1', '\uE74C', '\uE8B7', '\uE8AB', '\uE713', '\uE7E8' };
     static readonly string[] AppNames = { "", "Games", "Collection", "Mods", "ROMs", "Move", "Settings", "Exit" };
     static readonly Color[] AppColors = { Color.Empty, Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(124, 84, 214), Color.FromArgb(40, 124, 232), Color.FromArgb(24, 164, 150), Color.FromArgb(120, 124, 134), Color.FromArgb(58, 60, 68) };
+    // At the bottom, where a thumb would reach, leaving the wallpaper's town in view above them.
+    float AppsTop(Page p, int w, int h, float m, float bottom) {
+        float cell = (w - 2 * m) / TileCols, icon = cell * 0.68f, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
+        int appRows = (Math.Min(p.Items.Count, AppNames.Length) - 1 + TileCols - 1) / TileCols;
+        return bottom - h * 0.012f - appRows * (icon + labelH) - (appRows - 1) * rowGap;
+    }
     void RenderMain(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
         // The Play widget: the only place a game's intro plays.
         var widget = new RectangleF(m, top, w - 2 * m, (bottom - top) * 0.31f);
@@ -8159,9 +8286,7 @@ class LauncherForm : Form {
 
         // The apps.
         float cell = (w - 2 * m) / TileCols, icon = cell * 0.68f, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
-        int appRows = (Math.Min(p.Items.Count, AppNames.Length) - 1 + TileCols - 1) / TileCols;
-        // At the bottom, where a thumb would reach, leaving the wallpaper's town in view above them.
-        float gy = bottom - h * 0.012f - appRows * (icon + labelH) - (appRows - 1) * rowGap;
+        float gy = AppsTop(p, w, h, m, bottom);
         if (p.Sel < 1) BallShake(-1);
         for (int i = 1; i < p.Items.Count && i < AppNames.Length; i++) {
             var it = p.Items[i];

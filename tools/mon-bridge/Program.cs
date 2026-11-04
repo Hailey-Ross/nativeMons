@@ -29,6 +29,7 @@ static class Program
             if (args.Length == 2 && args[0] == "caught") return Caught(args[1]);
             if (args.Length == 2 && args[0] == "dex") return Dex(args[1]);
             if (args.Length == 1 && args[0] == "names") return Names();
+            if (args.Length == 1 && args[0] == "stats") return Stats();
             if (args.Length >= 3 && args[0] == "options") return GameOptions(args[1], args.Skip(2).ToArray());
         }
         catch (Exception e)
@@ -173,16 +174,18 @@ static class Program
         return 0;
     }
 
-    // Every evolution family up to Generation 5, the newest games here: one comma-separated row each, lowest dex number first.
+    const int MaxDex = 1025;
+
+    // Every evolution family, to the end of the National Dex: one comma-separated row each, lowest dex number first.
     static int Families()
     {
-        const int max = 649;
+        const int max = MaxDex;
         var parent = Enumerable.Range(0, max + 1).ToArray();
         int Find(int x) { while (parent[x] != x) x = parent[x] = parent[parent[x]]; return x; }
-        var forward = EvolutionTree.Evolves5.Forward;
-        for (ushort species = 1; species <= max; species++)
-            foreach (var (next, _) in forward.GetEvolutions(species, 0))
-                if (next is > 0 and <= max) parent[Find(next)] = Find(species);
+        foreach (var tree in new[] { EvolutionTree.Evolves5, EvolutionTree.Evolves7, EvolutionTree.Evolves8, EvolutionTree.Evolves9 })
+            for (ushort species = 1; species <= max; species++)
+                foreach (var (next, _) in tree.Forward.GetEvolutions(species, 0))
+                    if (next is > 0 and <= max) parent[Find(next)] = Find(species);
         foreach (var family in Enumerable.Range(1, max).GroupBy(Find))
             Console.WriteLine(string.Join(',', family.OrderBy(x => x)));
         return 0;
@@ -211,9 +214,37 @@ static class Program
         return 0;
     }
 
+    // Each Pokemon as each generation's games had it: generation, dex number, types, the six base stats
+    // (Generation 1's one Special in both), and abilities (none before Generation 3), tab separated.
+    static int Stats()
+    {
+        var tables = new (int Gen, IPersonalTable Table)[] {
+            (1, PersonalTable.Y), (2, PersonalTable.C), (3, PersonalTable.E), (4, PersonalTable.HGSS), (5, PersonalTable.B2W2),
+            (6, PersonalTable.AO), (7, PersonalTable.USUM), (8, PersonalTable.SWSH), (9, PersonalTable.SV) };
+        var strings = GameInfo.Strings;
+        foreach (var (gen, table) in tables)
+            for (ushort i = 1; i <= Math.Min(MaxDex, (int)table.MaxSpeciesID); i++)
+            {
+                var p = table[i];
+                if (p is PersonalInfo8SWSH sw && !sw.IsPresentInGame) continue;
+                if (p is PersonalInfo9SV sv && !sv.IsPresentInGame) continue;
+                var types = (p.Type1 == p.Type2 ? new[] { p.Type1 } : new[] { p.Type1, p.Type2 }).Select(t => gen <= 2 ? OldType(t) : t);
+                var abilities = new List<int>();
+                if (p is IPersonalAbility12 a) { abilities.Add(a.Ability1); abilities.Add(a.Ability2); }
+                if (p is IPersonalAbility12H h) abilities.Add(h.AbilityH);
+                Console.WriteLine(string.Join('\t', gen, i, string.Join(',', types.Select(t => strings.Types[t].ToLowerInvariant())),
+                    string.Join(',', new[] { p.HP, p.ATK, p.DEF, p.SPA, p.SPD, p.SPE }),
+                    string.Join(',', abilities.Where(x => x > 0).Distinct().Select(x => strings.Ability[x]))));
+            }
+        return 0;
+    }
+
+    // Generations 1 and 2 number types their own way (Bug 7, Fire 20, Dark 27).
+    static int OldType(int t) => t < 7 ? t : t <= 9 ? t - 1 : t >= 20 ? t - 11 : t;
+
     static int Names()
     {
-        for (int i = 1; i <= 649; i++) Console.WriteLine(i + "\t" + GameInfo.Strings.Species[i]);
+        for (int i = 1; i <= MaxDex; i++) Console.WriteLine(i + "\t" + GameInfo.Strings.Species[i]);
         return 0;
     }
 
