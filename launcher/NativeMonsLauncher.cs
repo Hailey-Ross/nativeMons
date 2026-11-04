@@ -6830,28 +6830,30 @@ class LauncherForm : Form {
 
     string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
-    // Power down on close: the screen (CrtTime), then the lights, then the device slides off the bottom.
-    const float CrtTime = 0.6f, LightsTime = 0.75f, SlideTime = 1.6f;
+    // Power down on close: the screen (CrtTime) with the lights cut just after it (LightsAt); the device leaves while their glow dies.
+    const float CrtTime = 0.45f, LightsAt = 0.1f, LightsTime = 0.3f, LiftTime = 0.24f, FallTime = 0.5f;
     float powerOff = -1; int powerTop; bool poweredOff;
     void PowerOffTick() {
         if (powerOff < 0 || poweredOff) return;
         float u = (float)clock.Elapsed.TotalSeconds - powerOff;
-        PowerLevel = PowerCurve(u - CrtTime);
-        if (u >= CrtTime && FrozenT < 0) FrozenT = powerOff + CrtTime;
-        float slide = (u - CrtTime - LightsTime) / SlideTime;
-        if (slide > 0) {
-            // Put away: it drops onto the bottom of the screen, bounces once, then slips down out of sight.
-            float k = Math.Min(1, slide) * SlideTime;
+        PowerLevel = PowerCurve(u - LightsAt);
+        if (u >= LightsAt && FrozenT < 0) FrozenT = powerOff + LightsAt;
+        float k = u - LightsAt - LightsTime;
+        bool gone = false;
+        if (k > 0) {
+            // Put away: down to the bottom of the screen, a soft lift as a hand picks it up, then it falls away out of sight.
             var scr = Screen.FromControl(this);
-            int rest = Math.Max(powerTop, scr.WorkingArea.Bottom - Height), gone = scr.Bounds.Bottom + 20;
-            float y;
-            if (k < 0.4f) { float q = k / 0.4f; y = powerTop + (rest - powerTop) * q * q; }
-            else if (k < 1.0f) y = rest - Height * 0.08f * (float)Math.Sin((k - 0.4f) / 0.6f * Math.PI);
-            else { float q = Math.Min(1, (k - 1.0f) / 0.6f); y = rest + (gone - rest) * q * q; }
+            int rest = Math.Max(powerTop, scr.WorkingArea.Bottom - Height), bottom = scr.Bounds.Bottom + 20;
+            float lift = Height * 0.065f, peak = rest - lift, g = 2 * (bottom - peak) / (FallTime * FallTime);
+            float drop = (float)Math.Sqrt(2 * (rest - powerTop) / g), y;
+            if (k < drop) y = powerTop + 0.5f * g * k * k;
+            else if (k < drop + LiftTime) { float q = (k - drop) / LiftTime; y = rest - lift * q * q * (3 - 2 * q); }
+            else { float tau = k - drop - LiftTime; y = peak + 0.5f * g * tau * tau; }
             Top = (int)y;
+            gone = y >= bottom;
         }
         Invalidate();
-        if (slide >= 1) { poweredOff = true; Close(); }
+        if (gone) { poweredOff = true; Close(); }
     }
     bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOff >= 0 || t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null || openRun != null || t - openAt < OpenTime + 0.3f || t - bounceAt < 1.4f; }
     // An app opening: its icon grows to fill the screen, then the screen it opens has its rows pop in one by one.
@@ -7587,9 +7589,9 @@ class LauncherForm : Form {
     static readonly float[] Sputter = { 0.15f, 0.85f, 0.05f, 0.6f, 0.2f, 0.75f, 0.08f, 0.45f, 0.3f };
     static float PowerCurve(float x) {
         if (x < 0) return 1;
-        if (x < 0.05f) return 1.25f;
-        if (x < 0.05f + Sputter.Length * 0.03f) return Sputter[(int)((x - 0.05f) / 0.03f)];
-        return 0.4f * (float)Math.Exp(-(x - 0.05f - Sputter.Length * 0.03f) / 0.1f);
+        if (x < 0.04f) return 1.25f;
+        if (x < 0.04f + Sputter.Length * 0.022f) return Sputter[(int)((x - 0.04f) / 0.022f)];
+        return 0.4f * (float)Math.Exp(-(x - 0.04f - Sputter.Length * 0.022f) / 0.08f);
     }
     // A light at that power: brighter on the surge, warm and dim as it dies, then dark.
     static Color Powered(Color c, Color off) {
