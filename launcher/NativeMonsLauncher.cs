@@ -2471,7 +2471,19 @@ static class SaveGuard {
         if (g == null || !g.IsHack) return Problem(file);
         if (!File.Exists(Config.MonBridge) || IsBlank(file)) return null;
         int code; string o = Bridge("info \"" + file + "\"", out code);
-        return code == 0 ? null : "It can't be read.";
+        if (code == 0) return null;
+        // PKHeX can't read every hack's save (pokeemerald-expansion moves things): the game's own sectors decide then.
+        return !g.IsDs && Gen3Intact(file) ? null : "It can't be read.";
+    }
+    // A GBA Pokemon save the game can load: at least one whole save (14 sectors) carrying the game's sector signature.
+    static bool Gen3Intact(string file) {
+        try {
+            var d = File.ReadAllBytes(file);
+            if (d.Length < 0x20000) return false;
+            int signed = 0;
+            for (int s = 0; s < 32; s++) if (BitConverter.ToUInt32(d, s * 0x1000 + 0xFF8) == 0x08012025) signed++;
+            return signed >= 14;
+        } catch { return false; }
     }
     public static string Problem(string file) {
         if (!File.Exists(Config.MonBridge) || IsBlank(file)) return null;
