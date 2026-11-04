@@ -1,11 +1,19 @@
 ## Setup
 
-1. **You need** Windows 10 or 11 (64-bit) and your own ROMs. No games are included. `.nds` ROMs that need patching also need [Python 3](https://www.python.org/downloads/).
-2. **Download** the zip above and extract it to a folder of its own (not inside Program Files).
-3. **Start** `NativeMonsLauncher.exe`. Choose **ROM folders** and add the folder with your `.gb`, `.gbc`, `.gba` and `.nds` files, or drop it onto the window. Single ROMs and `.zip` files can be dropped too. File names don't matter: games are found by reading each ROM.
-4. **Your saves:** **Settings > Import saves** brings in saves from other emulators. The originals aren't changed.
+**What you need:** a Windows 10 or 11 PC, and your own Pokémon game files (ROMs). No games come with nativeMons.
 
-The launcher prepares your Game Boy and GBA games for Gen1Recomp from your ROMs while it starts, so they open straight away when you press Play. It also makes the title screen and town wallpaper of the game it opens on, so Play shows that game straight away; the other games' pictures are made in the background once the menu is up. All of this runs out of sight at low priority. The first start after adding ROMs takes longer, about a minute for a full set; after that it opens in about a second. Windows Defender scans the many small files preparing writes, which is most of the load during that first start.
+1. **Download** the zip: click **Download Windows ZIP** above.
+2. **Unzip it.** Right-click the downloaded file and choose **Extract All...**, then **Extract**. Put the folder somewhere easy to find, such as your Documents or Desktop (not inside Program Files).
+3. **Open it.** In the new folder, double-click **NativeMonsLauncher**.
+   - If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**. This appears because nativeMons is a free project without a paid signing certificate.
+4. **Add your games.** On the home screen, choose **ROMs**, then **Add a folder**, and pick the folder your game files are in. Or just drag that folder onto the nativeMons window.
+   - It finds Game Boy, Game Boy Color, Game Boy Advance and DS games (`.gb`, `.gbc`, `.gba`, `.nds`, and `.zip` files holding them). The file names don't matter.
+5. **Wait about a minute the first time.** nativeMons gets your games ready behind its loading screen. After that it opens in about a second.
+6. **Play.** Choose **Games**, pick a game, and press **Play**.
+
+**Already have saves from another emulator?** Choose **Settings**, then **Import saves**. Your original save files aren't changed.
+
+**A DS game that won't start?** Some DS ROMs need a small fix first. nativeMons offers it when it finds one, and if your PC doesn't have Python (which the fix needs), it can download it for you.
 
 ## Games
 
