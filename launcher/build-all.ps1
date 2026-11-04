@@ -151,6 +151,29 @@ else {
     } catch { Write-Host "Skipped: $($_.Exception.Message) Romhacks show their base game's title screen." }
 }
 
+# Optional: our GBA player (engines\fulldex\gba), built with CMake, Ninja and MinGW GCC with SDL2 (MSYS2 UCRT64).
+# Without it GBA games play in Fulldex as before.
+Step 'GBA player'
+$gbaSource = Join-Path $repo 'engines\fulldex\gba'
+$gbaTools = 'cmake', 'ninja', 'g++' | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
+if (-not (Test-Path -LiteralPath (Join-Path $gbaSource 'CMakeLists.txt'))) { Write-Host 'Skipped: the Fulldex fork has no gba folder at this pin.' }
+elseif ($gbaTools) { Write-Host "Skipped: needs $($gbaTools -join ', ') (MSYS2 UCRT64 with SDL2). GBA games play in Fulldex." }
+else {
+    $gbaWork = Join-Path $work 'gbawide'
+    & cmake -S $gbaSource -B $gbaWork -G Ninja -DCMAKE_BUILD_TYPE=Release | Out-Null
+    if ($LASTEXITCODE -eq 0) { & cmake --build $gbaWork --parallel 4 | Out-Null }
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Skipped: it did not build. GBA games play in Fulldex.' }
+    else {
+        $gba = Join-Path $out 'engines\gbawide'
+        New-Item -ItemType Directory -Force $gba | Out-Null
+        Copy-Item -LiteralPath (Join-Path $gbaWork 'gbawide.exe') -Destination $gba -Force
+        Copy-Item -LiteralPath (Join-Path $gbaSource 'README.md') -Destination (Join-Path $gba 'README.md') -Force
+        Copy-Item -LiteralPath (Join-Path $repo 'engines\fulldex\LICENSE') -Destination (Join-Path $gba 'LICENSE.txt') -Force
+        Invoke-WebRequest 'https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE' -OutFile (Join-Path $gba 'LICENSE-mGBA.txt') -UseBasicParsing
+        Write-Host 'Built.'
+    }
+}
+
 Step 'mon-bridge'
 $bridgeProject = Join-Path $repo 'tools\mon-bridge\MonBridge.csproj'
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
