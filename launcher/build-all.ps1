@@ -60,7 +60,7 @@ try {
     & git -C $repo merge-base --is-ancestor $release.revision HEAD 2>$null
     if ($LASTEXITCODE -eq 0) { $build = [int]$release.build }
 } catch { }
-"channel=$channel`nbuild=$build`nrevision=$head`nlocal=yes" | Set-Content -LiteralPath $versionFile -Encoding ascii
+"channel=$channel`nbuild=$build`nrevision=$head`nlocal=$head" | Set-Content -LiteralPath $versionFile -Encoding ascii
 Write-Host "Local build of $($head.Substring(0, 7)), includes $channel build $build."
 
 Step 'Gen1Recomp'

@@ -408,12 +408,14 @@ static class Program
             {
                 converted = OpenHomeCopy(pk, to);
                 Console.Error.WriteLine(converted is null ? "converter: hand copy" : "converter: OpenHome");
+                // (OpenHome writes an impossible egg date for one that never hatched: none, as the games have it.)
+                if (converted is not null && converted.EggLocation == 0) converted.EggMetDate = null;
                 converted ??= ForceCopy(pk, to);
             }
             else
             {
                 converted = EntityConverter.ConvertToType(pk, to.PKMType, out var result);
-                if (converted is null || result is not (EntityConverterResult.Success or EntityConverterResult.None)) return ((PKM?)null, false);
+                if (converted is null || result is not (EntityConverterResult.Success or EntityConverterResult.None)) return ((PKM?)null, false, "");
             }
             converted.Move1 = known.Length > 0 ? known[0] : (ushort)0;
             converted.Move2 = known.Length > 1 ? known[1] : (ushort)0;
@@ -422,7 +424,8 @@ static class Program
             converted.HealPP();
             to.AdaptToSaveFile(converted);
             converted.RefreshChecksum();
-            return ((PKM?)converted, new LegalityAnalysis(converted).Valid);
+            var la = new LegalityAnalysis(converted);
+            return ((PKM?)converted, la.Valid, la.Valid ? "" : Why(la));
         });
         if (!work.Wait(TimeSpan.FromSeconds(20)))
         {
@@ -430,7 +433,7 @@ static class Program
             Console.Out.Flush();
             Environment.Exit(2);
         }
-        var (moved, legal) = work.Result;
+        var (moved, legal, why) = work.Result;
         if (moved is null)
             return Refuse(name + " can't go from " + from.Version + " to " + to.Version + ": PKHeX has no conversion between those games.");
 
@@ -451,8 +454,16 @@ static class Program
         // The destination first: if anything fails after this, the Pokemon is duplicated, never lost.
         WriteSafely(toPath, to);
         WriteSafely(fromPath, from);
-        Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal"));
+        // ok, name, legal or not, (restored), and what PKHeX's legality check found
+        Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal") + "\t\t" + why);
         return 0;
+    }
+
+    // PKHeX's legality report on one line: the problems it found, without its headings.
+    static string Why(LegalityAnalysis la)
+    {
+        var lines = la.Report().Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && !l.EndsWith(":") && !l.StartsWith("=")).Take(4);
+        return string.Join("; ", lines).Replace('\t', ' ');
     }
 
     // Who a Pokemon is, whatever save it's in. Evolving doesn't change it. Game Boy formats have no personality value.
@@ -485,9 +496,18 @@ static class Program
         // What happened while it was away still counts: it may have evolved or gained levels.
         if (pk.Species != original.Species && SpeciesFits(pk.Species, to)) original.Species = pk.Species;
         if (pk.CurrentLevel > original.CurrentLevel) original.CurrentLevel = pk.CurrentLevel;
+        // Moves learned while away come back with it, when the home game has them all.
+        var now = new[] { pk.Move1, pk.Move2, pk.Move3, pk.Move4 };
+        if (now.Any(m => m != 0) && now.All(m => m <= to.MaxMoveID)
+            && !now.SequenceEqual(new[] { original.Move1, original.Move2, original.Move3, original.Move4 }))
+        {
+            original.Move1 = now[0]; original.Move2 = now[1]; original.Move3 = now[2]; original.Move4 = now[3];
+            original.HealPP();
+        }
         to.AdaptToSaveFile(original);
         original.RefreshChecksum();
-        bool legal = new LegalityAnalysis(original).Valid;
+        var restoredLa = new LegalityAnalysis(original);
+        bool legal = restoredLa.Valid;
         int open = Target(to, options);
         if (open < 0) return Unplaced(open, to);
         Directory.CreateDirectory(backups);
@@ -499,7 +519,7 @@ static class Program
         WriteSafely(toPath, to);
         WriteSafely(fromPath, from);
         File.Delete(file);
-        Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal") + "\trestored");
+        Console.WriteLine("ok\t" + name + "\t" + (legal ? "legal" : "not-legal") + "\trestored\t" + (legal ? "" : Why(restoredLa)));
         return 0;
     }
 
