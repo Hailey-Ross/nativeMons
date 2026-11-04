@@ -105,14 +105,14 @@ The launcher is a phone-sized Pokédex that takes on each game's colours, and un
 
 A game's page in **Games** has Play, its engine, ROM version, saves, game options, mods, backups, export and the PKHeX and OpenHome buttons.
 
-## Pokémon Infinite Fusion
+## Pokémon Infinite Fusion and Infinite Fusion 2
 
-[Pokémon Infinite Fusion](https://github.com/infinitefusion/infinitefusion-e18) is a PC fan game (RPG Maker XP on mkxp-z), not a ROM. Open it in **Games** and choose one of two ways in; both are fine, and you can switch between them later:
+[Pokémon Infinite Fusion](https://github.com/infinitefusion/infinitefusion-e18) and [Infinite Fusion 2](https://github.com/infinitefusion/infinitefusion-hoenn-public) (Hoenn) are PC fan games (RPG Maker XP on mkxp-z), not ROMs. Both work the same way here; the paths below are Infinite Fusion's, and Infinite Fusion 2's are `games\infinitefusion2`, `state\saves\infinitefusion2` and `%APPDATA%\infinitefusion-hoenn`. Open one in **Games** and choose one of two ways in; both are fine, and you can switch between them later:
 
 - **Import it into the launcher.** From your installed folder, from the game's downloaded zip, or straight from its GitHub (that one needs [Git for Windows](https://git-scm.com)). The launcher keeps the game in `games\infinitefusion` and its saves in `state\saves\infinitefusion`, both inside the launcher's folder. Saves you already have in `%APPDATA%\infinitefusion` are copied in, and the originals stay. **Update** gets the newest release the way the game's own `INSTALL_OR_UPDATE` does. **Uninstall** removes the game's files and keeps its saves.
 - **Add an existing installation.** The launcher runs your own copy where it is and never changes its files, and its saves stay where the game keeps them, in `%APPDATA%\infinitefusion`. Update it with the game's own updater. **Remove from the launcher** only forgets it.
 
-Either way the launcher backs up the save files before each session (newest 30, under `state\save-backups`), and the game keeps backups of its own too. About 5 GB. Its Play tile and wallpaper come from the game's own title screen and region map. Move Pokémon, My Collection, quick start and the save tools don't apply to it.
+Either way the launcher backs up the save files before each session (newest 30, under `state\save-backups`), and the game keeps backups of its own too. About 5 GB (Infinite Fusion 2: about 3 GB). The Play tile and wallpaper come from each game's own title screen and region map. Move Pokémon, quick start and the save tools don't apply to them. Both count toward **My Collection**, each with a Pokédex of its own under **Romhacks and fan games**.
 
 ## Other PC games
 
