@@ -65,7 +65,7 @@ Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. n
 - **[Dev](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** built from every commit to `dev`. It may be broken, so back up your saves.
 - **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable):** the latest working build, from `main`.
 
-Unzip it anywhere (not inside Program Files), start `NativeMonsLauncher.exe` and add your ROM folder under **ROMs**, or drop the folder onto the window. File names don't matter: games are found by reading each ROM. Patching `.nds` ROMs needs Python 3.
+Unzip it anywhere (not inside Program Files), start `NativeMonsLauncher.exe` and add your ROM folder under **ROMs**, or drop the folder onto the window. File names don't matter: games are found by reading each ROM. Patching `.nds` ROMs needs Python 3: without one, the launcher offers to fetch Python's official Windows package from python.org into its own `tools\python` folder (nothing is installed in Windows).
 
 **The first start** after adding ROMs takes about a minute behind the splash screen:
 - Your Game Boy and GBA games are prepared for Gen1Recomp from your ROMs, three at a time.
@@ -204,7 +204,7 @@ Pokémon Infinite Fusion isn't part of a package: you import it or add your own 
 
 Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE, Fulldex's published Windows build, the Platinum PC port's and nativeplat's. With Node, Corepack and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings, saves and `games\` folder.
 
-`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `infinitefusion`, `openhome`, `node`, `patcher` and `python`. Version colours and finishes live in `launcher\games.json`.
+`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `infinitefusion`, `openhome`, `node`, `patcher`, `python` and `pythondir`. Version colours and finishes live in `launcher\games.json`.
 
 ## Credits
 
@@ -218,6 +218,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [mGBA](https://github.com/mgba-emu/mgba) by endrift and contributors (MPL-2.0), in the GBA player with our widescreen change, and as its [libretro](https://www.libretro.com) core for romhacks' title screens.
 - Pokemon GBA Widescreen by mamesj (in Pokémon Fulldex), whose idea and game protocol the GBA player follows; its widescreen patches are our own, written from the [pret](https://github.com/pret) decompilations' names.
 - Widescreen for romhacks and other versions in the GBA player: PokeDaisy's EXPAND (GPL-3.0), unchanged. Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy
+- [Python](https://www.python.org) by the Python Software Foundation (PSF License), fetched from python.org only when you patch a ROM and have no Python 3.
 - [rcheevos](https://github.com/RetroAchievements/rcheevos) by the RetroAchievements team (MIT), for RetroAchievements in the GBA player, through Pokémon Fulldex's achievements code.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.

@@ -158,7 +158,9 @@ static class Config {
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string MgbaCore { get { return Get("mgbacore", @"tools\mgba\mgba_libretro.dll"); } }
     public static string GamesFile { get { return Get("games", "games.json"); } }
-    public static string Python { get { string v; return values.TryGetValue("python", out v) ? v : "python"; } }
+    // A python= setting, else the Python the launcher fetched for the patcher (PythonSetup), else the system's.
+    public static string Python { get { string v; if (values.TryGetValue("python", out v)) return v; string own = Path.Combine(PythonDir, "python.exe"); return File.Exists(own) ? own : "python"; } }
+    public static string PythonDir { get { return Get("pythondir", @"tools\python"); } }
     public static string FulldexDir { get { return Path.GetDirectoryName(Fulldex); } }
     public static List<string> RomFolders() {
         string f = Path.Combine(State, "rom-folders.txt");
@@ -1592,6 +1594,7 @@ static class GameArt {
             string dir = Config.FulldexDir, romFile = g.FulldexRom;
             // An encrypted ROM won't start. Its picture comes from a patched copy, and the player's file isn't touched.
             if (Library.NeedsPatch(romFile)) {
+                if (!PythonSetup.Works()) return "Its picture needs the ROM patched, and that needs Python 3.";
                 if (Directory.Exists(patched)) Directory.Delete(patched, true);
                 Directory.CreateDirectory(patched);
                 romFile = Path.Combine(patched, "rom.nds");
@@ -2208,6 +2211,55 @@ static class DexInfos {
     }
 }
 
+// Python 3 for hails.nds-Patcher, only when the player wants to patch: python.org's embeddable package, checked by its
+// SHA-256, unpacked into tools\python (no installer, no admin). Its ._pth also gets the patcher's folder, for its imports.
+static class PythonSetup {
+    const string Url = "https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip";
+    const string Sha256 = "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159";
+    public const string Size = "about 12 MB";
+    static bool works;
+    // Whether Config.Python runs Python 3 (Windows' "python" can be only the Microsoft Store's shortcut).
+    public static bool Works() {
+        if (works) return true;
+        try {
+            var psi = new ProcessStartInfo(Config.Python, "-c \"import sys; print(sys.version_info[0])\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            using (var p = Process.Start(psi)) {
+                string o = p.StandardOutput.ReadToEnd();
+                if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } return false; }
+                works = p.ExitCode == 0 && o.Trim() == "3";
+            }
+        } catch { works = false; }
+        return works;
+    }
+    // Null when done, or why not.
+    public static string Install() {
+        string dir = Config.PythonDir, zip = dir + ".download.zip", temp = dir + ".new";
+        try {
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            Directory.CreateDirectory(Path.GetDirectoryName(dir));
+            using (var web = new System.Net.WebClient()) { web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; web.DownloadFile(Url, zip); }
+            string hash;
+            using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
+            if (hash != Sha256) return "The download from python.org wasn't the expected file, so it wasn't used.";
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
+            string pth = Directory.GetFiles(temp, "python3*._pth").FirstOrDefault();
+            if (pth == null || !File.Exists(Path.Combine(temp, "python.exe"))) return "The Python package was missing files.";
+            // (relative to tools\python, so the app folder can move)
+            var from = new Uri(Path.GetFullPath(dir).TrimEnd('\\') + "\\");
+            var to = new Uri(Path.GetFullPath(Path.GetDirectoryName(Config.Patcher)).TrimEnd('\\') + "\\");
+            string rel = Uri.UnescapeDataString(from.MakeRelativeUri(to).ToString()).Replace('/', '\\').TrimEnd('\\');
+            if (rel.StartsWith("file:", StringComparison.OrdinalIgnoreCase)) rel = Path.GetFullPath(Path.GetDirectoryName(Config.Patcher));
+            File.AppendAllText(pth, "\r\n" + (rel == "" ? "." : rel) + "\r\n");
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            Directory.Move(temp, dir);
+            works = false;
+            return Works() ? null : "Python was unpacked but didn't start.";
+        } catch (Exception e) { return "Python couldn't be fetched: " + e.Message; }
+        finally { try { File.Delete(zip); } catch { } try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+    }
+}
+
 // Updates come whole from this project's releases. The state folder and the files below are never touched.
 static class Updater {
     const string Site = "https://github.com/Hailey-Ross/nativeMons/releases/download/";
@@ -2604,7 +2656,8 @@ class LauncherForm : Form {
         playDirect = playId; directSlot = slot; chooseId = choose;
         Text = "nativeMons";
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-        FormClosing += delegate { DropReady(); StopSnapshot(); };
+        // The waiting quick-start game goes with the launcher: waited for here, as a background task dies with the program.
+        FormClosing += delegate { Hide(); DropReady(true); StopSnapshot(); };
         // A device standing upright: no window frame, the window's own outline is the shell's.
         var area = Screen.PrimaryScreen.WorkingArea;
         int h = area.Height * 94 / 100;
@@ -3030,8 +3083,10 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Patch now", "Changes the ROM files, with backups.", File.Exists(Config.Patcher), delegate {
             pages.Pop();
             string files = string.Join(" ", found.Select(g => "\"" + g.FulldexRom + "\"").ToArray());
-            RunTool("Patching", Config.Python, "\"" + Config.Patcher + "\" " + files, Path.GetDirectoryName(Config.Patcher), delegate(int code) {
-                if (code != 0) ShowLog("Patching failed", "The patcher stopped with code " + code + ". It needs Python 3."); else ReplaceMain();
+            WithPython(delegate {
+                RunTool("Patching", Config.Python, "\"" + Config.Patcher + "\" " + files, Path.GetDirectoryName(Config.Patcher), delegate(int code) {
+                    if (code != 0) ShowLog("Patching failed", "The patcher stopped with code " + code + "."); else ReplaceMain();
+                });
             });
         }) { Icon = '\uE72E' });
         p.Items.Add(new Item("Not now", "Nothing is changed. You can patch from the game's page.", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
@@ -4483,14 +4538,35 @@ class LauncherForm : Form {
             if (fresh.Imported && fresh.Gen1Rom != null && !string.Equals(oldGen1, fresh.Gen1Rom, StringComparison.OrdinalIgnoreCase)) Import(fresh, null);
         });
     }
+    // The patcher needs Python 3: run `go` with it, or first offer to fetch it (PythonSetup) when there is none.
+    void WithPython(Action go) {
+        if (PythonSetup.Works()) { go(); return; }
+        var p = new Page { Title = "Python 3 needed" };
+        p.Body = "hails.nds-Patcher is a Python script, and no working Python 3 was found on this PC.\n\nnativeMons can get Python's official Windows package from python.org (" + PythonSetup.Size + ", checked against a known checksum) and keep it in its own tools\\python folder, just for the patcher. Nothing is installed in Windows, and deleting that folder removes it.";
+        p.Items.Add(new Item("Get Python", "Downloads it from python.org, then patches.", true, delegate {
+            pages.Pop();
+            Busy("Getting Python", delegate { return PythonSetup.Install(); }, delegate(string err) {
+                if (err != null) { ShowLog("Python couldn't be set up", err); return; }
+                go();
+            });
+        }) { Icon = '' });
+        p.Items.Add(new Item("I'll install it myself", "Opens python.org's download page.", true, delegate {
+            pages.Pop();
+            try { Process.Start("https://www.python.org/downloads/windows/"); } catch { }
+        }) { Icon = '' });
+        p.Items.Add(new Item("Not now", "Nothing is changed.", true, delegate { pages.Pop(); }) { Icon = '' });
+        pages.Push(p);
+    }
     Page PatchPage(GameEntry g, bool thenPlay) {
         var p = new Page { Title = "Patch " + Path.GetFileName(g.FulldexRom) + "?", Theme = g.Theme };
         p.Body = "This ROM's secure area is still encrypted, so Fulldex can't load it without a DS BIOS.\n\nhails.nds-Patcher decrypts it. That changes 2 KB of your ROM file and keeps the original bytes in a backup, so it can be undone.\n\nIf no key table is available it downloads the DeSmuME emulator from GitHub to get one.";
         p.Items.Add(new Item("Patch it", "Changes the ROM file, with a backup.", File.Exists(Config.Patcher), delegate {
             pages.Pop();
-            RunTool("Patching " + g.Title, Config.Python, "\"" + Config.Patcher + "\" \"" + g.FulldexRom + "\"", Path.GetDirectoryName(Config.Patcher), delegate(int code) {
-                if (code != 0) { ShowLog("Patching failed", "The patcher stopped with code " + code + ". It needs Python 3."); return; }
-                if (thenPlay) Play(g); else { pages.Pop(); pages.Push(GamePage(g)); }
+            WithPython(delegate {
+                RunTool("Patching " + g.Title, Config.Python, "\"" + Config.Patcher + "\" \"" + g.FulldexRom + "\"", Path.GetDirectoryName(Config.Patcher), delegate(int code) {
+                    if (code != 0) { ShowLog("Patching failed", "The patcher stopped with code " + code + "."); return; }
+                    if (thenPlay) Play(g); else { pages.Pop(); pages.Push(GamePage(g)); }
+                });
             });
         }) { Icon = '' });
         p.Items.Add(new Item("Not now", "Nothing is changed.", true, delegate { pages.Pop(); }) { Icon = '' });
@@ -6081,13 +6157,16 @@ class LauncherForm : Form {
         });
     }
     // Ends the waiting game: closing its input tells it to quit, and it's stopped if it doesn't.
-    void DropReady() {
+    void DropReady(bool wait = false) {
         var p = ready;
         if (p == null) return;
         ready = null; readyPid = 0; readyUp = false; readyFor = null;
         QuickNote("dropped");
         // nativeplat writes its save slot as it closes: it gets longer, so it's never stopped part way through.
-        Task.Run(() => { try { p.StandardInput.Close(); if (!p.WaitForExit(15000)) p.Kill(); p.WaitForExit(2000); p.Dispose(); } catch { } });
+        int grace = 2000;
+        try { if (p.ProcessName.Equals("nativeplat", StringComparison.OrdinalIgnoreCase)) grace = 15000; } catch { }
+        var t = Task.Run(() => { try { p.StandardInput.Close(); if (!p.WaitForExit(grace)) p.Kill(); p.WaitForExit(2000); p.Dispose(); } catch { } });
+        if (wait) t.Wait(grace + 3000);
     }
     void UseReady(GameEntry g, Action<int> done) {
         var p = ready; ready = null; readyPid = 0; readyUp = false; readyHeld = false;
