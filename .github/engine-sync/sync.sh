@@ -138,7 +138,7 @@ check_releases() {
   fulldex_tag=$(grep -oP "fulldexRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
   platinum_tag=$(grep -oP "platinumRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
 
-  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq '[.[].tag_name | select(startswith("pc-"))][0]')
+  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq '[.[].tag_name | select(test("^(pc|fulldex)-"))][0]')
   [ -n "$newest" ] && [ "$newest" != "$fulldex_tag" ] && problem "Fulldex $newest released" "We pin \`$fulldex_tag\`. Test \`$newest\` on copies (skill engine-updates), then move the pin in build-all.ps1 and action.yml."
   digest=$(gh api "repos/mamesj/pokemon-fulldex/releases/tags/$fulldex_tag" --jq '.assets[] | select(.name == "pokemon-ds-wide-pc-windows-x86_64.zip") | .digest')
   if [ -n "$digest" ] && ! grep -qx "Fulldex $digest" "$pins"; then
@@ -170,9 +170,12 @@ else
     git -C "$REPO_DIR" diff HEAD --stat
   else
     git -C "$REPO_DIR" add launcher/build-all.ps1 .github/actions/build-package/action.yml .github/engine-sync/pins.txt
-    msg="Engine auto-sync with upstream"$'\n\n'"$(printf -- '- %s\n' "${CHANGES[@]}")"
-    git -C "$REPO_DIR" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q -m "$msg"
-    git -C "$REPO_DIR" push -q origin HEAD:refs/heads/dev
+    # A fork's liaison branch can move with no pin change here: nothing to commit then.
+    if ! git -C "$REPO_DIR" diff --cached --quiet; then
+      msg="Engine auto-sync with upstream"$'\n\n'"$(printf -- '- %s\n' "${CHANGES[@]}")"
+      git -C "$REPO_DIR" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q -m "$msg"
+      git -C "$REPO_DIR" push -q origin HEAD:refs/heads/dev
+    fi
   fi
 fi
 [ $PROBLEMS -eq 0 ] || say "$PROBLEMS problem(s) need a look: see the issues."

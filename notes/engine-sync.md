@@ -20,7 +20,7 @@ It runs as the sync GitHub App, so its commits show as the App's bot, with the s
 
 - **Gen1Recomp and Fulldex:** submodules, moved to the fork's new head.
 - **gen4recomp:** pushing `hails-additions` builds a `windows-<sha9>` release. The run waits for that build (up to two and a half hours), then sets the tag in both `launcher/build-all.ps1` and `.github/actions/build-package/action.yml`. A push that only changes docs starts no build, and the pin stays.
-- **Pinned releases:** `.github/engine-sync/pins.txt` records each asset's sha256. When Fulldex's `pc-v1` is re-uploaded with new files, the record changes and the push rebuilds with it. A new Fulldex tag, or any Platinum port change, only opens an issue: those get tested by hand first, and a new port needs its save padding checked.
+- **Pinned releases:** `.github/engine-sync/pins.txt` records each asset's sha256. When a pinned Fulldex release (dated tags such as `fulldex-2026-11-05b`, earlier `pc-v1`) is re-uploaded with new files, the record changes and the push rebuilds with it. A new Fulldex tag, or any Platinum port change, only opens an issue: those get tested by hand first, and a new port needs its save padding checked.
 
 ## Testing it
 
