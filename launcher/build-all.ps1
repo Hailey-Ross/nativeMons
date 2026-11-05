@@ -5,7 +5,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $loveVersion = '11.5'
-$fulldexRelease = 'pc-v1'
+$fulldexRelease = 'fulldex-2026-11-05b'
 $platinumRelease = 'v0.1.13'
 $nativeplatRelease = 'windows-abbf73035'
 
@@ -151,12 +151,12 @@ else {
     } catch { Write-Host "Skipped: $($_.Exception.Message) Romhacks show their base game's title screen." }
 }
 
-# Optional: our GBA player (engines\fulldex\gba), built with CMake, Ninja and MinGW GCC with SDL2 (MSYS2 UCRT64).
+# Optional: our GBA player (engines\fulldex\gba-wide), built with CMake, Ninja and MinGW GCC with SDL2 (MSYS2 UCRT64).
 # Without it GBA games play in Fulldex as before.
 Step 'GBA player'
-$gbaSource = Join-Path $repo 'engines\fulldex\gba'
+$gbaSource = Join-Path $repo 'engines\fulldex\gba-wide'
 $gbaTools = 'cmake', 'ninja', 'g++' | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
-if (-not (Test-Path -LiteralPath (Join-Path $gbaSource 'CMakeLists.txt'))) { Write-Host 'Skipped: the Fulldex fork has no gba folder at this pin.' }
+if (-not (Test-Path -LiteralPath (Join-Path $gbaSource 'CMakeLists.txt'))) { Write-Host 'Skipped: the Fulldex fork has no gba-wide folder at this pin.' }
 elseif ($gbaTools) { Write-Host "Skipped: needs $($gbaTools -join ', ') (MSYS2 UCRT64 with SDL2). GBA games play in Fulldex." }
 else {
     $gbaWork = Join-Path $work 'gbawide'

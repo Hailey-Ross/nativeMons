@@ -22,7 +22,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         LOVE_VERSION: "11.5"
-        FULLDEX_RELEASE: "pc-v1"
+        FULLDEX_RELEASE: "fulldex-2026-11-05b"
         PLATINUM_RELEASE: "v0.1.13"
         NATIVEPLAT_RELEASE: "windows-abbf73035"
       run: |
@@ -77,7 +77,7 @@ runs:
       shell: pwsh
       run: tools\openhome-bridge\build.ps1 -Out dist\nativeMons\tools\openhome -Work openhome-work
 
-    # Our GBA player: the Fulldex fork's gba folder (mGBA fetched at its pinned commit and patched there).
+    # Our GBA player: the Fulldex fork's gba-wide folder (mGBA fetched at its pinned commit and patched there).
     - uses: msys2/setup-msys2@v2
       with:
         msystem: UCRT64
@@ -93,17 +93,17 @@ runs:
       shell: msys2 {0}
       run: |
         set -e
-        cmake -S engines/fulldex/gba -B gbawide-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        cmake -S engines/fulldex/gba-wide -B gbawide-build -G Ninja -DCMAKE_BUILD_TYPE=Release
         cmake --build gbawide-build --parallel 4
         gba=dist/nativeMons/engines/gbawide
         mkdir -p "$gba"
         cp gbawide-build/gbawide.exe "$gba/"
-        cp engines/fulldex/gba/README.md "$gba/README.md"
+        cp engines/fulldex/gba-wide/README.md "$gba/README.md"
         cp engines/fulldex/LICENSE "$gba/LICENSE.txt"
         curl -fsSL https://raw.githubusercontent.com/mgba-emu/mgba/master/LICENSE -o "$gba/LICENSE-mGBA.txt"
         cp engines/fulldex/frontend/thirdparty/rcheevos/LICENSE "$gba/LICENSE-rcheevos.txt"
-        cp engines/fulldex/gba/third_party/pokedaisy/NOTICE "$gba/NOTICE-PokeDaisy.txt"
-        cp engines/fulldex/gba/third_party/pokedaisy/LICENSE "$gba/LICENSE-PokeDaisy.txt"
+        cp engines/fulldex/gba-wide/third_party/pokedaisy/NOTICE "$gba/NOTICE-PokeDaisy.txt"
+        cp engines/fulldex/gba-wide/third_party/pokedaisy/LICENSE "$gba/LICENSE-PokeDaisy.txt"
 
     - name: Check the package
       shell: pwsh
