@@ -11,7 +11,7 @@ param(
   [string]$SaveFolder, [string]$ArtFolder, [string]$LauncherOverride, [string]$Report,
   [Alias('Stages')][string[]]$Groups,
   [string[]]$Skip = @(),
-  [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full
+  [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full, [int]$Jobs = 4
 )
 $ErrorActionPreference = 'Continue'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -29,6 +29,8 @@ function GroupState([string]$g) {
 }
 function Overview { foreach ($g in $AllGroups + 'suite' + 'integrity') { if (($g -in 'suite','integrity') -and -not (Test-Path (GroupFile $g))) { continue }; $n = if (Test-Path (GroupFile $g)) { @(Get-Content (GroupFile $g)).Count } else { 0 }; '{0,-10} {1,-8} {2} checks' -f $g, (GroupState $g), $n } }
 if ($List) { Overview; exit 0 }
+# (powershell -File passes "a,b" as one string.)
+$Groups = @($Groups | ForEach-Object { $_ -split ',' } | Where-Object { $_ }); $Skip = @($Skip | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $bad = @(@($Groups) + @($Skip) | Where-Object { $_ -and $AllGroups -notcontains $_ })
 if ($bad) { throw "Unknown group: $($bad -join ', '). Groups: $($AllGroups -join ' ')" }
 if ($Retest) {
@@ -76,6 +78,14 @@ function Launcher([string[]]$a, [int]$seconds = 120) {
   $p = Start-Process $exe -ArgumentList $line -PassThru -WindowStyle Hidden
   if (-not $p.WaitForExit($seconds * 1000)) { try { $p.Kill() } catch { }; return -999 }
   return $p.ExitCode
+}
+# A launcher with its own state and LOVE folders, so several can run side by side.
+function Spawn([string]$argline, [string]$dir) {
+  New-Item -ItemType Directory -Force "$dir\appdata" | Out-Null
+  if (-not (Test-Path "$dir\state")) { Copy-Item $st "$dir\state" -Recurse }
+  $psi = New-Object Diagnostics.ProcessStartInfo $exe, $argline; $psi.UseShellExecute = $false
+  $psi.EnvironmentVariables['NATIVEMONS_STATE'] = "$dir\state"; $psi.EnvironmentVariables['APPDATA'] = "$dir\appdata"
+  [Diagnostics.Process]::Start($psi)
 }
 function Bridge { $b = Join-Path $app 'tools\mon-bridge\mon-bridge.exe'; $o = & $b @args 2>&1; [pscustomobject]@{ Code = $LASTEXITCODE; Out = ($o | ForEach-Object { "$_" }) } }
 function GameProcs {
@@ -211,12 +221,19 @@ if (On 'snapshots') {
   $sample = if ($Full) { $found } else { @('red','crystal','firered','platinum','black') | Where-Object { $found -contains $_ } }
   $screens = @('main','splash','games','folders','credits','sprites','updatebanner') + @($sample | ForEach-Object { "main:$_"; "gamepage:$_"; "saves:$_" })
   $screens += @($romLines | Where-Object { $_ -match '^\S+ found=([2-9]|\d\d)' } | ForEach-Object { 'roms:' + ($_ -split ' ')[0] } | Select-Object -First $(if ($Full) { 99 } else { 1 }))
-  $failed = @()
-  foreach ($scr in $screens) {
-    $png = "$Report\shots\" + ($scr -replace ':', '-') + '.png'
-    $c = Launcher @('--snapshot', $png, $scr, '600x1000') 90
-    $colours = 0; if (Test-Path $png) { try { $colours = [StableWin]::Colours($png) } catch { } }
-    if ($c -ne 0 -or $colours -lt 4) { $failed += "$scr(exit $c, colours $colours)" }
+  $failed = @(); $todo = New-Object Collections.Queue; $screens | ForEach-Object { $todo.Enqueue($_) }; $busy = @(); $n = 0
+  while ($todo.Count -or $busy.Count) {
+    while ($busy.Count -lt $Jobs -and $todo.Count) {
+      $scr = $todo.Dequeue(); $png = "$Report\shots\" + ($scr -replace ':', '-') + '.png'; $n++
+      $busy += [pscustomobject]@{ Scr = $scr; Png = $png; P = (Spawn "--snapshot `"$png`" $scr 600x1000" "$Work\snap$n"); T = Get-Date }
+    }
+    Start-Sleep -Milliseconds 200
+    foreach ($b in @($busy | Where-Object { $_.P.HasExited -or ((Get-Date) - $_.T).TotalSeconds -gt 90 })) {
+      $c = if ($b.P.HasExited) { $b.P.ExitCode } else { try { $b.P.Kill() } catch { }; -999 }
+      $colours = 0; if (Test-Path $b.Png) { try { $colours = [StableWin]::Colours($b.Png) } catch { } }
+      if ($c -ne 0 -or $colours -lt 4) { $failed += "$($b.Scr)(exit $c, colours $colours)" }
+      $busy = @($busy | Where-Object { $_ -ne $b })
+    }
   }
   T snapshots "$($screens.Count) screens draw" ($failed.Count -eq 0) ($failed -join ', ')
 }
@@ -224,9 +241,18 @@ if (On 'snapshots') {
 if (On 'saves') {
   $sv = @(Get-ChildItem $saves -Filter *.sav -File -ErrorAction SilentlyContinue)
   if ($sv.Count -eq 0) { T saves 'save tests' 'skip' 'no -SaveFolder' } else {
+    $official = @((Get-Content (Join-Path $app 'games.json') -Raw -Encoding UTF8 | ConvertFrom-Json) | ForEach-Object { $_.save } | Where-Object { $_ })
     foreach ($f in $sv) {
       if (IsBlank $f.FullName) { T saves "$($f.Name)" 'skip' 'blank: never saved in-game'; continue }
       $h = Sha $f.FullName
+      # A romhack's save only has to read, as the launcher judges it (SaveGuard.Problem): hacks break the original's checksums.
+      if ($official -notcontains $f.Name) {
+        $r = Bridge info $f.FullName; $d = [IO.File]::ReadAllBytes($f.FullName); $signed = 0
+        if ($d.Length -ge 0x20000) { for ($s = 0; $s -lt 32; $s++) { if ([BitConverter]::ToUInt32($d, $s * 0x1000 + 0xFF8) -eq 0x08012025) { $signed++ } } }
+        T saves "$($f.Name) (romhack): reads, or holds a whole save" ($r.Code -eq 0 -or $signed -ge 14) "info $($r.Code), $signed signed sectors"
+        T saves "$($f.Name): checks leave it untouched" ($h -eq (Sha $f.FullName))
+        continue
+      }
       $r = Bridge check $f.FullName; if ($r.Code -eq 0) { $a = Bridge summary $f.FullName; $b = Bridge compare $f.FullName $f.FullName }
       T saves "$($f.Name): reads, passes checks, equals itself" ($r.Code -eq 0 -and $a.Code -eq 0 -and $b.Code -eq 0) "check $($r.Code)"
       T saves "$($f.Name): checks leave it untouched" ($h -eq (Sha $f.FullName))
@@ -296,41 +322,55 @@ if (On 'play') {
     foreach ($row in $matrix) { $k = $row[1] + $(if ($row[1] -eq 'fulldex') { if ($ds -contains $row[0]) { '-ds' } else { '-gba' } }); if (-not $kinds.ContainsKey($k) -and -not $row[2]) { $kinds[$k] = 1; $pickRows += ,$row } }
     $matrix = $pickRows
   }
-  foreach ($row in $matrix) {
-    # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
-    $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
-    if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
-    ClearGames
-    Set-Content "$st\engine-$id.txt" $en
-    $limit = if ($en -eq 'gen1') { 420 } elseif ($en -eq 'port') { 240 } else { 120 }
-    $p = Start-Process $exe -ArgumentList "--play $id" -PassThru
-    $t = Get-Date; $steady = $null; $game = $null; $bad = ''
-    while (((Get-Date) - $t).TotalSeconds -lt $limit) {
-      Start-Sleep 1
-      if ($p.HasExited) { $bad = "launcher exited $($p.ExitCode) before the game settled"; break }
-      $game = @(GameProcs | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
-      if ($game) { if (-not $steady) { $steady = Get-Date } elseif (((Get-Date) - $steady).TotalSeconds -ge 4) { break } } else { $steady = $null }
+  # $Jobs games at once, each through its own launcher; never one game twice at once, since its engines share a save.
+  ClearGames
+  $todo = New-Object Collections.ArrayList; foreach ($row in $matrix) { [void]$todo.Add($row) }
+  $lanes = New-Object Collections.ArrayList; $n = 0
+  function Kill([object]$l) { foreach ($i in $l.Ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
+  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; Kill $l; [void]$lanes.Remove($l) }
+  while ($todo.Count -or $lanes.Count) {
+    while ($lanes.Count -lt $Jobs) {
+      $row = $todo | Where-Object { $r = $_; -not ($lanes | Where-Object { $_.Id -eq $r[0] }) } | Select-Object -First 1
+      if (-not $row) { break }
+      $todo.Remove($row); $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
+      if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
+      $n++; $dir = "$Work\play$n"; Copy-Item $st "$dir\state" -Recurse; Set-Content "$dir\state\engine-$id.txt" $en
+      $p = Spawn "--play $id" $dir
+      $limit = if ($en -eq 'gen1') { 420 } elseif ($en -eq 'port') { 240 } else { 120 }
+      [void]$lanes.Add([pscustomobject]@{ Id = $id; En = $en; Name = $name; P = $p; Ids = @($p.Id); T = Get-Date; Limit = $limit; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null })
     }
-    $took = [int]((Get-Date) - $t).TotalSeconds
-    if ($game -and $steady -and -not $bad) {
-      $title = $game.MainWindowTitle; $png = "$Report\shots\play-$id-$en.png"; $picture = 0; $w = Get-Date
-      while (((Get-Date) - $w).TotalSeconds -lt 45) {
-        try { [void][StableWin]::Shot($game.MainWindowHandle, $png); $picture = [StableWin]::Colours($png) } catch { $picture = 0 }
-        if ($picture -ge 8) { break }
-        try { [void][StableWin]::ScreenShot($game.MainWindowHandle, $png); $picture = [StableWin]::Colours($png); if ($picture -ge 8) { $title += ' (read from the screen)'; break } } catch { }
-        Start-Sleep 2
+    Start-Sleep -Milliseconds 500
+    # Each lane's own processes: everything started from its launcher, even after a parent has gone.
+    $procs = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId)
+    foreach ($l in @($lanes)) {
+      do { $more = @($procs | Where-Object { $l.Ids -contains $_.ParentProcessId -and $l.Ids -notcontains $_.ProcessId } | ForEach-Object { [int]$_.ProcessId }); $l.Ids += $more } while ($more.Count)
+      $png = "$Report\shots\play-$($l.Id)-$($l.En).png"
+      if ($l.Closing) {
+        $clean = $l.P.HasExited
+        if ($clean -or ((Get-Date) - $l.Closing).TotalSeconds -gt 40) {
+          Done $l ($clean -and $l.Picture -ge 8) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { '; launcher did not come back after the game closed' } elseif ($l.P.ExitCode -ne 0) { "; exit $($l.P.ExitCode)" })"
+        }
+      } elseif ($l.Shot) {
+        try { [void][StableWin]::Shot($l.Game.MainWindowHandle, $png); $l.Picture = [StableWin]::Colours($png) } catch { $l.Picture = 0 }
+        $secs = [int]((Get-Date) - $l.Shot).TotalSeconds
+        if ($l.Picture -ge 8 -or $secs -ge 45) { $l.Title += ", $($l.Picture) colours after ${secs}s"; [void]$l.Game.CloseMainWindow(); $l.Closing = Get-Date }
+      } elseif ($l.P.HasExited) {
+        Done $l $false "launcher exited $($l.P.ExitCode) before the game settled"
+      } else {
+        # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
+        $game = @($l.Ids | Where-Object { $_ -ne $l.P.Id } | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
+        if ($game) {
+          if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
+          elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) { $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle; $l.Shot = Get-Date }
+        } else { $l.Steady = $null }
+        if (-not $l.Shot -and ((Get-Date) - $l.T).TotalSeconds -gt $l.Limit) {
+          $l.P.Refresh(); [void][StableWin]::Shot($l.P.MainWindowHandle, "$Report\shots\failed-$($l.Id)-$($l.En).png")
+          Done $l $false "no steady game window in $($l.Limit)s"
+        }
       }
-      $title += ", $picture colours after $([int]((Get-Date) - $w).TotalSeconds)s"
-      [void]$game.CloseMainWindow()
-      $clean = $p.WaitForExit(40000)
-      if (-not $clean) { [void][StableWin]::Shot($p.MainWindowHandle, "$Report\shots\after-$id-$en.png"); foreach ($g in @(GameProcs)) { try { $g.Kill() } catch { } } ; try { if (-not $p.HasExited) { [void]$p.CloseMainWindow(); Start-Sleep 2; if (-not $p.HasExited) { $p.Kill() } } } catch { } }
-      T play $name ($clean -and $picture -ge 8) "started in ${took}s, '$title'$(if (-not $clean) { '; launcher did not come back after the game closed' } elseif ($p.ExitCode -ne 0) { "; exit $($p.ExitCode)" })"
-    } else {
-      if (-not $p.HasExited) { $p.Refresh(); [void][StableWin]::Shot($p.MainWindowHandle, "$Report\shots\failed-$id-$en.png"); try { [void]$p.CloseMainWindow(); Start-Sleep 2; if (-not $p.HasExited) { $p.Kill() } } catch { } }
-      T play $name $false $(if ($bad) { $bad } else { "no steady game window in ${limit}s" })
     }
-    ClearGames
   }
+  ClearGames
   if ($SaveFolder) {
     $cfg = Join-Path $app 'engines\fulldex\settings.cfg'
     T play 'global options reach the engine: windowed' ((Test-Path $cfg) -and ((Get-Content $cfg) -contains 'fullscreen=0'))

@@ -8739,6 +8739,8 @@ static class NativeMonsLauncher {
         }
         // One launcher per folder: a second start brings the first to the front.
         string folder = Path.GetFullPath(Config.Here).TrimEnd('\\').ToLowerInvariant().Replace('\\', '/');
+        // A test's own state folder (NATIVEMONS_STATE) is its own launcher, so tests can run side by side.
+        if (Environment.GetEnvironmentVariable("NATIVEMONS_STATE") != null) folder += "|" + Path.GetFullPath(Config.State).ToLowerInvariant().Replace('\\', '/');
         bool first;
         using (var instance = new System.Threading.Mutex(true, "Local\\NativeMonsLauncher-" + folder, out first)) {
             // Shortcut flags: --game (or --play) <id>, --slot <save>, --launcher.

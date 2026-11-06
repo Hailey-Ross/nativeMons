@@ -2,7 +2,9 @@
 
 `tests/stable-check/stable-check.ps1` decides whether a release package is fit to be the stable build. Run it before moving main.
 
-By default it's quick: one game per engine, the main screens and one update of each kind (about 10 minutes). `-Full` tries every game on every engine and every screen. A release decision needs a full run of play, snapshots and updater.
+It checks what we built around the engines, not the engines themselves: each game starts from our launcher and draws, saves stay sound, the package and updater work.
+
+By default it's quick: one game per engine, the main screens and one update of each kind. Games and screens run `-Jobs` at a time (default 4), each launcher with its own state folder; one game never runs on two engines at once, since they share its save. Everything but play, window and sync opens no window and took 69 s (5 November). `-Full` tries every game on every engine and every screen. A release decision needs a full run of play, snapshots and updater.
 
 The launcher is told not to take the keyboard, so the PC stays usable, though the games' own windows may take it briefly. Windows appear on screen during play and window: don't play games on the PC or move the mouse over them meanwhile.
 
@@ -42,4 +44,5 @@ Settings are remembered in the report folder, so later runs only need `-Report`.
 | `-SaveFolder` | a folder of Fulldex .sav files. They're copied in; the originals are only read. |
 | `-ArtFolder` | a `state\game-art` folder to copy in, so the run doesn't spend time capturing art |
 | `-Report` | where results and screenshots are kept (they stay after `-Work` is deleted) |
+| `-Jobs` | how many games or screens at once (default 4) |
 | `-LauncherOverride` | a locally built launcher to test in place of the package's. The result then doesn't speak for the package: run again without it before releasing. |
