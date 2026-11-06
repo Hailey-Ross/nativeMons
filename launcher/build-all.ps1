@@ -6,7 +6,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $loveVersion = '11.5'
 $fulldexRelease = 'fulldex-2026-11-05b'
-$platinumRelease = 'v0.1.13'
+$platinumRelease = 'v0.2.0'
 $nativeplatRelease = 'windows-abbf73035'
 
 $here = $PSScriptRoot

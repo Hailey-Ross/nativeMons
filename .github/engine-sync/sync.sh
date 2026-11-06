@@ -147,7 +147,7 @@ check_releases() {
   fi
 
   newest=$(gh api "repos/cybervisi0n/pokeplatinum/releases?per_page=20" --jq '[.[].tag_name | select(startswith("v"))][0]')
-  [ -n "$newest" ] && [ "$newest" != "$platinum_tag" ] && problem "Platinum port $newest released" "We pin \`$platinum_tag\`. A new port needs its save padding checked against PlatinumSave before the pin moves (skill upstream-sync)."
+  [ -n "$newest" ] && [ "$newest" != "$platinum_tag" ] && problem "Platinum port $newest released" "We pin \`$platinum_tag\`. A new port needs its save format checked (Continue on a DS save, its own save passes mon-bridge check) before the pin moves (skill upstream-sync)."
   digest=$(gh api "repos/cybervisi0n/pokeplatinum/releases/tags/$platinum_tag" --jq '[.assets[] | select(.name | test("win")) | .digest][0]')
   [ -n "$digest" ] && ! grep -qx "Platinum $digest" "$pins" && problem "Platinum port $platinum_tag re-uploaded" "Its files changed under the same tag. Check the save padding, then update .github/engine-sync/pins.txt."
   return 0
