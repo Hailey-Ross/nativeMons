@@ -1069,6 +1069,11 @@ static class PlatinumSave {
         }
         return dst;
     }
+    // Ports up to v0.1.13 padded the save; v0.2.0 on use the DS format. An old save has a footer signature at 0xCF38 (as the port checks).
+    public static bool IsOldPort(byte[] d) {
+        foreach (int half in new[] { 0, HalfSize }) if (d.Length >= half + MainPort && BitConverter.ToUInt32(d, half + MainPort - 8) == Signature) return true;
+        return false;
+    }
     public static byte[] ToPort(byte[] ds) { return Convert(ds, true); }
     public static byte[] ToDs(byte[] port) { return Convert(port, false); }
 }
@@ -6498,7 +6503,7 @@ class LauncherForm : Form {
         } catch { }
     }
     // ---------- the Platinum PC port ----------
-    // Its save goes in converted before it starts, and comes back checked (notes/launcher.md, Saves).
+    // Its save goes in as it is before it starts, and comes back checked (notes/launcher.md, Saves).
     static string PortDir { get { return Path.GetDirectoryName(Config.PlatinumPort); } }
     static string PortSave { get { return Path.Combine(PortDir, "save.bin"); } }
     static string PortRecord(GameEntry g) { return Path.Combine(Config.State, "save-sync", g.Id + "-port.txt"); }
@@ -6517,7 +6522,7 @@ class LauncherForm : Form {
             byte[] data;
             string problem = null;
             // A file the converter can't read is still kept, whole, as it may be the only copy of what was played.
-            try { data = PlatinumSave.ToDs(File.ReadAllBytes(save)); }
+            try { data = File.ReadAllBytes(save); if (PlatinumSave.IsOldPort(data)) data = PlatinumSave.ToDs(data); }
             catch (InvalidDataException x) { data = File.ReadAllBytes(save); problem = x.Message; }
             File.WriteAllBytes(incoming, data);
             problem = problem ?? SaveGuard.Problem(incoming);
@@ -6544,10 +6549,7 @@ class LauncherForm : Form {
         if (note != null && File.Exists(PortSave)) SaveGuard.Backup(g, PortSave, "platinum-port-leftover");
         string master = MasterOf(g);
         if (File.Exists(master) && !SaveGuard.IsBlank(master)) {
-            string converted = PortSave + ".in";
-            File.WriteAllBytes(converted, PlatinumSave.ToPort(File.ReadAllBytes(master)));
-            SaveGuard.WriteInPlace(converted, PortSave);
-            File.Delete(converted);
+            SaveGuard.WriteInPlace(master, PortSave);
         }
         else if (File.Exists(PortSave)) File.Delete(PortSave);
         WritePortRecord(g, File.Exists(PortSave) ? SaveGuard.Hash(PortSave) : "");
