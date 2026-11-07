@@ -85,13 +85,15 @@ function Spawn([string]$argline, [string]$dir) {
   if (-not (Test-Path "$dir\state")) { Copy-Item $st "$dir\state" -Recurse }
   $psi = New-Object Diagnostics.ProcessStartInfo $exe, $argline; $psi.UseShellExecute = $false
   $psi.EnvironmentVariables['NATIVEMONS_STATE'] = "$dir\state"; $psi.EnvironmentVariables['APPDATA'] = "$dir\appdata"
+  # No sound at all, whatever an engine does with its volume (SDL, and LOVE's OpenAL): the volume checks are separate.
+  foreach ($k in 'SDL_AUDIODRIVER','SDL_AUDIO_DRIVER') { $psi.EnvironmentVariables[$k] = 'dummy' }; $psi.EnvironmentVariables['ALSOFT_DRIVERS'] = 'null'
+  $psi.EnvironmentVariables['NATIVEMONS_TEST_PARALLEL'] = '1'
   [Diagnostics.Process]::Start($psi)
 }
 function Bridge { $b = Join-Path $app 'tools\mon-bridge\mon-bridge.exe'; $o = & $b @args 2>&1; [pscustomobject]@{ Code = $LASTEXITCODE; Out = ($o | ForEach-Object { "$_" }) } }
+# Everything run from the test's app folder but the launcher: gbawide, node and anything new count too.
 function GameProcs {
-  foreach ($n in 'lovec','love','nativeplat','main','Pokemon Fulldex') {
-    foreach ($p in (Get-Process $n -ErrorAction SilentlyContinue)) { try { if ($p.Path -and $p.Path.StartsWith($app, [StringComparison]::OrdinalIgnoreCase)) { $p } } catch { } }
-  }
+  foreach ($p in (Get-Process -ErrorAction SilentlyContinue)) { try { if ($p.ProcessName -ne 'NativeMonsLauncher' -and $p.Path -and $p.Path.StartsWith($app, [StringComparison]::OrdinalIgnoreCase)) { $p } } catch { } }
 }
 function ClearGames { foreach ($p in @(GameProcs)) { try { $p.Kill() } catch { } }; Start-Sleep 1 }
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
@@ -108,6 +110,20 @@ public static class StableWin {
   public static void Key(IntPtr h, int k) { PostMessage(h, 0x100, (IntPtr)k, IntPtr.Zero); PostMessage(h, 0x101, (IntPtr)k, IntPtr.Zero); System.Threading.Thread.Sleep(350); }
   // How many colours in a sample of the picture: a blank or failed drawing has one.
   public static int Colours(string f) { using (var b = new Bitmap(f)) { var seen = new System.Collections.Generic.HashSet<int>(); for (int y = 0; y < b.Height; y += Math.Max(1, b.Height / 40)) for (int x = 0; x < b.Width; x += Math.Max(1, b.Width / 40)) seen.Add(b.GetPixel(x, y).ToArgb()); return seen.Count; } }
+  // A process's visible, titled windows: .NET's MainWindowHandle can pick an untitled helper window instead.
+  public delegate bool EnumCb(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumCb cb, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint c);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  public class Win { public int Id; public IntPtr MainWindowHandle; public string MainWindowTitle; public bool CloseMainWindow() { return PostMessage(MainWindowHandle, 0x10, IntPtr.Zero, IntPtr.Zero); } }
+  public static Win[] Windows(int[] ids) {
+    var r = new System.Collections.Generic.List<Win>();
+    EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (Array.IndexOf(ids, (int)p) < 0 || !IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true;
+      var s = new System.Text.StringBuilder(512); GetWindowText(h, s, 512); if (s.Length > 0) r.Add(new Win { Id = (int)p, MainWindowHandle = h, MainWindowTitle = s.ToString() }); return true; }, IntPtr.Zero);
+    return r.ToArray();
+  }
 }
 '@
 function RomList { Get-ChildItem -LiteralPath $RomFolder -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(gb|gbc|gba|nds)$' } | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object }
@@ -189,7 +205,7 @@ if (On 'package') {
 if ($LauncherOverride) { Copy-Item -LiteralPath $LauncherOverride $exe -Force }
 # Everything from here is isolated: its own state, its own LOVE saves, quiet and in a window.
 New-Item -ItemType Directory -Force $st, "$Work\appdata" | Out-Null
-$env:NATIVEMONS_STATE = $st; $env:APPDATA = "$Work\appdata"; $env:NATIVEMONS_TEST_QUIET = '1'
+$env:NATIVEMONS_STATE = $st; $env:APPDATA = "$Work\appdata"; $env:NATIVEMONS_TEST_QUIET = '1'; $env:SDL_AUDIODRIVER = 'dummy'; $env:SDL_AUDIO_DRIVER = 'dummy'; $env:ALSOFT_DRIVERS = 'null'
 Set-Content "$st\rom-folders.txt" $RomFolder
 Set-Content "$st\game-options.txt" "full=off`nvol=0"
 if ($ArtFolder -and (Test-Path -LiteralPath $ArtFolder)) { Copy-Item -LiteralPath $ArtFolder "$st\game-art" -Recurse }
@@ -326,8 +342,8 @@ if (On 'play') {
   ClearGames
   $todo = New-Object Collections.ArrayList; foreach ($row in $matrix) { [void]$todo.Add($row) }
   $lanes = New-Object Collections.ArrayList; $n = 0
-  function Kill([object]$l) { foreach ($i in $l.Ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
-  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; Kill $l; [void]$lanes.Remove($l) }
+  function KillLane([object]$l) { foreach ($i in $l.Ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
+  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillLane $l; [void]$lanes.Remove($l) }
   while ($todo.Count -or $lanes.Count) {
     while ($lanes.Count -lt $Jobs) {
       $row = $todo | Where-Object { $r = $_; -not ($lanes | Where-Object { $_.Id -eq $r[0] }) } | Select-Object -First 1
@@ -348,7 +364,10 @@ if (On 'play') {
       if ($l.Closing) {
         $clean = $l.P.HasExited
         if ($clean -or ((Get-Date) - $l.Closing).TotalSeconds -gt 40) {
-          Done $l ($clean -and $l.Picture -ge 8) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { '; launcher did not come back after the game closed' } elseif ($l.P.ExitCode -ne 0) { "; exit $($l.P.ExitCode)" })"
+          # On a hidden desktop (STABLE_HIDDEN=1) OpenGL windows aren't composited, so they capture black: the settled, titled window decides.
+          $blind = $env:STABLE_HIDDEN -eq '1' -and $l.Picture -lt 8
+          if ($blind) { $l.Title += ' (picture unreadable on the hidden desktop)' }
+          Done $l ($clean -and ($l.Picture -ge 8 -or $blind)) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { '; launcher did not come back after the game closed' } elseif ($l.P.ExitCode -ne 0) { "; exit $($l.P.ExitCode)" })"
         }
       } elseif ($l.Shot) {
         try { [void][StableWin]::Shot($l.Game.MainWindowHandle, $png); $l.Picture = [StableWin]::Colours($png) } catch { $l.Picture = 0 }
@@ -358,14 +377,15 @@ if (On 'play') {
         Done $l $false "launcher exited $($l.P.ExitCode) before the game settled"
       } else {
         # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
-        $game = @($l.Ids | Where-Object { $_ -ne $l.P.Id } | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
+        $game = @([StableWin]::Windows([int[]]@($l.Ids | Where-Object { $_ -ne $l.P.Id })) | Where-Object { $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
         if ($game) {
           if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
           elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) { $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle; $l.Shot = Get-Date }
         } else { $l.Steady = $null }
         if (-not $l.Shot -and ((Get-Date) - $l.T).TotalSeconds -gt $l.Limit) {
           $l.P.Refresh(); [void][StableWin]::Shot($l.P.MainWindowHandle, "$Report\shots\failed-$($l.Id)-$($l.En).png")
-          Done $l $false "no steady game window in $($l.Limit)s"
+          $seen = @($l.Ids | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | ForEach-Object { $t = @([StableWin]::Windows([int[]]@($_.Id)) | ForEach-Object { $_.MainWindowTitle }) -join ' / '; "$($_.ProcessName)='$t'" }) -join ', '
+          Done $l $false "no steady game window in $($l.Limit)s; running: $seen"
         }
       }
     }
@@ -375,6 +395,8 @@ if (On 'play') {
     $cfg = Join-Path $app 'engines\fulldex\settings.cfg'
     T play 'global options reach the engine: windowed' ((Test-Path $cfg) -and ((Get-Content $cfg) -contains 'fullscreen=0'))
     T play 'global options reach the engine: volume' ((Test-Path $cfg) -and ((Get-Content $cfg) -contains 'volume=0'))
+    $gini = Join-Path $app 'engines\gbawide\gba-settings.ini'
+    if (@($script:played | Where-Object { $_ -match '^(firered|leafgreen|emerald) on fulldex$' }).Count) { T play 'global options reach the GBA player: volume' ((Test-Path $gini) -and ((Get-Content $gini) -contains 'volume=0')) }
   }
 }
 # ---------- sync: shared saves across engines. Needs the play stage to have prepared the game. ----------
@@ -385,7 +407,7 @@ if (On 'sync') {
     if ($script:played -notcontains "$g on gen1") {
       Set-Content "$st\engine-$g.txt" 'gen1'
       $q = Start-Process $exe -ArgumentList "--play $g" -PassThru; $w = Get-Date; $shown = $null
-      while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $shown = @(GameProcs | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle }) | Select-Object -First 1 }
+      while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $shown = @([StableWin]::Windows([int[]]@(GameProcs | ForEach-Object { $_.Id }))) | Select-Object -First 1 }
       T sync "${g}: prepared for Gen1Recomp" ([bool]$shown)
       Start-Sleep 5; if ($shown) { [void]$shown.CloseMainWindow() }; if (-not $q.WaitForExit(40000)) { try { $q.Kill() } catch { } }; ClearGames
     }
@@ -432,12 +454,13 @@ if (On 'sync') {
 if (On 'window') {
   ClearGames
   $pagesLog = "$Work\pages.log"; $env:NATIVEMONS_TEST_LOG = $pagesLog
+  # The log also carries other lines (quick-start, morph): the page is the last "depth|title" line.
+  function Now { Get-Content $pagesLog -Tail 40 -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+\|' } | Select-Object -Last 1 }
   $p = Start-Process $exe -PassThru
-  $t = Get-Date; do { Start-Sleep -Milliseconds 400; $p.Refresh() } while ($p.MainWindowHandle -eq 0 -and ((Get-Date) - $t).TotalSeconds -lt 40); $p.Refresh(); $h = $p.MainWindowHandle
-  $w = Get-Date; do { Start-Sleep -Milliseconds 250 } while ((Get-Content $pagesLog -Tail 1 -ErrorAction SilentlyContinue) -notmatch '^1\|nativeMons' -and ((Get-Date) - $w).TotalSeconds -lt 40); Start-Sleep 1
+  $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 40); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
+  $w = Get-Date; do { Start-Sleep -Milliseconds 250 } while ((Now) -notmatch '^1\|nativeMons' -and ((Get-Date) - $w).TotalSeconds -lt 120); Start-Sleep 2
   $U=0x26;$D=0x28;$L=0x25;$R=0x27;$E=0x0D;$B=0x1B
   function Alive { $p.Refresh(); (-not $p.HasExited) -and $p.Responding }
-  function Now { Get-Content $pagesLog -Tail 1 -ErrorAction SilentlyContinue }
   function WaitPage([string]$rx, [int]$secs = 30) { $w = Get-Date; do { if ((Now) -match $rx) { return $true }; Start-Sleep -Milliseconds 250 } while (((Get-Date) - $w).TotalSeconds -lt $secs); return $false }
   # The launcher ignores keys while it's busy, so each step waits to see the screen it expects, by name.
   function Visit([string]$name, [string]$rx, [int]$depth) {
@@ -468,7 +491,7 @@ if (On 'window') {
     [void]$p.CloseMainWindow(); [void]$p.WaitForExit(8000)
     $p = Start-Process $exe -PassThru
     Remove-Item $pagesLog -ErrorAction SilentlyContinue
-    $t = Get-Date; do { Start-Sleep -Milliseconds 400; $p.Refresh() } while ($p.MainWindowHandle -eq 0 -and ((Get-Date) - $t).TotalSeconds -lt 40); $p.Refresh(); $h = $p.MainWindowHandle
+    $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 40); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
     [void](WaitPage '^1\|nativeMons' 40); Start-Sleep 1
     $before = Get-Content $pick
     [StableWin]::Key($h,$D); [StableWin]::Key($h,$E); Start-Sleep 1
@@ -547,7 +570,7 @@ $left = @(GameProcs); T integrity 'no game left running' ($left.Count -eq 0) (($
   if ($script:lastGroup -and $script:lastGroup -ne 'suite') { T $script:lastGroup 'stopped before finishing' $false }
   T suite 'ran to the end' $false "$($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"
 } finally {
-  $env:APPDATA = $oldAppData; Remove-Item env:NATIVEMONS_STATE, env:NATIVEMONS_UPDATE_URL, env:NATIVEMONS_TEST_LOG, env:NATIVEMONS_TEST_QUIET -ErrorAction SilentlyContinue
+  $env:APPDATA = $oldAppData; Remove-Item env:NATIVEMONS_STATE, env:NATIVEMONS_UPDATE_URL, env:NATIVEMONS_TEST_LOG, env:NATIVEMONS_TEST_QUIET, env:SDL_AUDIODRIVER, env:SDL_AUDIO_DRIVER, env:ALSOFT_DRIVERS -ErrorAction SilentlyContinue
   try { ClearGames; foreach ($p in Get-Process NativeMonsLauncher -ErrorAction SilentlyContinue) { if ($p.Path -and $p.Path.StartsWith($Work, [StringComparison]::OrdinalIgnoreCase)) { $p.Kill() } } } catch { }
 }
 # The verdict covers every group's latest result, not only this run's.
