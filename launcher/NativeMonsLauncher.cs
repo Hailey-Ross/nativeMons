@@ -14,6 +14,12 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 static class Native {
+    [StructLayout(LayoutKind.Sequential)] struct BasicInfo { public IntPtr Exit, Peb, Affinity, Priority, Id, Parent; }
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int c, ref BasicInfo i, int n, out int r);
+    // The process that started this one, or 0.
+    public static int ParentOf(Process p) {
+        try { var i = new BasicInfo(); int r; return NtQueryInformationProcess(p.Handle, 0, ref i, Marshal.SizeOf(i), out r) == 0 ? i.Parent.ToInt32() : 0; } catch { return 0; }
+    }
     [StructLayout(LayoutKind.Sequential)]
     public struct XState { public uint Packet; public ushort Buttons; public byte LT, RT; public short LX, LY, RX, RY; }
     [DllImport("xinput1_4.dll")] public static extern int XInputGetState(int i, out XState s);
@@ -3062,10 +3068,10 @@ class LauncherForm : Form {
         }
     }
     // The port's program is called main, like plenty of others, so only one started from its own folder counts.
-    static bool PortRunning() {
+    static bool PortRunning(Func<Process, bool> counts = null) {
         bool found = false;
         foreach (var p in Process.GetProcessesByName("main")) {
-            try { if (string.Equals(p.MainModule.FileName, Config.PlatinumPort, StringComparison.OrdinalIgnoreCase)) found = true; } catch { }
+            try { if (string.Equals(p.MainModule.FileName, Config.PlatinumPort, StringComparison.OrdinalIgnoreCase) && (counts == null || counts(p))) found = true; } catch { }
             p.Dispose();
         }
         return found;
@@ -3078,16 +3084,20 @@ class LauncherForm : Form {
         return true;
     }
     static string RunningGames() {
+        // The stable check runs several launchers side by side: each counts only the games it started itself.
+        bool parallel = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_PARALLEL") == "1";
+        int me = Process.GetCurrentProcess().Id;
+        Func<Process, bool> counts = p => !parallel || Native.ParentOf(p) == me;
         var names = new List<string>();
-        if (PortRunning()) names.Add("the Platinum PC port");
+        if (PortRunning(counts)) names.Add("the Platinum PC port");
         var native = Process.GetProcessesByName("nativeplat");
-        if (native.Any(p => p.Id != readyPid)) names.Add("nativeplat");
-        if (PcGames.AnyRunning()) names.Add("a PC game");
+        if (native.Any(p => p.Id != readyPid && counts(p))) names.Add("nativeplat");
+        if (!parallel && PcGames.AnyRunning()) names.Add("a PC game");
         foreach (var p in native) p.Dispose();
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
             // The game quick start keeps waiting isn't running for the player.
-            if (found.Any(p => p.Id != readyPid && p.Id != snapPid)) names.Add(n);
+            if (found.Any(p => p.Id != readyPid && p.Id != snapPid && counts(p))) names.Add(n);
             foreach (var p in found) p.Dispose();
         }
         return string.Join(", ", names.ToArray());
@@ -3336,6 +3346,13 @@ class LauncherForm : Form {
         string v, engine = g.Engine();
         if (engine == "fulldex") {
             if (w.TryGetValue("vol", out v)) WriteFulldex("volume", v);
+            // GBA games run on our player, which keeps its own volume in gba-settings.ini (key=value lines).
+            if (w.TryGetValue("vol", out v) && !g.IsDs && File.Exists(Config.GbaPlayer)) {
+                string ini = Path.Combine(Path.GetDirectoryName(Config.GbaPlayer), "gba-settings.ini");
+                var lines = File.Exists(ini) ? File.ReadAllLines(ini).Where(x => !x.StartsWith("volume=")).ToList() : new List<string>();
+                lines.Add("volume=" + v);
+                File.WriteAllLines(ini, lines);
+            }
             if (w.TryGetValue("full", out v)) WriteFulldex("fullscreen", v == "on" ? "1" : "0");
             if (w.TryGetValue("wide", out v)) WriteFulldex("wide", v == "on" ? "1" : "0");
             if (w.TryGetValue("smooth", out v)) WriteFulldex("smooth", v == "on" ? "1" : "0");
