@@ -100,6 +100,7 @@ Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System; using System.Drawing; using System.Runtime.InteropServices;
 public static class StableWin {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool RedrawWindow(IntPtr h, IntPtr r, IntPtr g, uint f);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
@@ -455,10 +456,11 @@ if (On 'window') {
   ClearGames
   $pagesLog = "$Work\pages.log"; $env:NATIVEMONS_TEST_LOG = $pagesLog
   # The log also carries other lines (quick-start, morph): the page is the last "depth|title" line.
-  function Now { Get-Content $pagesLog -Tail 40 -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+\|' } | Select-Object -Last 1 }
+  # The launcher logs a page when it draws it: ask it to draw first. Before the first page there is no log yet.
+  function Now { if ($h) { [void][StableWin]::RedrawWindow($h, [IntPtr]::Zero, [IntPtr]::Zero, 0x181) }; Get-Content -LiteralPath $pagesLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+\|' } | Select-Object -Last 1 }
   $p = Start-Process $exe -PassThru
-  $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 40); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
-  $w = Get-Date; do { Start-Sleep -Milliseconds 250 } while ((Now) -notmatch '^1\|nativeMons' -and ((Get-Date) - $w).TotalSeconds -lt 120); Start-Sleep 2
+  $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 120); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
+  $w = Get-Date; do { Start-Sleep -Milliseconds 250 } while ("$(Now)" -notmatch '^1\|nativeMons' -and ((Get-Date) - $w).TotalSeconds -lt 300); Start-Sleep 2
   $U=0x26;$D=0x28;$L=0x25;$R=0x27;$E=0x0D;$B=0x1B
   function Alive { $p.Refresh(); (-not $p.HasExited) -and $p.Responding }
   function WaitPage([string]$rx, [int]$secs = 30) { $w = Get-Date; do { if ((Now) -match $rx) { return $true }; Start-Sleep -Milliseconds 250 } while (((Get-Date) - $w).TotalSeconds -lt $secs); return $false }
@@ -471,18 +473,21 @@ if (On 'window') {
     $n = 0; do { [StableWin]::Key($h,$B); $back = WaitPage "^$($depth - 1)\|" 6; $n++ } while (-not $back -and $n -lt 4)
     if (-not $back) { T window "back from $name" $false "$(Now)" }
   }
-  T window 'starts on the home screen' ((Alive) -and (WaitPage '^1\|nativeMons' 10)) "$(Now)"
-  [StableWin]::Key($h,$D); Visit 'Games' 'Games$' 2
-  [StableWin]::Key($h,$R); Visit 'Collection' 'Pokedex$' 2
-  [StableWin]::Key($h,$R); Visit 'Mods' 'Mods' 2
-  [StableWin]::Key($h,$R); Visit 'ROMs' 'ROM folders$' 2
-  1..3 | ForEach-Object { [StableWin]::Key($h,$L) }; [StableWin]::Key($h,$D); Visit 'Move' 'Move Pokemon' 2
-  [StableWin]::Key($h,$R); [StableWin]::Key($h,$E)
-  T window 'opens Settings' (WaitPage '^2\|Settings$') "$(Now)"
-  # Every row but the ones that download, open a file dialog or flip a setting.
-  $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
-  for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1) { [StableWin]::Key($h,$D) } }
-  [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
+  $atHome = (Alive) -and (WaitPage '^1\|nativeMons' 10)
+  T window 'starts on the home screen' $atHome "$(Now); exited $($p.HasExited), responding $($p.Responding), window $h"
+  if ($atHome) {
+    [StableWin]::Key($h,$D); Visit 'Games' 'Games$' 2
+    [StableWin]::Key($h,$R); Visit 'Collection' 'Pokedex$' 2
+    [StableWin]::Key($h,$R); Visit 'Mods' 'Mods' 2
+    [StableWin]::Key($h,$R); Visit 'ROMs' 'ROM folders$' 2
+    1..3 | ForEach-Object { [StableWin]::Key($h,$L) }; [StableWin]::Key($h,$D); Visit 'Move' 'Move Pokemon' 2
+    [StableWin]::Key($h,$R); [StableWin]::Key($h,$E)
+    T window 'opens Settings' (WaitPage '^2\|Settings$') "$(Now)"
+    # Every row but the ones that download, open a file dialog or flip a setting.
+    $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
+    for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1) { [StableWin]::Key($h,$D) } }
+    [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
+  }
   # Change a ROM version through its page, if a game has two: opened straight with --game, so no counting down the list.
   $idx = [array]::IndexOf($found, 'platinum')
   $two = @($romLines | Where-Object { $_ -match '^platinum found=([2-9])' }).Count -gt 0
@@ -490,16 +495,17 @@ if (On 'window') {
   if ($two -and $idx -ge 0 -and (Alive)) {
     [void]$p.CloseMainWindow(); [void]$p.WaitForExit(8000)
     $p = Start-Process $exe -ArgumentList '--game','platinum','--launcher' -PassThru
-    Remove-Item $pagesLog -ErrorAction SilentlyContinue
-    $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 40); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
-    [void](WaitPage 'Platinum$' 40); Start-Sleep 1
+    Copy-Item -LiteralPath $pagesLog (Join-Path $Report 'window-pages.log') -ErrorAction SilentlyContinue; Remove-Item $pagesLog -ErrorAction SilentlyContinue
+    $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 120); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
+    [void](WaitPage 'Platinum$' 300); Start-Sleep 1
     $before = Get-Content $pick
     [void][StableWin]::Shot($h,"$Report\shots\win-gamepage.png")
     1..2 | ForEach-Object { [StableWin]::Key($h,$D) }
-    # The picker opens on its first row, which may be the dump in use: then the next row.
-    for ($k = 0; $k -lt 2; $k++) {
+    # The picker may open on the dump in use, or with nothing highlighted: try moving down one, two, then up.
+    $moves = @(@(), @($D), @($D,$D), @($U))
+    for ($k = 0; $k -lt $moves.Count; $k++) {
       [StableWin]::Key($h,$E); [void](WaitPage 'ROM version' 6)
-      1..$k | Where-Object { $_ -gt 0 } | ForEach-Object { [StableWin]::Key($h,$D) }
+      foreach ($m in $moves[$k]) { [StableWin]::Key($h,$m) }
       [void][StableWin]::Shot($h,"$Report\shots\win-picker.png"); [StableWin]::Key($h,$E); Start-Sleep 10
       $after = Get-Content $pick
       if ($after -ne $before) { break }
