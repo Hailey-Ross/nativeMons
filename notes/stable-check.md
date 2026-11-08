@@ -18,7 +18,7 @@ stable-check.ps1 -Report <folder> -Skip play         # leave some out
 stable-check.ps1 -Report <folder> -List              # where things are
 ```
 
-Settings are remembered in the report folder, so later runs only need `-Report`. Give a setting again to change it. Each group's latest result is kept, and the verdict always covers every group: a group that hasn't run counts against it. Exit code 0 means every group ran with no failures, 1 otherwise.
+Settings are remembered in the report folder, so later runs only need `-Report`. Give a setting again to change it, or as "" to clear it. Each group's latest result is kept, and the verdict always covers every group: a group that hasn't run counts against it. Exit code 0 means every group ran with no failures, 1 otherwise.
 
 ## Groups
 

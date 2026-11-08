@@ -45,7 +45,7 @@ $Stages = @($Groups)
 $remember = Join-Path $Report 'last-run.json'
 $was = if (Test-Path $remember) { Get-Content $remember -Raw | ConvertFrom-Json } else { $null }
 foreach ($k in 'Package','Work','RomFolder','SaveFolder','ArtFolder','LauncherOverride') {
-  if (-not (Get-Variable $k -ValueOnly) -and $was -and $was.$k) { Set-Variable $k $was.$k }
+  if (-not $PSBoundParameters.ContainsKey($k) -and -not (Get-Variable $k -ValueOnly) -and $was -and $was.$k) { Set-Variable $k $was.$k }
 }
 foreach ($k in 'Package','Work','RomFolder') { if (-not (Get-Variable $k -ValueOnly)) { throw "-$k is needed the first time." } }
 @{ Package = $Package; Work = $Work; RomFolder = $RomFolder; SaveFolder = $SaveFolder; ArtFolder = $ArtFolder; LauncherOverride = $LauncherOverride } | ConvertTo-Json | Set-Content $remember
@@ -479,28 +479,31 @@ if (On 'window') {
   1..3 | ForEach-Object { [StableWin]::Key($h,$L) }; [StableWin]::Key($h,$D); Visit 'Move' 'Move Pokemon' 2
   [StableWin]::Key($h,$R); [StableWin]::Key($h,$E)
   T window 'opens Settings' (WaitPage '^2\|Settings$') "$(Now)"
-  # Every row but the ones that download or open a file dialog.
-  $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
+  # Every row but the ones that download, open a file dialog or flip a setting.
+  $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
   for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1) { [StableWin]::Key($h,$D) } }
   [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
-  # Change a ROM version through its page, if a game has two: from a fresh start, so the keys land where they're meant to.
+  # Change a ROM version through its page, if a game has two: opened straight with --game, so no counting down the list.
   $idx = [array]::IndexOf($found, 'platinum')
   $two = @($romLines | Where-Object { $_ -match '^platinum found=([2-9])' }).Count -gt 0
   $pick = "$st\rom-platinum.txt"
-  if ($two -and $idx -gt 0 -and (Alive)) {
+  if ($two -and $idx -ge 0 -and (Alive)) {
     [void]$p.CloseMainWindow(); [void]$p.WaitForExit(8000)
-    $p = Start-Process $exe -PassThru
+    $p = Start-Process $exe -ArgumentList '--game','platinum','--launcher' -PassThru
     Remove-Item $pagesLog -ErrorAction SilentlyContinue
     $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 40); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
-    [void](WaitPage '^1\|nativeMons' 40); Start-Sleep 1
+    [void](WaitPage 'Platinum$' 40); Start-Sleep 1
     $before = Get-Content $pick
-    [StableWin]::Key($h,$D); [StableWin]::Key($h,$E); Start-Sleep 1
-    1..$idx | ForEach-Object { [StableWin]::Key($h,$D) }
-    [void][StableWin]::Shot($h,"$Report\shots\win-list.png"); [StableWin]::Key($h,$E); Start-Sleep 1
     [void][StableWin]::Shot($h,"$Report\shots\win-gamepage.png")
-    1..2 | ForEach-Object { [StableWin]::Key($h,$D) }; [StableWin]::Key($h,$E); Start-Sleep 1
-    [void][StableWin]::Shot($h,"$Report\shots\win-picker.png"); [StableWin]::Key($h,$E); Start-Sleep 10
-    $after = Get-Content $pick
+    1..2 | ForEach-Object { [StableWin]::Key($h,$D) }
+    # The picker opens on its first row, which may be the dump in use: then the next row.
+    for ($k = 0; $k -lt 2; $k++) {
+      [StableWin]::Key($h,$E); [void](WaitPage 'ROM version' 6)
+      1..$k | Where-Object { $_ -gt 0 } | ForEach-Object { [StableWin]::Key($h,$D) }
+      [void][StableWin]::Shot($h,"$Report\shots\win-picker.png"); [StableWin]::Key($h,$E); Start-Sleep 10
+      $after = Get-Content $pick
+      if ($after -ne $before) { break }
+    }
     T window 'ROM version: choosing another saves it' ($after -ne $before) "$($before.Substring(0,8)) to $($after.Substring(0,8))"
     [void][StableWin]::Shot($h,"$Report\shots\win-after-version.png")
     T window 'ROM version: still running afterwards' (Alive)
