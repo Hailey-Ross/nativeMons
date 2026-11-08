@@ -63,7 +63,7 @@ Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. n
 ## Download and set up
 
 **Which download?**
-- **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable)** (recommended): the latest build that's been checked. Each stable release has a version number, such as 0.0.5, and stays on the releases page under that number. [CHANGELOG.md](CHANGELOG.md) lists what each one changed.
+- **[Stable](https://github.com/Hailey-Ross/nativeMons/releases/tag/stable)** (recommended): the latest build that's been checked. Stable has a version number, such as 0.0.5, raised for notable changes; each numbered release stays on the releases page. Minor updates, such as engine updates, keep the number. [CHANGELOG.md](CHANGELOG.md) lists what each one changed.
 - **[Dev](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge):** the newest changes, built from every commit to `dev`. It may be broken, so back up your saves.
 
 **What you need:** a Windows 10 or 11 PC, and your own Pokémon game files (ROMs). No games come with nativeMons.

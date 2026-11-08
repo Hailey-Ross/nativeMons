@@ -21,14 +21,14 @@ jobs:
           submodules: true
           fetch-depth: 30
 
-      # A stable release needs a new number in VERSION and its section in CHANGELOG.md.
+      # VERSION must be valid and have its CHANGELOG.md section. Minor updates keep the number; raise it for notable changes.
       - shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = (Get-Content VERSION -Raw).Trim()
           if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION should be like 0.0.5, not '$v'." }
-          if (git ls-remote --tags origin "refs/tags/v$v") { throw "v$v is already released. Raise VERSION for this release." }
+          if (git ls-remote --tags origin "refs/tags/v$v") { Write-Host "v$v is already released: this stable build keeps that number." }
           if (-not (Select-String -Path CHANGELOG.md -Pattern "^## $([regex]::Escape($v))\s*$" -Quiet)) { throw "CHANGELOG.md has no '## $v' section." }
 
       - uses: ./.github/actions/build-package
