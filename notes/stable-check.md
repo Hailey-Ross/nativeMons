@@ -46,3 +46,22 @@ Settings are remembered in the report folder, so later runs only need `-Report`.
 | `-Report` | where results and screenshots are kept (they stay after `-Work` is deleted) |
 | `-Jobs` | how many games or screens at once (default 4) |
 | `-LauncherOverride` | a locally built launcher to test in place of the package's. The result then doesn't speak for the package: run again without it before releasing. |
+
+## Keeping it short
+
+A clean quick run takes about 20 minutes, of which play, window and sync are most. Only those three put windows on screen, and nobody can use the PC while they run.
+
+- **Without windows first:** `-Skip play,window,sync` runs everything else in a few minutes while the PC stays usable. Run the three window groups only when the PC can be left alone, and say how long beforehand.
+- **One failure is one retest:** `-Retest` reruns only the failed groups, or `-Groups window` just one. Don't rerun everything.
+- **Read before rerunning:** the report keeps screenshots (`shots\win-*.png`) and the window test's page log (`window-pages.log`). Work out the cause from them; don't rerun a window group to watch it fail again.
+- **A broken walk stops at once:** the window test skips the rest after the first wrong screen, rather than waiting 10 s on each.
+
+## Gotchas (8 November)
+
+- `(Get-Content missing.log | ...) -notmatch 'x'` gives nothing, not `$true`: a `while` on it ends at once. Compare `"$(...)"` instead. This ended the start-up wait before the launcher finished starting, and every key after was one screen behind.
+- The launcher logs a page only when it draws one. During start-up it shows the splash and logs nothing; a fresh state's first start takes longer (it prepares every Gen1Recomp game).
+- Keys sent while the launcher is starting are ignored. Wait for `1|nativeMons` first.
+- A list walk breaks whenever rows are added: Settings gained Controls and Screenshots, and romhacks pushed games down the Games list. Open a game's page with `--game <id> --launcher` instead of counting rows.
+- The ROM version picker may open on the dump in use, which changes nothing; try the rows around it.
+- A remembered setting comes back unless it's given: pass `-LauncherOverride ""` to clear one.
+- A window closed by hand during play or window fails that group: `-Retest` it.

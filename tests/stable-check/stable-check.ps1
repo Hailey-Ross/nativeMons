@@ -465,11 +465,15 @@ if (On 'window') {
   function Alive { $p.Refresh(); (-not $p.HasExited) -and $p.Responding }
   function WaitPage([string]$rx, [int]$secs = 30) { $w = Get-Date; do { if ((Now) -match $rx) { return $true }; Start-Sleep -Milliseconds 250 } while (((Get-Date) - $w).TotalSeconds -lt $secs); return $false }
   # The launcher ignores keys while it's busy, so each step waits to see the screen it expects, by name.
+  # Once a step lands on the wrong screen every later key is off too: skip the rest rather than wait out each one.
+  $script:lost = $false
   function Visit([string]$name, [string]$rx, [int]$depth) {
+    if ($script:lost) { T window "opens $name" 'skip' 'an earlier step went wrong'; return }
     [StableWin]::Key($h,$E)
-    $ok = WaitPage "^$depth\|$rx"
+    $ok = WaitPage "^$depth\|$rx" 10
     [void][StableWin]::Shot($h, "$Report\shots\win-$($name -replace ' ','-').png")
     $alive = Alive; T window "opens $name" ($ok -and $alive) "$(Now)$(if (-not $alive) { '; not responding, exited: ' + $p.HasExited })"
+    if (-not ($ok -and $alive)) { $script:lost = $true; return }
     $n = 0; do { [StableWin]::Key($h,$B); $back = WaitPage "^$($depth - 1)\|" 6; $n++ } while (-not $back -and $n -lt 4)
     if (-not $back) { T window "back from $name" $false "$(Now)" }
   }
