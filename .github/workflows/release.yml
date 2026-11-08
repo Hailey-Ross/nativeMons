@@ -1,4 +1,4 @@
-# Every push to main replaces the stable release.
+# Every push to main replaces the stable release and adds a numbered one from VERSION.
 name: Release
 
 on:
@@ -20,6 +20,16 @@ jobs:
         with:
           submodules: true
           fetch-depth: 30
+
+      # A stable release needs a new number in VERSION and its section in CHANGELOG.md.
+      - shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION should be like 0.0.5, not '$v'." }
+          if (git ls-remote --tags origin "refs/tags/v$v") { throw "v$v is already released. Raise VERSION for this release." }
+          if (-not (Select-String -Path CHANGELOG.md -Pattern "^## $([regex]::Escape($v))\s*$" -Quiet)) { throw "CHANGELOG.md has no '## $v' section." }
 
       - uses: ./.github/actions/build-package
         with:
