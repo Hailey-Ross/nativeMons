@@ -22,8 +22,8 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         LOVE_VERSION: "11.5"
-        FULLDEX_RELEASE: "fulldex-2026-11-07"
-        PLATINUM_RELEASE: "v0.2.0"
+        FULLDEX_RELEASE: "fulldex-2026-11-08"
+        PLATINUM_RELEASE: "v0.2.1"
         NATIVEPLAT_RELEASE: "windows-abbf73035"
       run: |
         $dist = "dist\nativeMons"

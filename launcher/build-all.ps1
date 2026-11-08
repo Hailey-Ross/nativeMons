@@ -5,8 +5,8 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $loveVersion = '11.5'
-$fulldexRelease = 'fulldex-2026-11-07'
-$platinumRelease = 'v0.2.0'
+$fulldexRelease = 'fulldex-2026-11-08'
+$platinumRelease = 'v0.2.1'
 $nativeplatRelease = 'windows-abbf73035'
 
 $here = $PSScriptRoot
