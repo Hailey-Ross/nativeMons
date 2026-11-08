@@ -2371,7 +2371,7 @@ static class PythonSetup {
 // Updates come whole from this project's releases. The state folder and the files below are never touched.
 static class Updater {
     const string Site = "https://github.com/Hailey-Ross/nativeMons/releases/download/";
-    public class Release { public string channel, revision, package, sha256; public int build; }
+    public class Release { public string channel, revision, version, package, sha256; public int build; }
     public static volatile Release Latest;
     static string Base { get { return Environment.GetEnvironmentVariable("NATIVEMONS_UPDATE_URL") ?? Site; } }
     static Dictionary<string, string> Version() {
@@ -2383,6 +2383,12 @@ static class Updater {
     public const string StableTag = "stable", DevTag = "bleeding-edge";
     static string Installed { get { string v; return Version().TryGetValue("channel", out v) ? v : null; } }
     static string Revision { get { string v; return Version().TryGetValue("revision", out v) ? v : ""; } }
+    static string InstalledVersion { get { string v; return Version().TryGetValue("version", out v) ? v : null; } }
+    // Players see a stable release by its version, a dev build by its number.
+    public static string Label(string channel, int build, string version) { return channel == StableTag && !string.IsNullOrEmpty(version) ? "version " + version : "build " + build + (string.IsNullOrEmpty(version) ? "" : ", after version " + version); }
+    public static string InstalledLabel { get { return Label(Installed, Build, InstalledVersion); } }
+    public static string LatestLabel { get { var r = Latest; return r == null ? "" : Label(r.channel, r.build, r.version); } }
+    public static string Upper(string s) { return string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1); }
     // The player's choice, or else what this copy came from. The tags stay as published; players see Stable and Dev.
     public static string Channel { get { string c = Config.Read("update-channel.txt", "").Trim(); return c == StableTag || c == DevTag ? c : Installed ?? DevTag; } }
     public static void Choose(string channel) { Config.Write("update-channel.txt", channel); Latest = null; }
@@ -2423,7 +2429,7 @@ static class Updater {
             if (Directory.Exists(work)) Directory.Delete(work, true);
             Directory.CreateDirectory(work);
             using (var web = Web()) {
-                web.DownloadProgressChanged += (s, e) => report("Downloading build " + release.build, e.ProgressPercentage / 100f * 0.7f);
+                web.DownloadProgressChanged += (s, e) => report("Downloading " + Label(release.channel, release.build, release.version), e.ProgressPercentage / 100f * 0.7f);
                 var wait = new System.Threading.ManualResetEventSlim();
                 Exception failed = null;
                 web.DownloadFileCompleted += (s, e) => { failed = e.Error; wait.Set(); };
@@ -2465,7 +2471,7 @@ static class Updater {
                     foreach (var f in Directory.GetFiles(code, "*", SearchOption.AllDirectories))
                         if (!names.Contains(f.Substring(here.Length).TrimStart('\\'))) File.Delete(f);
                 // A package without this stamp would look out of date for ever.
-                File.WriteAllText(Path.Combine(here, "version.txt"), "channel=" + release.channel + "\nbuild=" + release.build + "\nrevision=" + release.revision + "\n");
+                File.WriteAllText(Path.Combine(here, "version.txt"), "channel=" + release.channel + "\nbuild=" + release.build + "\nrevision=" + release.revision + "\nversion=" + release.version + "\n");
                 report(changed + " files updated", 1f);
             }
             return null;
@@ -3264,7 +3270,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Screenshots", "", true, delegate { pages.Push(ScreenshotsPage()); }) { Icon = '', Info = "Open the folders where nativeplat and Infinite Fusion put the screenshots you take while you play." });
         p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, and DS games on Fulldex. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
-        p.Items.Add(new Item(Updater.Ready ? "Updates: Build " + Updater.Latest.build + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
+        p.Items.Add(new Item(Updater.Ready ? "Updates: " + Updater.Upper(Updater.LatestLabel) + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
         return p;
@@ -3273,20 +3279,20 @@ class LauncherForm : Form {
         string problem = null;
         Busy("Looking for updates", delegate { problem = Updater.Check(); return null; }, delegate(string e) {
             string local = Updater.Local;
-            string here = local != null ? "a local build" + (local.Length >= 7 && local != "yes" ? " of " + local.Substring(0, 7) : "") : Updater.Build > 0 ? Updater.InstalledName + " build " + Updater.Build : "a local build, not from a release";
+            string here = local != null ? "a local build" + (local.Length >= 7 && local != "yes" ? " of " + local.Substring(0, 7) : "") : Updater.Build > 0 ? Updater.InstalledName + " " + Updater.InstalledLabel : "a local build, not from a release";
             string chosen = Updater.Name(Updater.Channel);
             string other = Updater.Channel == Updater.StableTag ? Updater.DevTag : Updater.StableTag;
             var channel = new Item("Get updates from: " + chosen, "", true, delegate { Updater.Choose(other); pages.Pop(); OpenUpdates(); }) { Icon = '\uE895', Info = "Stable is the tested build. Dev gets every change first, and may have more problems. Select to switch to " + Updater.Name(other) + "." };
             var p = new Page { Title = "Updates" };
             if (problem != null || e != null) { p.Body = "This copy is " + here + ".\n\nCouldn't look for updates on " + chosen + ". " + (e ?? problem); p.Items.Add(channel); pages.Push(p); return; }
             if (local != null && Updater.Latest != null && !string.IsNullOrEmpty(Updater.Latest.sha256)) {
-                p.Body = "This copy is " + here + ", so updates aren't offered: a release could replace newer work.\n\nThe newest on " + chosen + " is build " + Updater.Latest.build + ". Updating replaces this copy's launcher and engines with it; your saves and settings stay.";
+                p.Body = "This copy is " + here + ", so updates aren't offered: a release could replace newer work.\n\nThe newest on " + chosen + " is " + Updater.LatestLabel + ". Updating replaces this copy's launcher and engines with it; your saves and settings stay.";
                 p.Items.Add(new Item("Update anyway", "", true, delegate { pages.Pop(); StartUpdate(); }) { Icon = '' });
                 p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '' });
                 p.Items.Add(channel); pages.Push(p); return;
             }
-            if (!Updater.Ready) { p.Body = "This copy is " + here + ".\n\nThe newest on " + chosen + " is build " + Updater.Latest.build + ". You're up to date."; p.Items.Add(channel); pages.Push(p); return; }
-            p.Body = "This copy is " + here + ".\n\n" + chosen + " build " + Updater.Latest.build + " is ready." + (Updater.Switching ? " It can be older than what you have now." : "") + " It updates the launcher and every engine together, downloading about 200 MB.\n\nYour saves, ROM copies, wallpapers and settings stay as they are. The launcher restarts when it's done.";
+            if (!Updater.Ready) { p.Body = "This copy is " + here + ".\n\nThe newest on " + chosen + " is " + Updater.LatestLabel + ". You're up to date."; p.Items.Add(channel); pages.Push(p); return; }
+            p.Body = "This copy is " + here + ".\n\n" + chosen + " " + Updater.LatestLabel + " is ready." + (Updater.Switching ? " It can be older than what you have now." : "") + " It updates the launcher and every engine together, downloading about 200 MB.\n\nYour saves, ROM copies, wallpapers and settings stay as they are. The launcher restarts when it's done.";
             p.Items.Add(new Item("Update now", "", true, delegate { pages.Pop(); StartUpdate(); }) { Icon = '\uE896' });
             p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
             p.Items.Add(channel);
@@ -8104,7 +8110,7 @@ class LauncherForm : Form {
         if (age < 0) return;
         float show = Math.Min(Ease(age / 0.28f), Ease((BannerSeconds - age) / 0.28f));
         // A pill as wide as its text.
-        string text = "Build " + bannerBuild + " is ready";
+        string text = Updater.Upper(Updater.LatestLabel) + " is ready";
         float bh = h * 0.056f, y = Math.Max(h * 0.052f, below) - (1 - show) * (bh + h * 0.06f), rad = bh / 2;
         float pad = bh * 0.16f, size = bh - 2 * pad, close = bh * 0.8f;
         float textW = g.MeasureString(text, smallBold).Width + pad;

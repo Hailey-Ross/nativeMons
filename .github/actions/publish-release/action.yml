@@ -30,24 +30,38 @@ runs:
         $sha = "${{ github.sha }}"
         $zip = "nativeMons-windows-x64.zip"
 
+        # Stable carries the number in VERSION. Dev carries the last stable version it came after, if any.
+        $stable = $env:PRE -ne "true"
+        $version = if ($stable) { (Get-Content VERSION -Raw).Trim() } else {
+          @(git ls-remote --tags origin "refs/tags/v*" | ForEach-Object { ($_ -split 'refs/tags/v')[1] } | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } | Sort-Object { [version]$_ }) | Select-Object -Last 1
+        }
         # The launcher's updater compares this with the channel's release.json.
-        "channel=$env:TAG`nbuild=$env:BUILD`nrevision=$sha" | Out-File -Encoding ascii dist\nativeMons\version.txt
+        "channel=$env:TAG`nbuild=$env:BUILD`nrevision=$sha`nversion=$version" | Out-File -Encoding ascii dist\nativeMons\version.txt
         Compress-Archive dist\nativeMons $zip
         $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
         "$hash  $zip" | Out-File -Encoding ascii "$zip.sha256" -NoNewline
-        @{ channel = $env:TAG; build = [int]$env:BUILD; revision = $sha; package = $zip; sha256 = $hash } | ConvertTo-Json | Out-File -Encoding ascii release.json
+        @{ channel = $env:TAG; build = [int]$env:BUILD; revision = $sha; version = "$version"; package = $zip; sha256 = $hash } | ConvertTo-Json | Out-File -Encoding ascii release.json
 
         $commits = git log -15 --no-merges --format="- ``%h`` %s" $sha
         # A build made by the Engine sync workflow says so, with what moved upstream.
-        $title = "nativeMons ($env:TAG)"; $sync = @()
+        $title = if ($stable) { "nativeMons $version" } else { "nativeMons ($env:TAG)" }; $sync = @()
         if ((git log -1 --format=%s $sha) -eq 'Engine auto-sync with upstream') {
           $title += ": engine auto-sync with upstream"
           $sync = @("**Engine auto-sync with upstream.** Built automatically from these upstream updates:", "", (git log -1 --format=%b $sha).Trim(), "")
         }
+        # A stable release's own section of CHANGELOG.md.
+        $changes = @()
+        if ($stable) {
+          $in = $false
+          $section = foreach ($l in Get-Content CHANGELOG.md -Encoding utf8) { if ($l -match '^## ') { $in = $l.Trim() -eq "## $version"; continue }; if ($in) { $l } }
+          $changes = @("## What's new in $version", "", ($section -join "`n").Trim(), "")
+        }
+        $first = if ($stable) { "Version **$version**, build **$env:BUILD**" } elseif ($version) { "Rolling build **$env:BUILD**, after version $version" } else { "Rolling build **$env:BUILD**" }
         $notes = @(
-          "Rolling build **$env:BUILD**, commit ``$($sha.Substring(0, 12))``."
+          "$first, commit ``$($sha.Substring(0, 12))``."
           ""
           $sync
+          $changes
           "[Download Windows ZIP](https://github.com/$env:REPO/releases/download/$env:TAG/$zip)"
           ""
           "> $env:BANNER"
@@ -64,3 +78,8 @@ runs:
         $global:LASTEXITCODE = 0
         $flag = if ($env:PRE -eq "true") { "--prerelease" } else { "--latest" }
         gh release create $env:TAG $zip "$zip.sha256" release.json --target $sha --title $title --notes-file release-body.md $flag
+        # The numbered release stays for good, with its own download link; the rolling one stays the latest.
+        if ($stable) {
+          [IO.File]::WriteAllText("$PWD\release-body.md", $notes.Replace("/download/$env:TAG/", "/download/v$version/"), (New-Object Text.UTF8Encoding($false)))
+          gh release create "v$version" $zip "$zip.sha256" release.json --target $sha --title $title --notes-file release-body.md --latest=false
+        }
