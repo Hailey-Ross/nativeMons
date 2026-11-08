@@ -2384,8 +2384,8 @@ static class Updater {
     static string Installed { get { string v; return Version().TryGetValue("channel", out v) ? v : null; } }
     static string Revision { get { string v; return Version().TryGetValue("revision", out v) ? v : ""; } }
     static string InstalledVersion { get { string v; return Version().TryGetValue("version", out v) ? v : null; } }
-    // Players see a stable release by its version, a dev build by its number.
-    public static string Label(string channel, int build, string version) { return channel == StableTag && !string.IsNullOrEmpty(version) ? "version " + version : "build " + build + (string.IsNullOrEmpty(version) ? "" : ", after version " + version); }
+    // Stable builds share a version until it's raised, so the build number tells them apart.
+    public static string Label(string channel, int build, string version) { return channel == StableTag && !string.IsNullOrEmpty(version) ? "version " + version + ", build " + build : "build " + build + (string.IsNullOrEmpty(version) ? "" : ", after version " + version); }
     public static string InstalledLabel { get { return Label(Installed, Build, InstalledVersion); } }
     public static string LatestLabel { get { var r = Latest; return r == null ? "" : Label(r.channel, r.build, r.version); } }
     public static string Upper(string s) { return string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1); }

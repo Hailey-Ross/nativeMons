@@ -78,8 +78,8 @@ runs:
         $global:LASTEXITCODE = 0
         $flag = if ($env:PRE -eq "true") { "--prerelease" } else { "--latest" }
         gh release create $env:TAG $zip "$zip.sha256" release.json --target $sha --title $title --notes-file release-body.md $flag
-        # The numbered release stays for good, with its own download link; the rolling one stays the latest.
-        if ($stable) {
+        # A raised VERSION also stays for good as vX.Y.Z; a stable build that keeps the number only refreshes stable.
+        if ($stable -and -not (git ls-remote --tags origin "refs/tags/v$version")) {
           [IO.File]::WriteAllText("$PWD\release-body.md", $notes.Replace("/download/$env:TAG/", "/download/v$version/"), (New-Object Text.UTF8Encoding($false)))
           gh release create "v$version" $zip "$zip.sha256" release.json --target $sha --title $title --notes-file release-body.md --latest=false
         }
