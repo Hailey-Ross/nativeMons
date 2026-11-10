@@ -2775,6 +2775,7 @@ class LauncherForm : Form {
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         // The waiting quick-start game goes with the launcher: waited for here, as a background task dies with the program.
         FormClosing += (o, e) => {
+            QuickNote("close " + e.CloseReason + " " + Visible + " " + WindowState + " " + powerOff);
             // Closed by the user, the device powers down first (PowerOffTick), then closes for real.
             if (powerOff < 0 && Visible && playDirect == null && !Native.Quiet && WindowState == FormWindowState.Normal
                 && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None)) {
@@ -2783,6 +2784,8 @@ class LauncherForm : Form {
                 DropReady(); StopSnapshot(); GameArt.StopNow(); return;
             }
             if (e.Cancel) return;
+            // The wait below still runs timer ticks: nothing may start a new background engine now.
+            closing = true;
             Hide(); DropReady(); StopSnapshot(); GameArt.StopNow();
             var d = dropping; if (d != null) d.Wait(18000);
         };
@@ -6786,9 +6789,10 @@ class LauncherForm : Form {
     }
     DateTime scannedAt; int spritesSeen;
     DateTime updateCheckedAt = DateTime.Now;
+    bool closing;
     void Poll() {
         PowerOffTick();
-        if (powerOff >= 0) return;
+        if (powerOff >= 0 || closing) return;
         WatchGba();
         OpenTick();
         if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
