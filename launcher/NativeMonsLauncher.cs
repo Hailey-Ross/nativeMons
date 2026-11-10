@@ -2778,10 +2778,13 @@ class LauncherForm : Form {
             // Closed by the user, the device powers down first (PowerOffTick), then closes for real.
             if (powerOff < 0 && Visible && playDirect == null && !Native.Quiet && WindowState == FormWindowState.Normal
                 && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None)) {
-                e.Cancel = true; powerOff = (float)clock.Elapsed.TotalSeconds; powerTop = Top; return;
+                e.Cancel = true; powerOff = (float)clock.Elapsed.TotalSeconds; powerTop = Top;
+                // Background engines (waiting game, snapshot, picture capture) close during the animation, not after it.
+                DropReady(); StopSnapshot(); GameArt.StopNow(); return;
             }
             if (e.Cancel) return;
-            Hide(); DropReady(true); StopSnapshot();
+            Hide(); DropReady(); StopSnapshot(); GameArt.StopNow();
+            var d = dropping; if (d != null) d.Wait(18000);
         };
         // A device standing upright: no window frame, the window's own outline is the shell's.
         var area = Screen.PrimaryScreen.WorkingArea;
@@ -6420,6 +6423,7 @@ class LauncherForm : Form {
         });
     }
     // Ends the waiting game: closing its input tells it to quit, and it's stopped if it doesn't.
+    Task dropping;
     void DropReady(bool wait = false) {
         var p = ready;
         if (p == null) return;
@@ -6429,6 +6433,7 @@ class LauncherForm : Form {
         int grace = 2000;
         try { if (p.ProcessName.Equals("nativeplat", StringComparison.OrdinalIgnoreCase)) grace = 15000; } catch { }
         var t = Task.Run(() => { try { p.StandardInput.Close(); if (!p.WaitForExit(grace)) p.Kill(); p.WaitForExit(2000); p.Dispose(); } catch { } });
+        dropping = t;
         if (wait) t.Wait(grace + 3000);
     }
     void UseReady(GameEntry g, Action<int> done) {
