@@ -1322,17 +1322,15 @@ static class GameArt {
         "SANDGEM_TOWN 418 176 848", "FLOAROMA_TOWN 426 176 640", "SOLACEON_TOWN 433 576 656", "CELESTIC_TOWN 442 465 528",
         "JUBILIFE_CITY 3 184 776", "CANALAVE_CITY 33 51 736", "OREBURGH_CITY 45 293 762", "ETERNA_CITY 65 315 538",
         "HEARTHOME_CITY 86 480 704", "PASTORIA_CITY 120 608 832", "VEILSTONE_CITY 132 704 608", "SUNYSHORE_CITY 150 860 785",
-        "SNOWPOINT_CITY 165 368 224", "POKEMON_LEAGUE 172 848 576", "FIGHT_AREA 188 640 432", "SURVIVAL_AREA 450 656 339",
-        "RESORT_AREA 457 816 463" };
-    // Platinum rebuilt the Battle Zone and the League's front: those use the game's own fly points.
-    static readonly string[] PtTowns = DpTowns.Take(13).Concat(new[] {
-        "POKEMON_LEAGUE 172 847 560", "FIGHT_AREA 188 647 430", "SURVIVAL_AREA 450 659 339", "RESORT_AREA 457 802 473" }).ToArray();
+        "SNOWPOINT_CITY 165 368 224", "FIGHT_AREA 188 640 432" };
+    // The League comes out white (its weather); Platinum's Battle Zone never loads on a new game, and a sweep ends at the first map that doesn't.
+    static readonly string[] PtTowns = DpTowns.Take(13).ToArray();
     static readonly string[] HgTowns = {
         "CHERRYGROVE_CITY 67 547 400", "VIOLET_CITY 73 479 258", "AZALEA_TOWN 74 419 469", "GOLDENROD_CITY 76 342 350",
-        "ECRUTEAK_CITY 78 397 184", "OLIVINE_CITY 77 285 258", "CIANWOOD_CITY 75 181 355", "MAHOGANY_TOWN 87 528 175",
-        "LAKE_OF_RAGE 88 536 90", "BLACKTHORN_CITY 89 660 166", "MT_SILVER 90 820 266", "PALLET_TOWN 49 1044 364",
-        "VIRIDIAN_CITY 50 1032 263", "PEWTER_CITY 51 1060 98", "CERULEAN_CITY 52 1309 132", "LAVENDER_TOWN 53 1419 243",
-        "VERMILION_CITY 54 1310 319", "CELADON_CITY 55 1218 250", "FUCHSIA_CITY 56 1215 404", "SAFFRON_CITY 59 1309 230",
+        "ECRUTEAK_CITY 78 397 184", "OLIVINE_CITY 77 312 264", "CIANWOOD_CITY 75 187 370", "MAHOGANY_TOWN 87 528 175",
+        "LAKE_OF_RAGE 88 536 90", "BLACKTHORN_CITY 89 674 177", "MT_SILVER 90 820 266", "PALLET_TOWN 49 1044 364",
+        "VIRIDIAN_CITY 50 1032 263", "PEWTER_CITY 51 1060 98", "CERULEAN_CITY 52 1336 136", "LAVENDER_TOWN 53 1419 243",
+        "VERMILION_CITY 54 1310 319", "CELADON_CITY 55 1218 250", "FUCHSIA_CITY 56 1215 404", "SAFFRON_CITY 59 1294 243",
         "CINNABAR_ISLAND 57 1039 503", "INDIGO_PLATEAU 58 912 201" };
     static string WarpList(string home, string[] towns) {
         return home + string.Concat(towns.Select(t => { var f = t.Split(' '); return ";" + f[1] + ":" + f[2] + ":" + f[3] + ":1"; }));
@@ -1345,7 +1343,7 @@ static class GameArt {
         int made = 0;
         for (int i = 0; i < towns.Length; i++) {
             string png = stem + "-stop-" + (first + i).ToString("00") + ".png";
-            if (File.Exists(png) && SaveTown(g, png, part, Path.Combine(TownsDir(g.Id), towns[i].Split(' ')[0] + ".jpg")) == null) made++;
+            if (!stopsMissed.Contains(first + i) && File.Exists(png) && SaveTown(g, png, part, Path.Combine(TownsDir(g.Id), towns[i].Split(' ')[0] + ".jpg")) == null) made++;
         }
         // Written even when none came out (an older engine): tried once per engine build, not at every start.
         File.WriteAllText(Path.Combine(TownsDir(g.Id), "done.txt"), "engine=" + EngineStamp(g) + Environment.NewLine + made + " towns" + Environment.NewLine + stopTimes);
@@ -1358,28 +1356,38 @@ static class GameArt {
     }
     // Seconds from the start of the last list run to each stop's picture, kept in done.txt for tuning.
     static string stopTimes = "";
+    // Stops the engine gave up on (its log: "stop N never arrived"): their pictures are of somewhere else.
+    static readonly HashSet<int> stopsMissed = new HashSet<int>();
     static int RunNativeplatTest(string spec, string lab, string warp, string sweep = null, string shot = null, int stops = 0) {
         var psi = new ProcessStartInfo(Config.Nativeplat) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(Config.Nativeplat), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
         psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
         psi.EnvironmentVariables["NP_AUTOTEST"] = spec;
         if (lab != null) { psi.EnvironmentVariables["PC_LAB"] = lab; psi.EnvironmentVariables["PC_LAB_AT"] = "300"; }
-        if (warp != null) psi.EnvironmentVariables["PC_WARP"] = warp;
+        if (warp != null) { psi.EnvironmentVariables["PC_WARP"] = warp; psi.EnvironmentVariables["PC_WARP_SETTLE"] = "120"; }
+        stopsMissed.Clear();
         if (sweep != null) psi.EnvironmentVariables["PC_SWEEP"] = sweep;
         using (var p = Process.Start(psi)) { Watch(p);
             try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
             var said = new Queue<string>();
-            DataReceivedEventHandler keep = (o, e) => { if (e.Data == null) return; lock (said) { said.Enqueue(e.Data); if (said.Count > 40) said.Dequeue(); } };
+            DataReceivedEventHandler keep = (o, e) => {
+                if (e.Data == null) return;
+                var miss = System.Text.RegularExpressions.Regex.Match(e.Data, @"PC_WARP stop (\d+) never arrived");
+                lock (said) { said.Enqueue(e.Data); if (said.Count > 40) said.Dequeue(); if (miss.Success) stopsMissed.Add(int.Parse(miss.Groups[1].Value)); }
+            };
             p.OutputDataReceived += keep; p.ErrorDataReceived += keep;
             p.BeginOutputReadLine(); p.BeginErrorReadLine();
             // A list run ends once its last stop is pictured, not at its frame budget, which only guards a stuck run.
             var clock = Stopwatch.StartNew();
             int seen = 0;
+            double lastAt = 0;
             var times = new List<string>();
             while (!p.WaitForExit(500)) {
                 if (clock.Elapsed.TotalSeconds > 1500) { try { p.Kill(); } catch { } return -1; }
                 if (shot == null || stops == 0) continue;
-                while (seen < stops && File.Exists(StopFile(shot, seen + 1))) { seen++; times.Add(((int)clock.Elapsed.TotalSeconds).ToString()); }
+                while (seen < stops && File.Exists(StopFile(shot, seen + 1))) { seen++; lastAt = clock.Elapsed.TotalSeconds; times.Add(((int)lastAt).ToString()); }
+                // A place that hangs the game without a word: keep what came out.
+                if (seen > 0 && seen < stops && clock.Elapsed.TotalSeconds - lastAt > 60) { times.Add("stalled"); try { p.Kill(); } catch { } p.WaitForExit(5000); break; }
                 if (seen == stops) { System.Threading.Thread.Sleep(1000); try { p.Kill(); } catch { } p.WaitForExit(5000); break; }
             }
             if (p.HasExited) p.WaitForExit();
