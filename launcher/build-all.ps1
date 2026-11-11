@@ -7,7 +7,7 @@ $ProgressPreference = 'SilentlyContinue'
 $loveVersion = '11.5'
 $fulldexRelease = 'fulldex-2026-11-08'
 $platinumRelease = 'v0.2.1'
-$nativeplatRelease = 'windows-095b8f537'
+$nativeplatRelease = 'windows-22adf5d0d'
 
 $here = $PSScriptRoot
 $repo = Split-Path $here -Parent
