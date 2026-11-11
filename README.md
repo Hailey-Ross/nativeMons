@@ -1,7 +1,8 @@
 <p align="center"><img src="assets/banner-title.png" alt="nativeMons" width="100%"></p>
 
-[![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml)
-[![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml)
+[![Engine sync](https://github.com/Hailey-Ross/nativeMons/actions/workflows/engine-sync.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases)
+[![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge)
+[![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases/latest)
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
 through its own engine, and the engines stay forks that keep pulling their upstream updates. It also installs and runs

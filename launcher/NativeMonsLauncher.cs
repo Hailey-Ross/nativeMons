@@ -1206,6 +1206,32 @@ static class GameArt {
     // The home screen's wallpaper: one of the game's towns.
     static string TownFile(string id) { return Path.Combine(Folder(id), "town.jpg"); }
     public static bool HasTown(string id) { return id != null && File.Exists(TownFile(id)); }
+    // Gen1Recomp games also picture every other town and city (towns\, done.txt once the set is made).
+    static string TownsDir(string id) { return Path.Combine(Folder(id), "towns"); }
+    static bool TownsByGen1(GameEntry g) { return g.Pc == null && g.TownFrame <= 0 && !g.IsDs && g.Gen1 != null; }
+    static bool TownsByNativeplat(GameEntry g) { return g.Pc == null && g.TownFrame <= 0 && g.IsDs && (g.Nativeplat != null || g.TownCore != null); }
+    // A set is made once per engine build for DS games: an older build that can't walk the list is tried again after an update.
+    static string EngineStamp(GameEntry g) { try { return TownsByNativeplat(g) ? File.GetLastWriteTimeUtc(Config.Nativeplat).Ticks.ToString() : ""; } catch { return ""; } }
+    static bool HasTowns(GameEntry g) {
+        string done = Path.Combine(TownsDir(g.Id), "done.txt");
+        if (!File.Exists(done)) return false;
+        string stamp = EngineStamp(g);
+        try { return stamp == "" || File.ReadAllText(done).Contains("engine=" + stamp); } catch { return true; }
+    }
+    // One of them, picked at random once per launcher start.
+    static readonly Random townDice = new Random();
+    static readonly Dictionary<string, string> townChosen = new Dictionary<string, string>();
+    static string ChosenTown(string id) {
+        lock (gate) {
+            string f;
+            if (townChosen.TryGetValue(id, out f) && File.Exists(f)) return f;
+            var all = new List<string> { TownFile(id) };
+            try { if (Directory.Exists(TownsDir(id))) all.AddRange(Directory.GetFiles(TownsDir(id), "*.jpg")); } catch { }
+            f = all[townDice.Next(all.Count)];
+            townChosen[id] = f;
+            return f;
+        }
+    }
     // Per town (games.json townView): the point of the picture to centre between the Play card and the apps, and a zoom
     // where 1 shows its whole width. A hack without its own uses its base game's.
     public static readonly Dictionary<string, float[]> TownViews = new Dictionary<string, float[]>();
@@ -1222,11 +1248,12 @@ static class GameArt {
         if (pic == null) return false;
         // A wide window has no open band between them: the town just fills it.
         if (screen.Width > screen.Height || band.Height < screen.Height * 0.08f) { Draw(g, pic, screen); return true; }
-        string id = Shown(gameId, HasTown);
-        var view = TownView(id);
-        lock (gate) if (framedId != id) {
+        string id = Shown(gameId, HasTown), file = ChosenTown(id);
+        // games.json's framing is for the home town; the others are centred, a little closer than their whole width.
+        var view = file == TownFile(id) ? TownView(id) : new[] { 0.5f, 0.5f, 1.4f };
+        lock (gate) if (framedId != file) {
             if (framedSoft != null) framedSoft.Dispose(); if (framedBlur != null) framedBlur.Dispose();
-            framedSoft = Feathered(pic); framedBlur = Blurred(pic); framedId = id;
+            framedSoft = Feathered(pic); framedBlur = Blurred(pic); framedId = file;
         }
         float scale = screen.Width / pic.Width * Math.Max(1f, view[2]), dw = pic.Width * scale, dh = pic.Height * scale;
         float x = Math.Max(screen.Right - dw, Math.Min(screen.X, band.X + band.Width / 2 - view[0] * dw));
@@ -1273,11 +1300,12 @@ static class GameArt {
         id = Shown(id, HasTown);
         if (!HasTown(id)) return null;
         lock (gate) {
-            if (loadedTownId != id) {
+            string file = ChosenTown(id);
+            if (loadedTownId != file) {
                 try {
-                    Bitmap next; using (var f = new Bitmap(TownFile(id))) next = new Bitmap(f);
+                    Bitmap next; using (var f = new Bitmap(file)) next = new Bitmap(f);
                     if (loadedTown != null) loadedTown.Dispose();
-                    loadedTown = next; loadedTownId = id;
+                    loadedTown = next; loadedTownId = file;
                 } catch { return null; }
             }
             return loadedTown;
@@ -1289,17 +1317,57 @@ static class GameArt {
     const string DpNewGame = "1250:start;1350:a:4:40:35;2800:down;2820:down;2840:a;2900:a:4:40:14;3560:tap:128:100:8:40:3;3700:a:4:40:49;5850:tap:82:118:6;6600:b:4:40:6;6950:down;6980:a;7040:a:4:40:40;9300:a:4:40:120";
     const string HgNewGame = "1300:start;1700:start;2100:a:4:40:10;3100:tap:220:170:4:80:30;6100:tap:128:72:4;6500:a:4;6800:tap:128:147:4;7200:tap:220:170:4:80:50;11500:tap:70:140:4;11900:tap:220:180:4:80:3;12500:tap:60:80:4;12800:tap:220:180:4;13200:tap:190:55:4;13500:tap:220:180:4:80:3;14000:start:4;14100:a:4;14500:tap:220:180:4;14800:tap:190:55:4;15100:tap:220:180:4:80:20";
     const string Twinleaf = "411", TwinleafX = "110", TwinleafZ = "888";
-    static int RunNativeplatTest(string spec, string lab, string warp) {
+    // Every other town for the wallpapers: name, map header, world tile x, z (the decomps' map matrices and fly points).
+    static readonly string[] DpTowns = {
+        "SANDGEM_TOWN 418 176 848", "FLOAROMA_TOWN 426 176 640", "SOLACEON_TOWN 433 576 656", "CELESTIC_TOWN 442 465 528",
+        "JUBILIFE_CITY 3 160 768", "CANALAVE_CITY 33 51 736", "OREBURGH_CITY 45 293 762", "ETERNA_CITY 65 315 538",
+        "HEARTHOME_CITY 86 480 704", "PASTORIA_CITY 120 608 832", "VEILSTONE_CITY 132 704 608", "SUNYSHORE_CITY 150 864 763",
+        "SNOWPOINT_CITY 165 368 224", "POKEMON_LEAGUE 172 848 576", "FIGHT_AREA 188 640 432", "SURVIVAL_AREA 450 656 339",
+        "RESORT_AREA 457 816 463" };
+    // Platinum rebuilt the Battle Zone and the League's front: those use the game's own fly points.
+    static readonly string[] PtTowns = DpTowns.Take(13).Concat(new[] {
+        "POKEMON_LEAGUE 172 847 560", "FIGHT_AREA 188 647 430", "SURVIVAL_AREA 450 659 339", "RESORT_AREA 457 802 473" }).ToArray();
+    static readonly string[] HgTowns = {
+        "CHERRYGROVE_CITY 67 547 400", "VIOLET_CITY 73 479 258", "AZALEA_TOWN 74 419 469", "GOLDENROD_CITY 76 342 350",
+        "ECRUTEAK_CITY 78 397 184", "OLIVINE_CITY 77 285 258", "CIANWOOD_CITY 75 181 355", "MAHOGANY_TOWN 87 528 175",
+        "LAKE_OF_RAGE 88 536 90", "BLACKTHORN_CITY 89 660 166", "MT_SILVER 90 820 266", "PALLET_TOWN 49 1044 364",
+        "VIRIDIAN_CITY 50 1032 263", "PEWTER_CITY 51 1060 98", "CERULEAN_CITY 52 1309 132", "LAVENDER_TOWN 53 1419 243",
+        "VERMILION_CITY 54 1310 319", "CELADON_CITY 55 1218 250", "FUCHSIA_CITY 56 1215 404", "SAFFRON_CITY 59 1309 230",
+        "CINNABAR_ISLAND 57 1039 503", "INDIGO_PLATEAU 58 912 201" };
+    static string WarpList(string home, string[] towns) {
+        return home + string.Concat(towns.Select(t => { var f = t.Split(' '); return ";" + f[1] + ":" + f[2] + ":" + f[3] + ":1"; }));
+    }
+    // A run that walks a list leaves <shot>-stop-NN.png per town (gen4recomp NP_STAT_WARP_STOPS); stop `first` is towns[0].
+    static int SaveStops(GameEntry g, string shot, string[] towns, int first, RectangleF part) {
+        string stem = shot.Substring(0, shot.Length - 4);
+        if (Directory.Exists(TownsDir(g.Id))) Directory.Delete(TownsDir(g.Id), true);
+        Directory.CreateDirectory(TownsDir(g.Id));
+        int made = 0;
+        for (int i = 0; i < towns.Length; i++) {
+            string png = stem + "-stop-" + (first + i).ToString("00") + ".png";
+            if (File.Exists(png) && SaveTown(g, png, part, Path.Combine(TownsDir(g.Id), towns[i].Split(' ')[0] + ".jpg")) == null) made++;
+        }
+        // Written even when none came out (an older engine): tried once per engine build, not at every start.
+        File.WriteAllText(Path.Combine(TownsDir(g.Id), "done.txt"), "engine=" + EngineStamp(g) + Environment.NewLine + made + " towns");
+        return made;
+    }
+    static string StopFile(string shot, int n) { return shot.Substring(0, shot.Length - 4) + "-stop-" + n.ToString("00") + ".png"; }
+    static void DeleteStops(string shot) {
+        string stem = Path.GetFileName(shot.Substring(0, shot.Length - 4)) + "-stop-";
+        try { foreach (var f in Directory.GetFiles(Path.GetDirectoryName(shot), stem + "*.png")) File.Delete(f); } catch { }
+    }
+    static int RunNativeplatTest(string spec, string lab, string warp, string sweep = null) {
         var psi = new ProcessStartInfo(Config.Nativeplat) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(Config.Nativeplat), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
         psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
         psi.EnvironmentVariables["NP_AUTOTEST"] = spec;
         if (lab != null) { psi.EnvironmentVariables["PC_LAB"] = lab; psi.EnvironmentVariables["PC_LAB_AT"] = "300"; }
         if (warp != null) psi.EnvironmentVariables["PC_WARP"] = warp;
+        if (sweep != null) { psi.EnvironmentVariables["PC_SWEEP"] = sweep; psi.EnvironmentVariables["PC_SWEEP_OUT"] = sweep + ".out"; }
         using (var p = Process.Start(psi)) { Watch(p);
             try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
             p.BeginOutputReadLine(); p.BeginErrorReadLine();
-            if (!p.WaitForExit(600000)) { try { p.Kill(); } catch { } return -1; }
+            if (!p.WaitForExit(1500000)) { try { p.Kill(); } catch { } return -1; }
             return p.ExitCode;
         }
     }
@@ -1331,7 +1399,7 @@ static class GameArt {
     static string CaptureTownNativeplat(GameEntry g) {
         string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png"), root = Path.Combine(Path.GetDirectoryName(Config.Nativeplat), "userdata");
         string slotName = "nativemons-wallpaper", slot = Path.Combine(root, "saves", g.TownCore ?? g.Nativeplat, slotName + ".sav"), script = shot + ".press";
-        string romCopy = shot + ".nds", core = g.TownCore ?? g.Nativeplat;
+        string romCopy = shot + ".nds", core = g.TownCore ?? g.Nativeplat, sweepFile = shot + ".sweep";
         string view = "size=1024x768,layout=top,zoom=1024,game=" + core + ",png=" + shot + ",rom=" + (g.TownCore != null ? romCopy : LauncherForm.NativeplatRomCopy(g));
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(shot));
@@ -1341,10 +1409,18 @@ static class GameArt {
                 File.Copy(g.FulldexRom, romCopy, true);
                 File.SetAttributes(romCopy, FileAttributes.Normal);
                 File.WriteAllText(script, HgNewGame.Replace(";", Environment.NewLine));
-                RunNativeplatTest("frames=18500," + view + ",press=@" + script, null, "60:686:393:1");
-                if (!File.Exists(shot)) return "No picture came out.";
-                return SaveTown(g, shot, new RectangleF(0.02f, 0.24f, 0.76f, 0.64f));
+                // New Bark first, then every other town; an engine without the list stops at New Bark.
+                var hgPart = new RectangleF(0.02f, 0.24f, 0.76f, 0.64f);
+                DeleteStops(shot);
+                RunNativeplatTest("frames=" + (18500 + 400 * HgTowns.Length) + "," + view + ",press=@" + script, null, WarpList("60:686:393:1", HgTowns));
+                string hgHome = File.Exists(StopFile(shot, 1)) ? StopFile(shot, 1) : shot;
+                if (!File.Exists(hgHome)) return "No picture came out.";
+                string hgWhy = SaveTown(g, hgHome, hgPart);
+                if (hgWhy == null) SaveStops(g, shot, HgTowns, 2, hgPart);
+                return hgWhy;
             }
+            var part = new RectangleF(0.1f, 0.06f, 0.66f, 0.9f);
+            bool dp = g.Nativeplat != "platinum";
             if (g.Nativeplat == "platinum") {
                 Directory.CreateDirectory(Path.GetDirectoryName(slot));
                 File.WriteAllBytes(slot, new byte[0]);
@@ -1356,18 +1432,30 @@ static class GameArt {
                 RunNativeplatTest("frames=2800," + view + stored + ",press=1450:start:4:40:4;1800:a:4:60:6", null, null);
             } else {
                 File.WriteAllText(script, DpNewGame.Replace(";", "\n"));
-                RunNativeplatTest("frames=15500," + view + ",press=@" + script, null, Twinleaf + ":" + TwinleafX + ":" + TwinleafZ + ":1");
+                DeleteStops(shot);
+                RunNativeplatTest("frames=" + (15500 + 400 * DpTowns.Length) + "," + view + ",press=@" + script, null, WarpList(Twinleaf + ":" + TwinleafX + ":" + TwinleafZ + ":1", DpTowns));
             }
-            if (!File.Exists(shot)) return "No picture came out.";
+            string home = dp && File.Exists(StopFile(shot, 1)) ? StopFile(shot, 1) : shot;
+            if (!File.Exists(home)) return "No picture came out.";
             // Around the town itself, which sits in the upper middle of this view, clear of the dark past the loaded map.
-            return SaveTown(g, shot, new RectangleF(0.1f, 0.06f, 0.66f, 0.9f));
+            string why = SaveTown(g, home, part);
+            if (why != null || dp) { if (why == null) SaveStops(g, shot, DpTowns, 2, part); return why; }
+            // Platinum's other towns: one new-game run of its lab's sweep (MAP -1 X Z lines), a picture per town.
+            DeleteStops(shot);
+            Directory.CreateDirectory(Path.GetDirectoryName(slot));
+            File.WriteAllBytes(slot, new byte[0]);
+            File.WriteAllLines(sweepFile, PtTowns.Select(t => { var f = t.Split(' '); return f[1] + " -1 " + f[2] + " " + f[3]; }).ToArray());
+            RunNativeplatTest("frames=" + (1500 + 700 * PtTowns.Length) + "," + view + ",storage=1,slot=" + slotName, "inline:map " + Twinleaf + " " + TwinleafX + " " + TwinleafZ + " 1;", null, sweepFile);
+            SaveStops(g, shot, PtTowns, 1, part);
+            return null;
         } catch (Exception x) { return x.Message; }
         finally {
-            foreach (var f in new[] { shot, script, romCopy, slot, slot + ".bak", slot + ".tmp", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
+            foreach (var f in new[] { shot, script, romCopy, slot, slot + ".bak", slot + ".tmp", sweepFile, sweepFile + ".out", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
+            DeleteStops(shot);
         }
     }
     // Whatever surrounds the picture is cut away: the window's edge, or the unloaded dark beyond a map.
-    static string SaveTown(GameEntry g, string shot, RectangleF? part = null) {
+    static string SaveTown(GameEntry g, string shot, RectangleF? part = null, string to = null) {
         Directory.CreateDirectory(Folder(g.Id));
         using (var pic = new Bitmap(shot)) {
             int left = pic.Width, top = pic.Height, right = 0, bottom = 0;
@@ -1381,7 +1469,7 @@ static class GameArt {
             quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
             var area = Rectangle.FromLTRB(left, top, Math.Min(pic.Width, right + 2), Math.Min(pic.Height, bottom + 2));
             if (part != null) area = new Rectangle((int)(pic.Width * part.Value.X), (int)(pic.Height * part.Value.Y), (int)(pic.Width * part.Value.Width), (int)(pic.Height * part.Value.Height));
-            using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(TownFile(g.Id), jpeg, quality);
+            using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(to ?? TownFile(g.Id), jpeg, quality);
         }
         return null;
     }
@@ -1390,7 +1478,7 @@ static class GameArt {
         if (g.Pc != null) return CapturePcTown(g);
         if (g.TownFrame > 0) return CaptureTownOpening(g);
         if (g.IsDs) return CaptureTownNativeplat(g);
-        string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png");
+        string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png"), many = Path.Combine(Config.State, "game-art", g.Id + "-towns");
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(shot));
             if (File.Exists(shot)) File.Delete(shot);
@@ -1409,13 +1497,27 @@ static class GameArt {
             psi.EnvironmentVariables["POKEPORT_VERSION"] = g.Gen1;
             psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TownArt.lua";
-            psi.EnvironmentVariables["NATIVEMONS_TOWN_ART"] = shot.Replace('\\', '/');
-            string said = LauncherForm.RunCapture(psi, 240, out code);
-            if (!File.Exists(shot)) return "No picture came out. " + said;
-            return SaveTown(g, shot);
+            // Every town and city, one picture each, the home town first (TownArt.lua prints them in order).
+            if (Directory.Exists(many)) Directory.Delete(many, true);
+            Directory.CreateDirectory(many);
+            psi.EnvironmentVariables["NATIVEMONS_TOWN_ART"] = many.Replace('\\', '/');
+            string said = LauncherForm.RunCapture(psi, 1500, out code);
+            var names = said.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("town art: ")).Select(l => l.Substring(10).Replace("MAP_", "")).ToList();
+            if (names.Count == 0 || !File.Exists(Path.Combine(many, names[0] + ".png"))) return "No picture came out. " + said;
+            string why = SaveTown(g, Path.Combine(many, names[0] + ".png"));
+            if (why != null) return why;
+            if (Directory.Exists(TownsDir(g.Id))) Directory.Delete(TownsDir(g.Id), true);
+            Directory.CreateDirectory(TownsDir(g.Id));
+            foreach (var n in names.Skip(1)) {
+                string png = Path.Combine(many, n + ".png");
+                if (File.Exists(png)) SaveTown(g, png, null, Path.Combine(TownsDir(g.Id), n + ".jpg"));
+            }
+            File.WriteAllText(Path.Combine(TownsDir(g.Id), "done.txt"), string.Join(Environment.NewLine, names));
+            return null;
         } catch (Exception x) { return x.Message; }
         finally {
             try { if (File.Exists(shot)) File.Delete(shot); } catch { }
+            try { if (Directory.Exists(many)) Directory.Delete(many, true); } catch { }
             LauncherForm.RemoveArtData(ArtIdentity);
         }
     }
@@ -1754,7 +1856,7 @@ static class GameArt {
     class Job { public GameEntry Game; public bool Town; }
     static List<Job> Missing(GameEntry first) {
         var jobs = Library.Games.Where(x => CanCapture(x) && !Has(x.Id) && !Failed(x, false)).Select(x => new Job { Game = x })
-            .Concat(Library.Games.Where(x => CanCaptureTown(x) && !HasTown(x.Id) && !Failed(x, true)).Select(x => new Job { Game = x, Town = true }));
+            .Concat(Library.Games.Where(x => CanCaptureTown(x) && (!HasTown(x.Id) || ((TownsByGen1(x) || TownsByNativeplat(x)) && !HasTowns(x))) && !Failed(x, true)).Select(x => new Job { Game = x, Town = true }));
         // The game the launcher opens on comes first, so its screen is ready even if the rest is stopped.
         return jobs.OrderBy(j => j.Game == first ? 0 : 1).ToList();
     }
@@ -2790,7 +2892,9 @@ class LauncherForm : Form {
             var d = dropping; if (d != null) d.Wait(18000);
         };
         // A device standing upright: no window frame, the window's own outline is the shell's.
-        var area = Screen.PrimaryScreen.WorkingArea;
+        // Tests can name a screen (NATIVEMONS_TEST_SCREEN=DISPLAY3) so the user keeps their own.
+        string testScreen = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_SCREEN");
+        var area = (Screen.AllScreens.FirstOrDefault(s => testScreen != null && s.DeviceName.EndsWith(testScreen, StringComparison.OrdinalIgnoreCase)) ?? Screen.PrimaryScreen).WorkingArea;
         int h = area.Height * 94 / 100;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual; ClientSize = new Size(h * 60 / 100, h);
