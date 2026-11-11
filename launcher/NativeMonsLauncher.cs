@@ -1320,8 +1320,8 @@ static class GameArt {
     // Every other town for the wallpapers: name, map header, world tile x, z (the decomps' map matrices and fly points).
     static readonly string[] DpTowns = {
         "SANDGEM_TOWN 418 176 848", "FLOAROMA_TOWN 426 176 640", "SOLACEON_TOWN 433 576 656", "CELESTIC_TOWN 442 465 528",
-        "JUBILIFE_CITY 3 160 768", "CANALAVE_CITY 33 51 736", "OREBURGH_CITY 45 293 762", "ETERNA_CITY 65 315 538",
-        "HEARTHOME_CITY 86 480 704", "PASTORIA_CITY 120 608 832", "VEILSTONE_CITY 132 704 608", "SUNYSHORE_CITY 150 864 763",
+        "JUBILIFE_CITY 3 184 776", "CANALAVE_CITY 33 51 736", "OREBURGH_CITY 45 293 762", "ETERNA_CITY 65 315 538",
+        "HEARTHOME_CITY 86 480 704", "PASTORIA_CITY 120 608 832", "VEILSTONE_CITY 132 704 608", "SUNYSHORE_CITY 150 860 785",
         "SNOWPOINT_CITY 165 368 224", "POKEMON_LEAGUE 172 848 576", "FIGHT_AREA 188 640 432", "SURVIVAL_AREA 450 656 339",
         "RESORT_AREA 457 816 463" };
     // Platinum rebuilt the Battle Zone and the League's front: those use the game's own fly points.
@@ -1348,7 +1348,7 @@ static class GameArt {
             if (File.Exists(png) && SaveTown(g, png, part, Path.Combine(TownsDir(g.Id), towns[i].Split(' ')[0] + ".jpg")) == null) made++;
         }
         // Written even when none came out (an older engine): tried once per engine build, not at every start.
-        File.WriteAllText(Path.Combine(TownsDir(g.Id), "done.txt"), "engine=" + EngineStamp(g) + Environment.NewLine + made + " towns");
+        File.WriteAllText(Path.Combine(TownsDir(g.Id), "done.txt"), "engine=" + EngineStamp(g) + Environment.NewLine + made + " towns" + Environment.NewLine + stopTimes);
         return made;
     }
     static string StopFile(string shot, int n) { return shot.Substring(0, shot.Length - 4) + "-stop-" + n.ToString("00") + ".png"; }
@@ -1356,19 +1356,35 @@ static class GameArt {
         string stem = Path.GetFileName(shot.Substring(0, shot.Length - 4)) + "-stop-";
         try { foreach (var f in Directory.GetFiles(Path.GetDirectoryName(shot), stem + "*.png")) File.Delete(f); } catch { }
     }
-    static int RunNativeplatTest(string spec, string lab, string warp, string sweep = null) {
+    // Seconds from the start of the last list run to each stop's picture, kept in done.txt for tuning.
+    static string stopTimes = "";
+    static int RunNativeplatTest(string spec, string lab, string warp, string sweep = null, string shot = null, int stops = 0) {
         var psi = new ProcessStartInfo(Config.Nativeplat) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(Config.Nativeplat), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
         psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
         psi.EnvironmentVariables["NP_AUTOTEST"] = spec;
         if (lab != null) { psi.EnvironmentVariables["PC_LAB"] = lab; psi.EnvironmentVariables["PC_LAB_AT"] = "300"; }
         if (warp != null) psi.EnvironmentVariables["PC_WARP"] = warp;
-        if (sweep != null) { psi.EnvironmentVariables["PC_SWEEP"] = sweep; psi.EnvironmentVariables["PC_SWEEP_OUT"] = sweep + ".out"; }
+        if (sweep != null) psi.EnvironmentVariables["PC_SWEEP"] = sweep;
         using (var p = Process.Start(psi)) { Watch(p);
             try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
+            var said = new Queue<string>();
+            DataReceivedEventHandler keep = (o, e) => { if (e.Data == null) return; lock (said) { said.Enqueue(e.Data); if (said.Count > 40) said.Dequeue(); } };
+            p.OutputDataReceived += keep; p.ErrorDataReceived += keep;
             p.BeginOutputReadLine(); p.BeginErrorReadLine();
-            if (!p.WaitForExit(1500000)) { try { p.Kill(); } catch { } return -1; }
-            return p.ExitCode;
+            // A list run ends once its last stop is pictured, not at its frame budget, which only guards a stuck run.
+            var clock = Stopwatch.StartNew();
+            int seen = 0;
+            var times = new List<string>();
+            while (!p.WaitForExit(500)) {
+                if (clock.Elapsed.TotalSeconds > 1500) { try { p.Kill(); } catch { } return -1; }
+                if (shot == null || stops == 0) continue;
+                while (seen < stops && File.Exists(StopFile(shot, seen + 1))) { seen++; times.Add(((int)clock.Elapsed.TotalSeconds).ToString()); }
+                if (seen == stops) { System.Threading.Thread.Sleep(1000); try { p.Kill(); } catch { } p.WaitForExit(5000); break; }
+            }
+            if (p.HasExited) p.WaitForExit();
+            if (shot != null) lock (said) stopTimes = "stops at s: " + string.Join(" ", times.ToArray()) + ", run " + (int)clock.Elapsed.TotalSeconds + " s" + Environment.NewLine + "last output:" + Environment.NewLine + string.Join(Environment.NewLine, said.ToArray());
+            return p.HasExited ? p.ExitCode : 0;
         }
     }
     // Generation 5's opening flies over the home town, at a frame set in games.json.
@@ -1399,7 +1415,7 @@ static class GameArt {
     static string CaptureTownNativeplat(GameEntry g) {
         string shot = Path.Combine(Config.State, "game-art", g.Id + "-town.png"), root = Path.Combine(Path.GetDirectoryName(Config.Nativeplat), "userdata");
         string slotName = "nativemons-wallpaper", slot = Path.Combine(root, "saves", g.TownCore ?? g.Nativeplat, slotName + ".sav"), script = shot + ".press";
-        string romCopy = shot + ".nds", core = g.TownCore ?? g.Nativeplat, sweepFile = shot + ".sweep";
+        string romCopy = shot + ".nds", core = g.TownCore ?? g.Nativeplat;
         string view = "size=1024x768,layout=top,zoom=1024,game=" + core + ",png=" + shot + ",rom=" + (g.TownCore != null ? romCopy : LauncherForm.NativeplatRomCopy(g));
         try {
             Directory.CreateDirectory(Path.GetDirectoryName(shot));
@@ -1412,7 +1428,7 @@ static class GameArt {
                 // New Bark first, then every other town; an engine without the list stops at New Bark.
                 var hgPart = new RectangleF(0.02f, 0.24f, 0.76f, 0.64f);
                 DeleteStops(shot);
-                RunNativeplatTest("frames=" + (18500 + 400 * HgTowns.Length) + "," + view + ",press=@" + script, null, WarpList("60:686:393:1", HgTowns));
+                RunNativeplatTest("frames=" + (18500 + 2000 * HgTowns.Length) + "," + view + ",press=@" + script, null, WarpList("60:686:393:1", HgTowns), null, shot, HgTowns.Length + 1);
                 string hgHome = File.Exists(StopFile(shot, 1)) ? StopFile(shot, 1) : shot;
                 if (!File.Exists(hgHome)) return "No picture came out.";
                 string hgWhy = SaveTown(g, hgHome, hgPart);
@@ -1433,7 +1449,7 @@ static class GameArt {
             } else {
                 File.WriteAllText(script, DpNewGame.Replace(";", "\n"));
                 DeleteStops(shot);
-                RunNativeplatTest("frames=" + (15500 + 400 * DpTowns.Length) + "," + view + ",press=@" + script, null, WarpList(Twinleaf + ":" + TwinleafX + ":" + TwinleafZ + ":1", DpTowns));
+                RunNativeplatTest("frames=" + (15500 + 2000 * DpTowns.Length) + "," + view + ",press=@" + script, null, WarpList(Twinleaf + ":" + TwinleafX + ":" + TwinleafZ + ":1", DpTowns), null, shot, DpTowns.Length + 1);
             }
             string home = dp && File.Exists(StopFile(shot, 1)) ? StopFile(shot, 1) : shot;
             if (!File.Exists(home)) return "No picture came out.";
@@ -1444,15 +1460,41 @@ static class GameArt {
             DeleteStops(shot);
             Directory.CreateDirectory(Path.GetDirectoryName(slot));
             File.WriteAllBytes(slot, new byte[0]);
-            File.WriteAllLines(sweepFile, PtTowns.Select(t => { var f = t.Split(' '); return f[1] + " -1 " + f[2] + " " + f[3]; }).ToArray());
-            RunNativeplatTest("frames=" + (1500 + 700 * PtTowns.Length) + "," + view + ",storage=1,slot=" + slotName, "inline:map " + Twinleaf + " " + TwinleafX + " " + TwinleafZ + " 1;", null, sweepFile);
+            // Inline: the game core has no file system to read a list from.
+            string sweep = "inline:" + string.Join(";", PtTowns.Select(t => { var f = t.Split(' '); return f[1] + " -1 " + f[2] + " " + f[3]; }).ToArray());
+            RunNativeplatTest("frames=" + (1500 + 2000 * PtTowns.Length) + "," + view + ",storage=1,slot=" + slotName, "inline:map " + Twinleaf + " " + TwinleafX + " " + TwinleafZ + " 1;", null, sweep, shot, PtTowns.Length);
             SaveStops(g, shot, PtTowns, 1, part);
             return null;
         } catch (Exception x) { return x.Message; }
         finally {
-            foreach (var f in new[] { shot, script, romCopy, slot, slot + ".bak", slot + ".tmp", sweepFile, sweepFile + ".out", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
+            foreach (var f in new[] { shot, script, romCopy, slot, slot + ".bak", slot + ".tmp", Path.Combine(root, "options-autotest.ini") }) try { if (File.Exists(f)) File.Delete(f); } catch { }
             DeleteStops(shot);
         }
+    }
+    // The largest rectangle of the picture with no black in it, on a grid of 8-pixel cells.
+    static Rectangle TrimDark(Bitmap pic, Rectangle a) {
+        const int cell = 8;
+        int cols = a.Width / cell, rows = a.Height / cell;
+        var heights = new int[cols];
+        int bestArea = 0; var best = a;
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                int d = 0;
+                for (int dy = 1; dy < cell; dy += 3) for (int dx = 1; dx < cell; dx += 3) { var px = pic.GetPixel(a.X + c * cell + dx, a.Y + r * cell + dy); if (px.R + px.G + px.B < 36) d++; }
+                heights[c] = d >= 5 ? 0 : heights[c] + 1;
+            }
+            // Largest rectangle under this row's histogram.
+            var stack = new Stack<int>();
+            for (int c = 0; c <= cols; c++) {
+                int h = c == cols ? 0 : heights[c];
+                while (stack.Count > 0 && heights[stack.Peek()] >= h) {
+                    int top = stack.Pop(), height = heights[top], left = stack.Count == 0 ? 0 : stack.Peek() + 1, width = c - left;
+                    if (height * width > bestArea) { bestArea = height * width; best = new Rectangle(a.X + left * cell, a.Y + (r - height + 1) * cell, width * cell, height * cell); }
+                }
+                stack.Push(c);
+            }
+        }
+        return best;
     }
     // Whatever surrounds the picture is cut away: the window's edge, or the unloaded dark beyond a map.
     static string SaveTown(GameEntry g, string shot, RectangleF? part = null, string to = null) {
@@ -1469,6 +1511,9 @@ static class GameArt {
             quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
             var area = Rectangle.FromLTRB(left, top, Math.Min(pic.Width, right + 2), Math.Min(pic.Height, bottom + 2));
             if (part != null) area = new Rectangle((int)(pic.Width * part.Value.X), (int)(pic.Height * part.Value.Y), (int)(pic.Width * part.Value.Width), (int)(pic.Height * part.Value.Height));
+            // A DS town's view reaches past the map blocks the game has loaded: its mostly black edges are cut away.
+            if (part != null && to != null) area = TrimDark(pic, area);
+            if (area.Width < 200 || area.Height < 160) return "The town came out mostly blank.";
             using (var cut = pic.Clone(area, pic.PixelFormat)) cut.Save(to ?? TownFile(g.Id), jpeg, quality);
         }
         return null;
