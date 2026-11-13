@@ -5,7 +5,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $loveVersion = '11.5'
-$fulldexRelease = 'fulldex-2026-11-08'
+$fulldexRelease = 'fulldex-2026-11-12'
 $platinumRelease = 'v0.2.1'
 $nativeplatRelease = 'windows-22adf5d0d'
 

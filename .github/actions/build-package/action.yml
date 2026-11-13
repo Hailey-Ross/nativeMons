@@ -22,7 +22,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         LOVE_VERSION: "11.5"
-        FULLDEX_RELEASE: "fulldex-2026-11-08"
+        FULLDEX_RELEASE: "fulldex-2026-11-12"
         PLATINUM_RELEASE: "v0.2.1"
         NATIVEPLAT_RELEASE: "windows-22adf5d0d"
       run: |
