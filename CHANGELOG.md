@@ -15,6 +15,10 @@ Each notable stable release raises the version, and its section here becomes its
 - Wallpapers: drawn scenes or pictures from your own play, asked once and changeable in Settings, plus a picture of your own for any game, picked from your PC or found online (fan art from wallhaven.cc, free-license art from Openverse). Sun and Moon now differ, and the Ultra versions glow in a complementary color.
 - The mouse only picks a row when it really moves, so a still cursor no longer takes the selection from the keys.
 - GBA games whose ROM path has an accent (such as "Pokémon - LeafGreen Version") start again: the player gets a plain path.
+- Platinum PC port v0.2.2: importing ROMs from other regions. Its saves were checked: Continue loads a DS save, and the save it writes passes the checks.
+- A game's Engine opens a list of its engines, with the one in use marked, instead of switching to the next one.
+- Volume, music and sound effects are sliders in Game options: left and right change them by 5.
+- The guide button (Xbox, or PlayStation's PS button) opens an overlay while a game runs: resume, its controls, or close the game.
 
 ## 0.0.5
 

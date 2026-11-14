@@ -531,6 +531,92 @@ static class Wallpaper {
         }
     }
 }
+// The guide button while a game runs: Xbox's through XInput's extended state, PlayStation's PS button straight from the
+// controller (DualShock 4 and DualSense, over USB or Bluetooth), which Windows doesn't pass on.
+static class GuideButton {
+    [DllImport("xinput1_4.dll", EntryPoint = "#100")] static extern int XInputGetStateEx(int i, out Native.XState s);
+    [DllImport("hid.dll")] static extern void HidD_GetHidGuid(out Guid g);
+    [DllImport("hid.dll")] static extern bool HidD_GetPreparsedData(Microsoft.Win32.SafeHandles.SafeFileHandle h, out IntPtr data);
+    [DllImport("hid.dll")] static extern bool HidD_FreePreparsedData(IntPtr data);
+    [DllImport("hid.dll")] static extern int HidP_GetCaps(IntPtr data, out Caps caps);
+    [StructLayout(LayoutKind.Sequential)] struct Caps { public ushort Usage, UsagePage, InputLength, OutputLength, FeatureLength; [MarshalAs(UnmanagedType.ByValArray, SizeConst = 27)] public ushort[] Rest; }
+    [DllImport("setupapi.dll")] static extern IntPtr SetupDiGetClassDevs(ref Guid g, IntPtr e, IntPtr p, int flags);
+    [DllImport("setupapi.dll")] static extern bool SetupDiEnumDeviceInterfaces(IntPtr set, IntPtr d, ref Guid g, int i, ref Iface f);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode)] static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr set, ref Iface f, IntPtr detail, int size, out int need, IntPtr info);
+    [DllImport("setupapi.dll")] static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
+    [StructLayout(LayoutKind.Sequential)] struct Iface { public int Size; public Guid Class; public int Flags; public IntPtr Reserved; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr sec, uint mode, uint flags, IntPtr template);
+    [DllImport("kernel32.dll")] static extern bool ReadFile(Microsoft.Win32.SafeHandles.SafeFileHandle h, byte[] buf, uint n, out uint read, IntPtr over);
+    static readonly string[] SonyPids = { "05c4", "09cc", "0ba0", "0ce6", "0df2" };
+    static volatile bool sony;
+    static readonly HashSet<string> reading = new HashSet<string>();
+    static bool started;
+    public static bool Down() {
+        if (sony) return true;
+        for (int i = 0; i < 4; i++) {
+            Native.XState s;
+            try { if (XInputGetStateEx(i, out s) == 0 && (s.Buttons & 0x0400) != 0) return true; } catch { return false; }
+        }
+        return false;
+    }
+    // A thread looks for PlayStation controllers every few seconds, and reads each one found on a thread of its own.
+    public static void Start() {
+        if (started) return;
+        started = true;
+        new System.Threading.Thread(delegate() {
+            while (true) {
+                try {
+                    foreach (var path in SonyPaths()) lock (reading) if (reading.Add(path)) { var p = path; new System.Threading.Thread(delegate() { Read(p); }) { IsBackground = true }.Start(); }
+                } catch { }
+                System.Threading.Thread.Sleep(5000);
+            }
+        }) { IsBackground = true, Priority = System.Threading.ThreadPriority.BelowNormal }.Start();
+    }
+    static List<string> SonyPaths() {
+        var found = new List<string>();
+        Guid hid; HidD_GetHidGuid(out hid);
+        IntPtr set = SetupDiGetClassDevs(ref hid, IntPtr.Zero, IntPtr.Zero, 0x12);
+        if (set == new IntPtr(-1)) return found;
+        try {
+            for (int i = 0; ; i++) {
+                var f = new Iface { Size = Marshal.SizeOf(typeof(Iface)) };
+                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref hid, i, ref f)) break;
+                int need; SetupDiGetDeviceInterfaceDetail(set, ref f, IntPtr.Zero, 0, out need, IntPtr.Zero);
+                IntPtr detail = Marshal.AllocHGlobal(need);
+                try {
+                    Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);
+                    if (!SetupDiGetDeviceInterfaceDetail(set, ref f, detail, need, out need, IntPtr.Zero)) continue;
+                    string path = Marshal.PtrToStringUni(new IntPtr(detail.ToInt64() + 4)), low = path.ToLowerInvariant();
+                    if (low.Contains("054c") && SonyPids.Any(pid => low.Contains("pid_" + pid) || low.Contains("pid&" + pid))) found.Add(path);
+                } finally { Marshal.FreeHGlobal(detail); }
+            }
+        } finally { SetupDiDestroyDeviceInfoList(set); }
+        return found;
+    }
+    static void Read(string path) {
+        try {
+            using (var h = CreateFile(path, 0x80000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
+                if (h.IsInvalid) return;
+                int length = 64; IntPtr data;
+                if (HidD_GetPreparsedData(h, out data)) { Caps c; if (HidP_GetCaps(data, out c) == 0x110000) length = c.InputLength; HidD_FreePreparsedData(data); }
+                bool dualSense = path.ToLowerInvariant().Contains("0ce6") || path.ToLowerInvariant().Contains("0df2");
+                var buf = new byte[Math.Max(16, length)];
+                uint n;
+                while (ReadFile(h, buf, (uint)buf.Length, out n, IntPtr.Zero) && n > 0) sony = PsDown(buf, (int)n, dualSense);
+            }
+        } catch { }
+        finally { sony = false; lock (reading) reading.Remove(path); }
+    }
+    // Where each controller's report keeps the PS button.
+    static bool PsDown(byte[] b, int n, bool dualSense) {
+        switch (b[0]) {
+            case 0x01: return dualSense && n >= 64 ? (b[10] & 1) != 0 : n > 7 && (b[7] & 1) != 0;   // USB; Bluetooth's short report
+            case 0x11: return n > 9 && (b[9] & 1) != 0;                                              // DualShock 4, Bluetooth
+            case 0x31: return n > 11 && (b[11] & 1) != 0;                                            // DualSense, Bluetooth
+        }
+        return false;
+    }
+}
 // Find a wallpaper: fan art from wallhaven.cc (safe for work only) or free-license art from Openverse, fetched when the
 // player asks. Nothing is bundled; a picture they pick is kept as that game's own, with where it came from.
 class WallResult { public string Title, Thumb, Full, Page, Credit; public volatile Bitmap Pic; public volatile bool Failed; }
@@ -3420,6 +3506,9 @@ class Item {
     public string TileHint = "";   // a short second line on its grid tile, to tell similar rows apart
     public int Fold;   // a section header: 1 open, 2 closed
     public Color Tint = Color.Empty; // its icon card's colour, when the icon's own won't do
+    public bool IsSlider; public int Slider = -1;   // a 0-100 slider row (-1: the engine's own, nothing to show)
+    public string SliderNote = "";                  // under its name: where the value comes from
+    public Action<int> Slide;                       // left and right: the step to take
     public Item(string text, string hint, bool on, Action run) { Text = text; Hint = hint ?? ""; On = on; Run = run; }
 }
 class Page {
@@ -3714,6 +3803,20 @@ class LauncherForm : Form {
                 Sprites.Wait(30);
             }
         }
+        // guide, guide-controls, guide-close: the guide overlay over a 1280x720 game screen.
+        if (screen.StartsWith("guide")) {
+            using (var bmp = new Bitmap(1280, 720)) using (var g = Graphics.FromImage(bmp)) {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias; g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                var th = current != null ? current.Theme : Theme.Default;
+                GuideOverlay.Draw(g, bmp.Size, current != null ? current.Title : "Pokemon Platinum", ControlsFor(current != null ? current.Engine() : "port"), Accent(th),
+                    screen == "guide-close" ? 2 : screen == "guide-controls" ? 1 : 0, screen == "guide-controls", screen == "guide-close");
+                bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            return;
+        }
+        // gameoptions[:<game>]: Game options, from Settings or for one game.
+        if (screen == "gameoptions") pages.Push(GameOptionsPage(previewId != null ? Library.Games.Find(g => g.Id == previewId) : null));
+        if (screen == "engines") { var eg = Library.Games.Find(g => g.Id == previewId); if (eg != null) { pages.Push(GamePage(eg)); pages.Push(EnginePage(eg)); } }
         if (screen == "roms" || screen == "gamepage") {
             var which = Library.Games.Find(g => g.Id == previewId);
             if (which != null) pages.Push(screen == "roms" ? RomsPage(which) : GamePage(which));
@@ -3915,6 +4018,7 @@ class LauncherForm : Form {
     void Start() {
         if (!Native.Quiet) Activate(); Native.Front(Handle);
         starting = true; startSince = DateTime.Now; startStage = "Looking for your games"; Invalidate();
+        GuideButton.Start();
         Task.Run(() => {
             string err = null;
             // Once: Gen1Recomp's saves come beside the launcher (EnsureGen1Data), before anything asks it about them.
@@ -4185,6 +4289,21 @@ class LauncherForm : Form {
             var o = option;
             if (g == null ? o.GameOnly : !GameOptions.Has(g, o)) continue;
             bool pick = o.Values.Length > 6;
+            // Volumes are sliders: left and right step by 5; pressing still opens the list, for Global and the engine's own.
+            if (o.Values.Length == 21 && o.Values[20] == "100") {
+                string stored = GameOptions.Stored(g, o), shown = stored == GameOptions.Follow ? GameOptions.Stored(null, o) : stored;
+                int at; bool own = !int.TryParse(shown, out at);
+                p.Items.Add(new Item(o.Name, "", true, delegate { pages.Push(OptionPickPage(g, o)); }) {
+                    Icon = o.Icon, IsSlider = true, Slider = own ? -1 : at,
+                    SliderNote = stored == GameOptions.Follow ? "Global" + (own ? ": the engine's own" : "") : own ? (g == null ? "Each game's own" : "This game's own") : "",
+                    Slide = delegate(int step) {
+                        int from = own ? 100 : at, to = Math.Max(0, Math.Min(100, from + step));
+                        GameOptions.Store(g, o, to.ToString());
+                        var was = pages.Pop(); var again = GameOptionsPage(g); again.Sel = was.Sel; again.TopRow = was.TopRow; again.ScrollRow = was.ScrollRow; pages.Push(again);
+                    },
+                    Info = (o.Note != null ? o.Note + " " : "") + "Left and right change it by 5. Press for Global or the engine's own." });
+                continue;
+            }
             p.Items.Add(new Item(o.Name + ": " + GameOptions.Describe(g, o, GameOptions.Stored(g, o)), pick ? "Press to choose." : "Press to change.", true, delegate {
                 if (pick) { pages.Push(OptionPickPage(g, o)); return; }
                 GameOptions.Store(g, o, GameOptions.Next(g, o));
@@ -5602,6 +5721,22 @@ class LauncherForm : Form {
         if (SaveSets.All(g).Count > 1) r.Add("Save: " + SaveSets.Name(g, SaveSets.Active(g)));
         return r.ToArray();
     }
+    // Every engine a game has, listed: the one in use is marked and selected; picking one goes back to the game.
+    Page EnginePage(GameEntry g) {
+        string engine = g.Engine();
+        var engines = g.Engines();
+        bool share = Shares(g) || g.Port != null || g.Nativeplat != null;
+        var p = new Page { Title = "Engine", Theme = g.Theme, FitBody = true, Body = "Choose what plays " + g.Title + "." + (share ? " They all share one save." : "") };
+        foreach (var one in engines) {
+            var e = one;
+            p.Items.Add(new Item(GameEntry.EngineShort(e) + (e == engine ? ": In use" : ""), "", true, delegate {
+                Config.Write("engine-" + g.Id + ".txt", e);
+                pages.Pop(); RebuildTop(delegate { return GamePage(g); }); ReplaceMain();
+            }) { Icon = '', Info = GameEntry.EngineName(e) + "." + (e == engine ? " In use now." : " Select to play " + g.Title + " with it.") });
+        }
+        p.Sel = Math.Max(0, engines.IndexOf(engine));
+        return p;
+    }
     Page GamePage(GameEntry g) {
         if (g.Pc != null) return PcGamePage(g);
         var p = new Page { Title = g.Title, Theme = g.Theme };
@@ -5610,12 +5745,8 @@ class LauncherForm : Form {
         play.Records = GameRecords(g);
         p.Items.Add(play);
         var engines = g.Engines();
-        if (engines.Count > 1) {
-            string other = engines[(engines.IndexOf(engine) + 1) % engines.Count];
-            p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine), "Switch to " + GameEntry.EngineName(other) + (Shares(g) || g.Port != null || g.Nativeplat != null ? ". They share one save." : "."), true, delegate {
-                Config.Write("engine-" + g.Id + ".txt", other); pages.Pop(); pages.Push(GamePage(g)); ReplaceMain();
-            }) { Icon = '' });
-        }
+        if (engines.Count > 1) p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine), "", true, delegate { pages.Push(EnginePage(g)); }) { Icon = '',
+            Info = g.Title + " plays with " + GameEntry.EngineName(engine) + ". Select to choose from its " + engines.Count + " engines." });
         if (g.Roms.Count > 1) p.Items.Add(new Item("ROM version: " + g.LabelOf(g.Chosen), "", true, delegate { pages.Push(RomsPage(g)); }) { Icon = '\uE8B7', Info = g.Roms.Count + " different dumps of this game were found. " + Path.GetFileName(g.Chosen.File) + " is in use." });
         if (g.IsHack) {
             var baseGame = Library.Games.Find(x => x.Id == g.BaseId);
@@ -8227,6 +8358,140 @@ class LauncherForm : Form {
         } catch { }
     }
 
+    // ---------- the guide overlay: the guide button while a game runs ----------
+    bool guideWas; GuideOverlay guideShown;
+    void GuideTick() {
+        bool down = GuideButton.Down();
+        if (down && !guideWas && job != null && jobIsGame && (guideShown == null || guideShown.IsDisposed)) OpenGuide();
+        guideWas = down;
+    }
+    void OpenGuide() {
+        try {
+            job.Refresh();
+            IntPtr w = job.MainWindowHandle;
+            if (w == IntPtr.Zero) return;
+            var g = current;
+            guideShown = new GuideOverlay(w, g != null ? g.Title : jobTitle, ControlsFor(g != null ? g.Engine() : ""), Accent(Cur()));
+            guideShown.Show();
+            Native.Front(guideShown.Handle);
+        } catch { }
+    }
+    static string ControlsFor(string engine) {
+        int i = engine == "fulldex" ? 0 : engine == "gen1" ? 1 : engine == "nativeplat" ? 2 : engine == "port" ? 3 : engine == "pc" ? 4 : -1;
+        return i >= 0 ? ControlSheets[i][2] : "This emulator's keys and buttons are in its own settings.";
+    }
+    // Over the game's screen: Resume, Controls and Close game, by controller, keys or mouse. The game keeps running.
+    internal sealed class GuideOverlay : Form {
+        readonly IntPtr game; readonly string title, controls; readonly Color accent;
+        int sel; bool showControls, confirmClose, ready; ushort prev; bool guidePrev = true;
+        readonly Timer tick = new Timer { Interval = 16 };
+        readonly List<RectangleF> rows = new List<RectangleF>();
+        public GuideOverlay(IntPtr game, string title, string controls, Color accent) {
+            this.game = game; this.title = title; this.controls = controls; this.accent = accent;
+            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
+            Bounds = Screen.FromHandle(game).Bounds; BackColor = Color.Black; Opacity = 0.94; DoubleBuffered = true; KeyPreview = true;
+            Text = "nativeMons";
+            tick.Tick += delegate { PollPad(); };
+            Load += delegate { tick.Start(); };
+            FormClosed += delegate { tick.Stop(); tick.Dispose(); };
+        }
+        void PollPad() {
+            ushort b = Pad(); bool gd = GuideButton.Down();
+            // Buttons still held from opening it don't count.
+            if (!ready) { prev = b; guidePrev = gd; ready = true; return; }
+            ushort pressed = (ushort)(b & ~prev); prev = b;
+            bool guide = gd && !guidePrev; guidePrev = gd;
+            if (guide) { Resume(); return; }
+            if ((pressed & UP) != 0) Do("up"); else if ((pressed & DOWN) != 0) Do("down");
+            else if ((pressed & A) != 0) Do("ok"); else if ((pressed & B) != 0) Do("back");
+        }
+        protected override bool ProcessCmdKey(ref Message m, Keys k) {
+            switch (k) {
+                case Keys.Up: Do("up"); return true;
+                case Keys.Down: Do("down"); return true;
+                case Keys.Enter: Do("ok"); return true;
+                case Keys.Escape: case Keys.Back: Do("back"); return true;
+            }
+            return base.ProcessCmdKey(ref m, k);
+        }
+        protected override void OnMouseMove(MouseEventArgs e) {
+            base.OnMouseMove(e);
+            for (int i = 0; i < rows.Count; i++) if (rows[i].Contains(e.Location) && sel != i) { sel = i; if (i != 2) confirmClose = false; Invalidate(); }
+        }
+        protected override void OnMouseClick(MouseEventArgs e) {
+            base.OnMouseClick(e);
+            if (e.Button == MouseButtons.Right) { Do("back"); return; }
+            for (int i = 0; i < rows.Count; i++) if (rows[i].Contains(e.Location)) { sel = i; Do("ok"); return; }
+        }
+        void Do(string a) {
+            if (a == "up") sel = (sel + 2) % 3;
+            else if (a == "down") sel = (sel + 1) % 3;
+            else if (a == "back") { if (showControls) showControls = false; else { Resume(); return; } }
+            else if (a == "ok") {
+                if (sel == 0) { Resume(); return; }
+                if (sel == 1) showControls = !showControls;
+                // Closing asks twice: anything after the last save in the game is lost.
+                if (sel == 2) { if (!confirmClose) confirmClose = true; else { Native.PostMessage(game, 0x10, IntPtr.Zero, IntPtr.Zero); Close(); return; } }
+            }
+            if (sel != 2) confirmClose = false;
+            Invalidate();
+        }
+        void Resume() { Close(); Native.Front(game); }
+        protected override void OnPaint(PaintEventArgs e) {
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            rows.Clear(); rows.AddRange(Draw(e.Graphics, ClientSize, title, controls, accent, sel, showControls, confirmClose));
+        }
+        public static List<RectangleF> Draw(Graphics g, Size size, string title, string controls, Color accent, int sel, bool showControls, bool confirmClose) {
+            var hits = new List<RectangleF>();
+            using (var b = new SolidBrush(Color.FromArgb(10, 12, 18))) g.FillRectangle(b, 0, 0, size.Width, size.Height);
+            float cw = Math.Min(640f, size.Width * 0.46f), pad = cw * 0.06f, rowH = cw * 0.12f, gap = cw * 0.02f, inner = cw - 2 * pad;
+            using (var f1 = new Font("Segoe UI Semibold", cw * 0.058f, GraphicsUnit.Pixel))
+            using (var f0 = new Font("Segoe UI", cw * 0.034f, GraphicsUnit.Pixel))
+            using (var f2 = new Font("Segoe UI Semibold", cw * 0.046f, GraphicsUnit.Pixel))
+            using (var f3 = new Font("Segoe UI", cw * 0.034f, GraphicsUnit.Pixel)) {
+                float titleH = f1.Height * 1.3f, labelH = f0.Height * 1.4f;
+                float textH = showControls ? g.MeasureString(controls, f3, (int)(inner - pad)).Height + pad : 0;
+                float hintH = f3.Height * 2.2f;
+                float ch = pad + labelH + titleH + gap * 2 + 3 * rowH + 2 * gap + (showControls ? textH + gap * 2 : 0) + (confirmClose ? f3.Height * 1.4f : 0) + hintH + pad * 0.5f;
+                var card = new RectangleF((size.Width - cw) / 2, Math.Max(pad, (size.Height - ch) / 2), cw, ch);
+                using (var path = Round(card, cw * 0.05f)) {
+                    using (var b = new SolidBrush(Color.FromArgb(30, 32, 40))) g.FillPath(b, path);
+                    using (var pen = new Pen(Color.FromArgb(120, accent), 2)) g.DrawPath(pen, path);
+                }
+                float y = card.Y + pad, x = card.X + pad;
+                using (var b = new SolidBrush(Color.FromArgb(150, 255, 255, 255))) g.DrawString("NATIVEMONS", f0, b, x, y);
+                y += labelH;
+                using (var b = new SolidBrush(Color.White)) g.DrawString(title, f1, b, new RectangleF(x, y, inner, titleH));
+                y += titleH + gap * 2;
+                string[] names = { "Resume", showControls ? "Hide controls" : "Controls", confirmClose ? "Press again to close" : "Close game" };
+                var mid = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+                for (int i = 0; i < 3; i++) {
+                    var r = new RectangleF(x, y, inner, rowH);
+                    bool on = i == sel;
+                    Color fill = on ? (i == 2 && confirmClose ? Color.FromArgb(214, 64, 52) : accent) : Color.FromArgb(44, 47, 58);
+                    using (var path = Round(r, rowH / 2)) using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+                    using (var b = new SolidBrush(Color.White)) g.DrawString(names[i], f2, b, new RectangleF(r.X + rowH * 0.45f, r.Y, r.Width - rowH * 0.9f, r.Height), mid);
+                    hits.Add(r);
+                    y += rowH + gap;
+                    if (i == 1 && showControls) {
+                        var box = new RectangleF(x, y, inner, textH);
+                        using (var path = Round(box, pad * 0.4f)) using (var b = new SolidBrush(Color.FromArgb(20, 22, 28))) g.FillPath(b, path);
+                        using (var b = new SolidBrush(Color.FromArgb(214, 218, 228))) g.DrawString(controls, f3, b, new RectangleF(box.X + pad / 2, box.Y + pad / 2, box.Width - pad, box.Height - pad));
+                        y += textH + gap;
+                    }
+                }
+                y += gap;
+                if (confirmClose) {
+                    using (var b = new SolidBrush(Color.FromArgb(255, 176, 166))) g.DrawString("Anything since your last save in the game is lost.", f3, b, new RectangleF(x, y, inner, f3.Height * 1.4f), new StringFormat { Alignment = StringAlignment.Center });
+                    y += f3.Height * 1.4f;
+                }
+                using (var b = new SolidBrush(Color.FromArgb(140, 255, 255, 255))) g.DrawString("A  choose      B  back      Guide  resume", f3, b, new RectangleF(x, y, inner, hintH), new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center });
+            }
+            return hits;
+        }
+    }
+
     // ---------- input ----------
     static ushort Pad() {
         for (int i = 0; i < 4; i++) {
@@ -8272,6 +8537,7 @@ class LauncherForm : Form {
         if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0) Invalidate();
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
+        GuideTick();
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
         if ((pressed & A) != 0) Act("ok", true);
@@ -8399,6 +8665,7 @@ class LauncherForm : Form {
             }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
             else if (p.Gallery != null) p.Sel = GalleryMove(p.Sel, a, p.Items.Count);
+            else if ((a == "left" || a == "right") && p.Items[p.Sel].Slide != null) p.Items[p.Sel].Slide(a == "right" ? 5 : -5);
             else if ((a == "left" && p.Items[p.Sel].Fold == 1) || (a == "right" && p.Items[p.Sel].Fold == 2)) p.Items[p.Sel].Run();
             else if ((a == "left" || a == "right") && p.Items[p.Sel].Fold != 0) { }
             else if (p.Jump > 0 && a == "left") p.Sel = Math.Max(0, p.Sel - p.Jump);
@@ -10572,6 +10839,7 @@ class LauncherForm : Form {
             }
         }
         float tx = ib.Right + pad, right = r.Right - pad;
+        if (it.IsSlider) { SliderRow(g, it, sel, r, tx, right, h, accent); if (line) using (var pen = new Pen(PhoneLine, 1)) g.DrawLine(pen, tx, r.Bottom - 1, r.Right, r.Bottom - 1); return; }
         string title = it.Text.Replace("Pokemon ", ""), value = null;
         int colon = title.IndexOf(": ");
         if (colon > 0) { value = title.Substring(colon + 2); title = title.Substring(0, colon); }
@@ -10594,6 +10862,28 @@ class LauncherForm : Form {
             Write(g, sub, smallFont, PhoneSub, new RectangleF(tx, ty + th1, tw, th2), StringAlignment.Near, StringAlignment.Center, false);
         } else Write(g, title, itemFont, ink, new RectangleF(tx, r.Y, tw, r.Height), StringAlignment.Near, StringAlignment.Center, false);
         if (line) using (var pen = new Pen(PhoneLine, 1)) g.DrawLine(pen, tx, r.Bottom - 1, r.Right, r.Bottom - 1);
+    }
+    // A slider row: its name (and where the value comes from) on the left, a track with a knob and the value on the right.
+    void SliderRow(Graphics g, Item it, bool sel, RectangleF r, float tx, float right, int h, Color accent) {
+        float valueW = g.MeasureString("100%", itemFont).Width + 4, trackW = (right - tx) * 0.46f, trackX = right - valueW - trackW - r.Height * 0.15f;
+        float nameW = trackX - tx - r.Height * 0.2f;
+        if (it.SliderNote != "") {
+            float th1 = itemFont.Height * 1.2f, th2 = smallFont.Height * 1.25f, ty = r.Y + (r.Height - th1 - th2) / 2;
+            Write(g, it.Text, itemFont, PhoneText, new RectangleF(tx, ty, nameW, th1), StringAlignment.Near, StringAlignment.Center, false);
+            Write(g, it.SliderNote, smallFont, PhoneSub, new RectangleF(tx, ty + th1, nameW, th2), StringAlignment.Near, StringAlignment.Center, false);
+        } else Write(g, it.Text, itemFont, PhoneText, new RectangleF(tx, r.Y, nameW, r.Height), StringAlignment.Near, StringAlignment.Center, false);
+        float cy = r.Y + r.Height / 2, th = Math.Max(4f, h * 0.007f), k = it.Slider < 0 ? 0 : it.Slider / 100f, knob = r.Height * 0.17f;
+        var track = new RectangleF(trackX, cy - th / 2, trackW, th);
+        using (var path = Round(track, th / 2)) using (var b = new SolidBrush(PhoneLine)) g.FillPath(b, path);
+        if (it.Slider >= 0) {
+            if (k > 0) using (var path = Round(new RectangleF(trackX, cy - th / 2, Math.Max(th, trackW * k), th), th / 2)) using (var b = new SolidBrush(accent)) g.FillPath(b, path);
+            float kx = trackX + trackW * k;
+            using (var b = new SolidBrush(Color.FromArgb(40, 0, 0, 0))) g.FillEllipse(b, kx - knob, cy - knob + knob * 0.15f, knob * 2, knob * 2);
+            using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, kx - knob, cy - knob, knob * 2, knob * 2);
+            using (var pen = new Pen(sel ? accent : Color.FromArgb(200, 200, 206), Math.Max(1.5f, h * 0.0025f))) g.DrawEllipse(pen, kx - knob, cy - knob, knob * 2, knob * 2);
+        }
+        string value = it.Slider < 0 ? "Own" : it.Slider == 0 ? "Off" : it.Slider + "%";
+        Write(g, value, itemFont, sel ? accent : PhoneSub, new RectangleF(right - valueW, r.Y, valueW, r.Height), StringAlignment.Far, StringAlignment.Center, false);
     }
     // A section header: an arrow pointing down when open, right when folded, then its name and how many it holds.
     void SectionRow(Graphics g, Item it, bool sel, RectangleF r, bool line, int h, Color accent) {
