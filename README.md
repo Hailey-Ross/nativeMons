@@ -5,8 +5,9 @@
 [![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases/latest)
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
-through its own engine, and the engines stay forks that keep pulling their upstream updates. It also installs and runs
-the fan game Pokémon Infinite Fusion, and any other self-contained PC game you add.
+through its own engine, and the engines stay forks that keep pulling their upstream updates. The 3DS games play through
+an optional 3DS emulator built from our own fork. It also installs and runs the fan game Pokémon Infinite Fusion, and
+any other self-contained PC game you add.
 
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
 GAME FREAK inc. or The Pokémon Company.
@@ -15,20 +16,22 @@ GAME FREAK inc. or The Pokémon Company.
 
 ## Supported games
 
-| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat |
-|---|---|:-:|:-:|:-:|:-:|
-| 1 | Red, Blue, Yellow | ✓ | | | |
-| 2 | Gold, Silver, Crystal | ✓ | | | |
-| 3 | Ruby, Sapphire | ✓ | | | |
-| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | | |
-| 4 | Diamond, Pearl | | | | ✓ |
-| 4 | HeartGold, SoulSilver | | ✓ | | |
-| 4 | Platinum | | ✓ | ✓ | ✓ |
-| 5 | Black, White, Black 2, White 2 | | ✓ | | |
+| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat | 3DS emulator |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| 1 | Red, Blue, Yellow | ✓ | | | | |
+| 2 | Gold, Silver, Crystal | ✓ | | | | |
+| 3 | Ruby, Sapphire | ✓ | | | | |
+| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | | | |
+| 4 | Diamond, Pearl | | | | ✓ | |
+| 4 | HeartGold, SoulSilver | | ✓ | | | |
+| 4 | Platinum | | ✓ | ✓ | ✓ | |
+| 5 | Black, White, Black 2, White 2 | | ✓ | | | |
+| 6 | X, Y, Omega Ruby, Alpha Sapphire | | | | | ✓ |
+| 7 | Sun, Moon, Ultra Sun, Ultra Moon | | | | | ✓ |
 
 Plus **[Pokémon Infinite Fusion](#pokémon-infinite-fusion)**, a PC fan game with no ROM, which the launcher installs and runs as its own program.
 
-**3DS games (Generations 6 and 7), optional and in progress on Dev:** X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon, played through a [3DS emulator](#3ds-games) you choose. Switch games aren't supported.
+**3DS games** play through an optional [3DS emulator](#3ds-games): AzaharPlus (recommended) or Azahar, installed from the launcher only if you want them. Switch games aren't supported.
 
 **Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them.
 
@@ -59,6 +62,8 @@ Gen1Recomp and nativeplat only run exact dumps, so they check each ROM's SHA-1. 
 
 Fulldex and the Platinum PC port don't check a hash: they go by the game code in the ROM's header, so most dumps of a supported game work.
 
+3DS games (`.3ds` or `.cci` cartridge dumps) are found by the title ID in their header, so any dump of a supported game works. Azahar needs a decrypted dump (GodMode9 on your 3DS makes one); AzaharPlus also opens encrypted ones.
+
 Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. nativeplat's own import screen refuses Platinum Rev 0, but nativeMons places the ROM itself. The two revisions share the same game files, differing only in a GTS screen, and Platinum runs nativeplat's Rev 1 code either way.
 
 ## Download and set up
@@ -74,7 +79,8 @@ Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. n
 3. **Open it.** In the new folder, double-click **NativeMonsLauncher**.
    - If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**. This appears because nativeMons is a free project without a paid signing certificate.
 4. **Add your games.** On the home screen, choose **ROMs**, then **Add a folder**, and pick the folder your game files are in. Or just drag that folder onto the nativeMons window.
-   - It finds Game Boy, Game Boy Color, Game Boy Advance and DS games (`.gb`, `.gbc`, `.gba`, `.nds`, and `.zip` files holding them). The file names don't matter: games are found by reading each ROM.
+   - It finds Game Boy, Game Boy Color, Game Boy Advance and DS games (`.gb`, `.gbc`, `.gba`, `.nds`, and `.zip` files holding them), and 3DS games (`.3ds`, `.cci`). The file names don't matter: games are found by reading each ROM.
+   - For 3DS games, also turn on **3DS games** under **Emu** and install an emulator there (see [3DS games](#3ds-games)).
 5. **Wait about a minute the first time.** nativeMons gets your games ready behind its loading screen. After that it opens in about a second.
 6. **Play.** Choose **Games**, pick a game, and press **Play**.
 
@@ -94,13 +100,13 @@ Before a stable release, `tests/stable-check/stable-check.ps1` tests a release p
 
 ## Using it
 
-The launcher is a phone-sized Pokédex that takes on each game's colours, and unfolds into a tablet for **Move**. Its home screen shows the game you played last: its intro plays in the **Play** tile, and one of its towns is the wallpaper, both captured from your own ROM on your PC. Below that are **Games**, **Collection**, **Mods**, **ROMs**, **Move**, **Settings** and **Exit**. The highlighted app's icon moves (the Games Poké Ball shakes as if mid-catch), and opening one grows its icon to fill the screen before the new screen's rows pop in. Closing the launcher powers it down like an old device: the screen shrinks to a dot, the lights flicker out, and it drops away off the bottom of the screen. Whenever the launcher is loading, a rainbow Poké Ball spins: on the splash at start, while it works on something such as preparing a game or backing up a save, while a game's title screen is being made in its Play tile, and while Pokémon pictures and Pokédex entries arrive.
+The launcher is a phone-sized Pokédex that takes on each game's colors, and unfolds into a tablet for **Move**. Its home screen shows the game you played last: its intro plays in the **Play** tile, and one of its towns is the wallpaper, both captured from your own ROM on your PC. Below that are **Games**, **Collection**, **Mods**, **ROMs**, **Emu** (the 3DS emulators), **Move**, **Settings** and **Exit**. The highlighted app's icon moves (the Games Poké Ball shakes as if mid-catch), and opening one grows its icon to fill the screen before the new screen's rows pop in. Closing the launcher powers it down like an old device: the screen shrinks to a dot, the lights flicker out, and it drops away off the bottom of the screen. Whenever the launcher is loading, a rainbow Poké Ball spins: on the splash at start, while it works on something such as preparing a game or backing up a save, while a game's title screen is being made in its Play tile, and while Pokémon pictures and Pokédex entries arrive.
 
 - **D-pad or left stick:** move. **A:** select. **B:** back.
 - **Keyboard:** arrow keys or WASD, Enter, Esc.
 - **Mouse:** hover to select, click to choose, right-click to go back. The D-pad and buttons on the device can be clicked too, and dragging its shell moves the window.
 
-**Dropping files on the window** works on any menu screen. A folder becomes a ROM folder. A `.gb`, `.gbc`, `.gba` or `.nds` ROM is used where it is, without its folder. A `.zip`'s ROMs are copied into `state\roms`, and the zip isn't changed. A `.sav` goes to Import saves. Afterwards a page says which game each ROM turned out to be. If a ROM isn't one nativeMons runs, the page says so and shows its SHA-1. **ROMs > Add a ROM file** does the same from a file picker. ROMs added on their own, and copies taken from a zip, are listed on the ROMs page, where you can remove them.
+**Dropping files on the window** works on any menu screen. A folder becomes a ROM folder. A `.gb`, `.gbc`, `.gba`, `.nds`, `.3ds` or `.cci` ROM is used where it is, without its folder. A `.zip`'s ROMs are copied into `state\roms`, and the zip isn't changed. A `.sav` goes to Import saves. Afterwards a page says which game each ROM turned out to be. If a ROM isn't one nativeMons runs, the page says so and shows its SHA-1. **ROMs > Add a ROM file** does the same from a file picker. ROMs added on their own, and copies taken from a zip, are listed on the ROMs page, where you can remove them.
 
 **Shortcuts:** `NativeMonsLauncher.exe --game <id>` starts a game and closes the launcher when the game ends. Ids are the lowercase names, such as `firered`, `crystal` or `black2`. Add `--slot <number or name>` to choose which of its saves to use, or `--launcher` to open the menu on that game's page instead. If the launcher is already open, it takes the request itself. `--play <id>` still works.
 
@@ -117,12 +123,13 @@ Either way the launcher backs up the save files before each session (newest 30, 
 
 ## 3DS games
 
-Optional, and still being built on Dev. Turn on **3DS games** under **Emu** on the home screen (or in Settings), then install AzaharPlus there (recommended: Azahar with extras, and it also opens encrypted dumps). Plain Azahar is there too, as a backup for when AzaharPlus misbehaves. Nothing downloads until you pick one. Each is built from our own fork of it and checked against a pinned checksum before it's put in place. It lives in `emulators\`, which a launcher update never touches, and removing it never touches your saves.
+X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon play through a 3DS emulator, which is optional. Turn on **3DS games** under **Emu** on the home screen (or in Settings), then install **AzaharPlus** there: the recommended one, Azahar with extras, which also opens encrypted dumps. Plain **Azahar** is there too, as a backup for when AzaharPlus misbehaves. Nothing downloads until you pick one. Each is built from our own fork of it, is checked against a pinned checksum before it's put in place, and lives in `emulators\`, which a launcher update never touches; removing one never touches your saves. When a newer build of your emulator is ready, Play asks whether to update first; **Do not remind me of this update** stops the question for that one update.
 
-- **ROMs:** decrypted `.3ds` or `.cci` dumps of your own cartridges (GodMode9 on your 3DS). They're played where they are, never copied. No games, keys or system files are included.
-- **Saves** belong to the launcher, in `state\3ds\saves`, not to an emulator: each play hands the save to the emulator you chose and takes it back after, with a backup before and after, so you can switch emulators. Save slots and their backups work as for the other games, and each slot keeps its own save states.
-- **Controllers:** Azahar gets every connected controller mapped, laid out as on a 3DS; change it in Azahar's own Controls.
+- **ROMs:** `.3ds` or `.cci` dumps of your own cartridges (GodMode9 on your 3DS), played where they are, never copied. No games, keys or system files are included, and our AzaharPlus build leaves out its downloader for Nintendo's system files.
+- **Saves** belong to the launcher, in `state\3ds\saves`, not to an emulator: each play hands the save to the emulator you chose and takes it back after, with a backup before and after, so you can switch emulators. A save that fails its check after a session is never kept as the one in use: it goes to the backups, and your last good save stays. Save slots work as for the other games, and each slot keeps its own save states.
+- **Controllers:** every connected controller is mapped, laid out as on a 3DS; change it in the emulator's own Controls. The launcher also sets Vulkan with background shader building (the first minutes of a game are smoother each time you play), your **Game options** volume, and no "are you sure" on close.
 - **My Collection** counts their Pokédex, and **Move Pokemon** moves box Pokémon in and out of them (Gen 6 and 7, the same rules as the other games). After a move, that save slot's save states go to its backups, so loading an old one can't undo the move. Export and import of 3DS saves aren't there yet.
+- **Looks:** each game has a drawn theme of its region (Kalos, Hoenn or Alola) in its own colors. Its wallpapers come from your own play: while a 3DS game runs with its window in front, the launcher keeps a few pictures of the top screen, leaving out menus and dark or repeated ones, and shows one of them at random. They stay on your PC.
 
 ## Other PC games
 
@@ -131,7 +138,7 @@ Optional, and still being built on Dev. Turn on **3DS games** under **Emu** on t
 - **From a .zip:** the launcher unpacks it into `games\` and keeps that copy. The zip stays as it is.
 - **Choose its program (.exe):** then run it where it is, or let the launcher copy the game's folder into `games\`.
 
-The launcher finds the game's program itself, leaving out installers and uninstallers, and asks which one when there's more than one. It's named after the program (rename it on its page) and gets a colour of its own.
+The launcher finds the game's program itself, leaving out installers and uninstallers, and asks which one when there's more than one. It's named after the program (rename it on its page) and gets a color of its own.
 
 These games go without the extras: no captured title screen or wallpaper, and no save handling, since the launcher can't know where such a game keeps its saves. The launcher starts the game, shows it on Discord, and waits for it to close; if the program only hands over to another one in its folder and quits, the session lasts until that one closes too. **Remove from the launcher** forgets it, and deletes the launcher's copy if it made one; your own folder and saves are never touched.
 
@@ -192,7 +199,9 @@ Pokémon pictures come from [pogo.hails.app](https://pogo.hails.app) ([hailsDotG
 
 Each engine has its own page of options (**Fulldex**, **Gen1Recomp**), stored where its menus keep them, so changes show up on both sides.
 
-**Game options** set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 yet.
+**Game options** set volume, music, sound effects, fullscreen, widescreen, smooth scaling, text speed, battle scene, battle style and sound for every game, and a game's own page can override them. Each one is left alone until you choose it, and it applies when a game starts. Volumes go in steps of 5%, chosen from a list; an engine with coarser steps uses the nearest one it has (Fulldex and the GBA player go in tens). Not every engine has every setting: the page says which. Options kept in the save aren't available on Generation 5 and later yet.
+
+**Emu** (also under **3DS games** in Settings) turns 3DS games on and installs, updates or removes the 3DS emulators.
 
 **Quick start** opens games straight at their title screen, past the copyright and intro. On Gen1Recomp (Game Boy, Game Boy Color and GBA games) and nativeplat (Diamond, Pearl, Platinum), the last game you played waits at its title out of sight, silent and paused, while the menu is open, so Play shows it at once; it's used only if its save and options are still what it read. DS games on Fulldex start from a snapshot of their title screen, made in the background from a copy of your save; it's used only while your save is exactly the one it was made from, and the game's clock is set to now. Either is thrown away and made again whenever something it loaded could have changed. Turn it off to start games with their intro. GBA games on Fulldex, the Platinum PC port and Infinite Fusion start as before.
 
@@ -218,11 +227,12 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 
 | Part | What it adds | Source |
 |---|---|---|
-| `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its licence requires of forks; our fork adds quick start and keeps the launcher's background jobs out of sight | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
+| `engines/gen1recomp` | Red to Crystal, Ruby, Sapphire, FireRed, LeafGreen, Emerald, and mods. Its own launcher is removed, as its license requires of forks; our fork adds quick start and keeps the launcher's background jobs out of sight | [bryanthaboi/gen1recomp](https://github.com/bryanthaboi/gen1recomp) |
 | `engines/fulldex` | DS and GBA games in widescreen at 60 fps. Packages use its published Windows build | [mamesj/pokemon-fulldex](https://github.com/mamesj/pokemon-fulldex), a fork of [ClickingMaster/ssrecomp](https://github.com/ClickingMaster/ssrecomp), using melonDS and mGBA |
 | GBA player (`engines/fulldex/gba-wide`) | GBA games and hacks: FireRed, LeafGreen and Emerald in widescreen by our patches; Ruby, Sapphire, other languages and the romhacks PokeDaisy's EXPAND knows (Unbound, Radical Red, Rocket Edition, ..., plus BugLime and Adventure Red, which we added) widened by EXPAND; everything else at 3:2. Ours, in our Fulldex fork; packages build it | [Hailey-Ross/pokemon-fulldex](https://github.com/Hailey-Ross/pokemon-fulldex/tree/hails-additions/gba-wide), after Pokemon GBA Widescreen by mamesj |
 | Platinum PC port | A native Platinum. Packages carry its published Windows release, program only | [cybervisi0n/pokeplatinum](https://github.com/cybervisi0n/pokeplatinum) |
 | nativeplat | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
+| 3DS emulators | X to Ultra Moon. Optional: installed from the launcher, from the Windows releases of our forks (not in the package) | [AzaharPlus/AzaharPlus](https://github.com/AzaharPlus/AzaharPlus) ([ours](https://github.com/Hailey-Ross/AzaharPlus)) and [azahar-emu/azahar](https://github.com/azahar-emu/azahar) ([ours](https://github.com/Hailey-Ross/azahar)) |
 | `tools/nds-patcher` | Decrypts `.nds` secure areas | [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) |
 | `tools/mon-bridge` | Reads saves and moves Pokémon | [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors |
 | `tools/openhome-bridge` | Converts Pokémon between games that have no real transfer | [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington, run on Node.js |
@@ -234,7 +244,7 @@ Pokémon Infinite Fusion isn't part of a package: you import it or add your own 
 
 Open `launcher\build.bat` to build everything into `build\nativeMons`, ready to run. It needs Git and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and downloads LÖVE, Fulldex's published Windows build, the Platinum PC port's and nativeplat's. With Node, Corepack and Rust too, it builds the OpenHome converter; without them, cross-generation moves use a simpler copy. To build somewhere else, put that folder's path in a `build-output.txt` at the repo root. Rebuilding keeps your settings, saves and `games\` folder.
 
-`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `infinitefusion`, `openhome`, `node`, `patcher`, `python` and `pythondir`. Version colours and finishes live in `launcher\games.json`.
+`launcher\build.bat <output folder>` builds only the launcher and needs only Windows, but it can't run games without the engines. Beside the exe, `state\nativemons.cfg` can set the paths `love`, `gen1recomp`, `fulldex`, `pokeplatinum`, `nativeplat`, `infinitefusion`, `openhome`, `node`, `patcher`, `python`, `pythondir` and `emulators` (where 3DS emulators are installed). Version colors and finishes live in `launcher\games.json`.
 
 ## Credits
 
@@ -263,5 +273,5 @@ Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or 
 
 ## License
 
-GPL-3.0-or-later (see `LICENSE`). Each engine keeps its own licence and credits, including the additional terms in
+GPL-3.0-or-later (see `LICENSE`). Each engine keeps its own license and credits, including the additional terms in
 Gen1Recomp's `LICENSE.MD`.
