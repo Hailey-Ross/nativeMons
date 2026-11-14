@@ -5,7 +5,7 @@ Each notable stable release raises the version, and its section here becomes its
 ## Next
 
 - Fulldex 12 November: the nickname question after a catch no longer covers your Pokémon, HeartGold and SoulSilver radio text stays in view in widescreen, DS music keeps its normal tempo and pitch during fast forward, and many smaller fixes.
-- Gen1Recomp: the latest upstream updates, including Crystal sound fixes and, in the Gen 3 games, trainer party and Continue fixes.
+- Gen1Recomp: the latest upstream updates, including Crystal sound fixes and, in the Gen 3 games, trainer party and Continue fixes, the Bag working in Battle Pyramid battles, the gift Castform holding its Mystic Water, and one controller press no longer skipping two menu options.
 - Wallpapers: a random town each start, from every town and city of the game, for every game family.
 - Closing the launcher also closes the games it started in the background, and nothing new starts while it closes.
 
