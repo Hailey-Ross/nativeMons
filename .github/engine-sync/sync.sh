@@ -47,9 +47,18 @@ sync_fork() {
     run git -C "$dir" push -q origin "$theirs:refs/heads/$liaison"
     CHANGES+=("$name: $count upstream commit(s) onto $liaison (${theirs:0:9})")
   fi
-  if [ "$additions" != 1 ]; then echo "$theirs" > "$WORK/$name.head"; return 0; fi
+  if [ "$additions" = 0 ]; then echo "$theirs" > "$WORK/$name.head"; return 0; fi
 
   git -C "$dir" checkout -q -B hails-additions origin/hails-additions
+  # additions=release: our work follows upstream's stable releases, not every commit (user, 2026-11-10).
+  local release=""
+  if [ "$additions" = release ]; then
+    release=$(gh api "repos/$upstream/releases/latest" --jq .tag_name 2>/dev/null || true)
+    if [ -z "$release" ]; then problem "$name has no upstream release" "\`gh api repos/$upstream/releases/latest\` returned nothing."; return 0; fi
+    git -C "$dir" fetch -q upstream "refs/tags/$release:refs/tags/$release"
+    theirs=$(git -C "$dir" rev-parse "$release^{commit}")
+    liaison=$release
+  fi
   if git -C "$dir" merge-base --is-ancestor "$theirs" HEAD; then git -C "$dir" rev-parse HEAD > "$WORK/$name.head"; return 0; fi
   git -C "$dir" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
     merge -q --no-ff --no-edit -m "Merge upstream $liaison (${theirs:0:9})" "$theirs" >/dev/null 2>&1 || true
@@ -75,9 +84,11 @@ sync_fork() {
     problem "$name merge failed" "Merging \`$liaison\` (${theirs:0:9}) into \`hails-additions\` in \`$fork\` didn't complete. Nothing was pushed."
     return 0
   fi
-  # A licence change, or a removed file back, always needs a person.
-  local touched; touched=$(git -C "$dir" diff --name-only origin/hails-additions HEAD)
-  if echo "$touched" | grep -qiE '(^|/)licen[cs]e'; then
+  # A licence change, or a removed file back, always needs a person. The emulators' own licence files only: their
+  # merges touch hundreds of licence headers and helper scripts.
+  local touched licences='(^|/)licen[cs]e'; touched=$(git -C "$dir" diff --name-only origin/hails-additions HEAD)
+  case $name in Azahar|AzaharPlus) licences='^(licen[cs]e|LICEN[CS]E)(\.txt|\.md)?$|^misc/licenses/' ;; esac
+  if echo "$touched" | grep -qiE "$licences"; then
     problem "$name licence changed upstream" "Upstream changed a licence file in \`$fork\`: re-read it (skill licence-and-credits) and merge by hand."$'\n```\n'"$(echo "$touched" | grep -iE 'licen[cs]e')"$'\n```'
     return 0
   fi
@@ -85,6 +96,16 @@ sync_fork() {
     if ! out=$(sh "$dir/tools/nativemons/check-removed.sh" 2>&1); then
       problem "$name merge brings back removed launcher files" "$out"
       return 0
+    fi
+  fi
+  # The emulators' build names the upstream release it's based on.
+  if [ -n "$release" ]; then
+    local wf=.github/workflows/nativemons-windows-release.yml
+    git -C "$dir" checkout -q HEAD -- "$wf"
+    sed -i "s/^\(      UPSTREAM_TAG: \).*/\1$release/" "$dir/$wf"
+    if ! git -C "$dir" diff --quiet -- "$wf"; then
+      git -C "$dir" add -- "$wf"
+      git -C "$dir" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q -m "Windows release: based on $release"
     fi
   fi
   run git -C "$dir" push -q origin HEAD:refs/heads/hails-additions
@@ -131,6 +152,30 @@ pin_gen4recomp() {
   CHANGES+=("gen4recomp pin: $now -> $tag")
 }
 
+# Azahar and AzaharPlus publish windows-<sha9> from each push to hails-additions. The launcher downloads it when a
+# player installs the emulator, checked against the sha256 pinned beside its tag in Emu3ds.All.
+pin_emulator() {
+  local name=$1 repo=$2 id=$3 asset=$4 head=$5 waited=0
+  [ -z "$head" ] && return 0
+  local cs=$REPO_DIR/launcher/NativeMonsLauncher.cs tag="windows-${head:0:9}" now old
+  now=$(grep -A1 "Id = \"$id\"," "$cs" | grep -oE 'windows-[0-9a-f]{9}' | head -1)
+  old=$(grep -A1 "Id = \"$id\"," "$cs" | grep -oP 'Sha256 = "\K[0-9a-f]{64}' | head -1)
+  [ "$now" = "$tag" ] && return 0
+  if [ "$DRY" != 1 ]; then
+    while ! gh release view "$tag" -R "$repo" >/dev/null 2>&1; do
+      local state; state=$(gh run list -R "$repo" --workflow nativemons-windows-release.yml --commit "$head" --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || true)
+      if [ -z "$state" ] && [ $waited -ge 300 ]; then say "$name: no build for ${head:0:9}, pin stays $now"; return 0; fi
+      case $state in "completed failure"*|"completed cancelled"*) problem "$name build failed" "The Windows release build of \`hails-additions\` ${head:0:9} in \`$repo\` didn't finish. The launcher's pin stays \`$now\`."; return 0 ;; esac
+      [ $waited -ge 7200 ] && { problem "$name build took too long" "No release \`$tag\` in \`$repo\` after 2 hours. The pin stays \`$now\`."; return 0; }
+      sleep 60; waited=$((waited + 60))
+    done
+  fi
+  local digest; digest=$(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[] | select(.name == \"$asset\") | .digest" 2>/dev/null | sed 's/^sha256://')
+  if [ -z "$digest" ] || [ -z "$now" ] || [ -z "$old" ]; then say "$name: release $tag or its pin not found, pin stays $now"; return 0; fi
+  sed -i "s/$now/$tag/; s/$old/$digest/" "$cs"
+  CHANGES+=("$name pin: $now -> $tag")
+}
+
 # Pinned releases: a re-upload under the same tag just needs a rebuild; a new tag needs testing by hand first.
 check_releases() {
   local pins=$REPO_DIR/.github/engine-sync/pins.txt
@@ -156,10 +201,15 @@ check_releases() {
 sync_fork Gen1Recomp "$OWNER/gen1recomp" bryanthaboi/gen1recomp dev 1
 sync_fork Fulldex "$OWNER/pokemon-fulldex" mamesj/pokemon-fulldex main 1
 sync_fork gen4recomp "$OWNER/gen4recomp" sohamb117/gen4recomp main 1
+# 3DS emulators: the liaison follows upstream every night; hails-additions only takes upstream's stable releases.
+sync_fork Azahar "$OWNER/azahar" azahar-emu/azahar master release
+sync_fork AzaharPlus "$OWNER/AzaharPlus" AzaharPlus/AzaharPlus AzaharPlus release
 
 pin_submodule Gen1Recomp engines/gen1recomp "$(cat "$WORK/Gen1Recomp.head")"
 pin_submodule Fulldex engines/fulldex "$(cat "$WORK/Fulldex.head")"
 pin_gen4recomp "$(cat "$WORK/gen4recomp.head")"
+pin_emulator Azahar "$OWNER/azahar" azahar azahar-nativemons-windows-x64.zip "$(cat "$WORK/Azahar.head")"
+pin_emulator AzaharPlus "$OWNER/AzaharPlus" azaharplus azaharplus-nativemons-windows-x64.zip "$(cat "$WORK/AzaharPlus.head")"
 check_releases
 
 if [ ${#CHANGES[@]} -eq 0 ]; then
@@ -169,7 +219,7 @@ else
   if [ "$DRY" = 1 ]; then
     git -C "$REPO_DIR" diff HEAD --stat
   else
-    git -C "$REPO_DIR" add launcher/build-all.ps1 .github/actions/build-package/action.yml .github/engine-sync/pins.txt
+    git -C "$REPO_DIR" add launcher/build-all.ps1 .github/actions/build-package/action.yml .github/engine-sync/pins.txt launcher/NativeMonsLauncher.cs
     # A fork's liaison branch can move with no pin change here: nothing to commit then.
     if ! git -C "$REPO_DIR" diff --cached --quiet; then
       msg="Engine auto-sync with upstream"$'\n\n'"$(printf -- '- %s\n' "${CHANGES[@]}")"
