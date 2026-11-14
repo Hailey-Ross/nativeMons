@@ -19,6 +19,7 @@ Each notable stable release raises the version, and its section here becomes its
 - A game's Engine opens a list of its engines, with the one in use marked, instead of switching to the next one.
 - Volume, music and sound effects are sliders in Game options: left and right change them by 5.
 - The guide button (Xbox, or PlayStation's PS button) opens an overlay while a game runs: resume, its controls, or close the game.
+- 3DS emulators control like Fulldex: a controller by the letters on its buttons, and Fulldex's keys as a second profile, "Keyboard (Fulldex keys)".
 
 ## 0.0.5
 

@@ -414,17 +414,26 @@ static class Ctr3dsSaves {
             if (i >= 0) lines[i] = pair[0] + "=" + pair[1]; else { lines.Insert(end, pair[0] + "=" + pair[1]); end++; }
         }
     }
-    // Any controller, by position on a 3DS (A right, B bottom): SDL's standard buttons and axes, for every pad connected.
+    // Any controller, as Fulldex has it: each button by the letter printed on it (user, 2026-11-14), SDL's standard
+    // buttons and axes, for every pad connected.
     static readonly string[][] PadMap = {
-        new[] { "button_a", "button:1" }, new[] { "button_b", "button:0" }, new[] { "button_x", "button:3" }, new[] { "button_y", "button:2" },
+        new[] { "button_a", "button:0" }, new[] { "button_b", "button:1" }, new[] { "button_x", "button:2" }, new[] { "button_y", "button:3" },
         new[] { "button_up", "button:11" }, new[] { "button_down", "button:12" }, new[] { "button_left", "button:13" }, new[] { "button_right", "button:14" },
         new[] { "button_l", "button:9" }, new[] { "button_r", "button:10" }, new[] { "button_start", "button:6" }, new[] { "button_select", "button:4" },
         new[] { "button_zl", "axis:4,direction:+,threshold:0.5" }, new[] { "button_zr", "axis:5,direction:+,threshold:0.5" }, new[] { "button_home", "button:5" },
         new[] { "circle_pad", "axis_x:0,axis_y:1,deadzone:0.1" }, new[] { "c_stick", "axis_x:2,axis_y:3,deadzone:0.1" },
     };
+    // Fulldex's keys, as a second profile: Azahar binds each button to one device, so the keyboard can't share the
+    // controller's profile. Qt key codes; anything left out keeps Azahar's own key.
+    static readonly string[][] KeyMap = {
+        new[] { "button_a", "88" }, new[] { "button_b", "90" }, new[] { "button_x", "83" }, new[] { "button_y", "65" },
+        new[] { "button_l", "81" }, new[] { "button_r", "87" }, new[] { "button_start", "16777220" }, new[] { "button_select", "16777219" },
+        new[] { "button_up", "16777235" }, new[] { "button_down", "16777237" }, new[] { "button_left", "16777234" }, new[] { "button_right", "16777236" },
+    };
     // Azahar's own settings the launcher keeps: no "are you sure" on close, the launcher's Discord status instead of its
     // own, and (once, so the player's own mapping stays) every controller mapped.
-    static void WriteCitraConfig(Emu3ds e, GameEntry g) {
+    internal static string ConfigFile(Emu3ds e) { return Path.Combine(EmuData(e), "config", "qt-config.ini"); }
+    internal static void WriteCitraConfig(Emu3ds e, GameEntry g) {
         string f = Path.Combine(EmuData(e), "config", "qt-config.ini");
         Directory.CreateDirectory(Path.GetDirectoryName(f));
         var lines = File.Exists(f) ? File.ReadAllLines(f).ToList() : new List<string>();
@@ -440,7 +449,8 @@ static class Ctr3dsSaves {
         }
         // Once per version of these defaults, so the player's own changes stay afterwards. Version 2 (2026-11-13): the
         // profile's own mapping type too (Azahar rewrites every binding to it on save), Vulkan and async shaders.
-        string marker = Path.Combine(EmuData(e), "nativemons-defaults-2.txt");
+        // Version 3 (2026-11-14): Fulldex's layout, the controller by printed letters and the keyboard as a second profile.
+        string marker = Path.Combine(EmuData(e), "nativemons-defaults-3.txt");
         if (!File.Exists(marker)) {
             foreach (var m in PadMap) {
                 var parts = ("api:controller,engine:sdl,guid:0,maptype:all,port:0," + m[1]).Split(',').OrderBy(x => x, StringComparer.Ordinal);
@@ -448,12 +458,16 @@ static class Ctr3dsSaves {
             }
             // 0 = all controllers (Settings::InputMappingType).
             SetIni(lines, "Controls", "profiles\\1\\input_maptype", "0");
-            if (!lines.Any(l => l.StartsWith("profiles\\size="))) SetIni(lines, "Controls", "profiles\\size", "1");
+            SetIni(lines, "Controls", "profiles\\1\\name", "Controller (Fulldex layout)");
+            foreach (var k in KeyMap) SetIni(lines, "Controls", "profiles\\2\\" + k[0], "\"code:" + k[1] + ",engine:keyboard\"");
+            SetIni(lines, "Controls", "profiles\\2\\name", "Keyboard (Fulldex keys)");
+            var size = lines.FirstOrDefault(l => l.StartsWith("profiles\\size="));
+            int have; if (size == null || !int.TryParse(size.Substring(14), out have) || have < 2) SetIni(lines, "Controls", "profiles\\size", "2");
             // Vulkan (2), and shaders compiled in the background so a new effect doesn't freeze the game.
             SetIni(lines, "Renderer", "graphics_api", "2");
             SetIni(lines, "Renderer", "async_shader_compilation", "true");
-            File.WriteAllText(marker, "Controller mapping, Vulkan and async shaders written by nativeMons. Delete this file to have them written again.");
-            try { File.Delete(Path.Combine(EmuData(e), "nativemons-controls.txt")); } catch { }
+            File.WriteAllText(marker, "Fulldex's controller and keyboard layouts, Vulkan and async shaders written by nativeMons. Delete this file to have them written again.");
+            foreach (var old in new[] { "nativemons-controls.txt", "nativemons-defaults-2.txt" }) try { File.Delete(Path.Combine(EmuData(e), old)); } catch { }
         }
         File.WriteAllLines(f, lines.ToArray());
     }
@@ -8378,7 +8392,7 @@ class LauncherForm : Form {
     }
     static string ControlsFor(string engine) {
         int i = engine == "fulldex" ? 0 : engine == "gen1" ? 1 : engine == "nativeplat" ? 2 : engine == "port" ? 3 : engine == "pc" ? 4 : -1;
-        return i >= 0 ? ControlSheets[i][2] : "This emulator's keys and buttons are in its own settings.";
+        return i >= 0 ? ControlSheets[i][2] : "A controller works as on Fulldex: each button by the letter on it.\n\nFor Fulldex's keys (arrows, X, Z, S, A, Q, W, Enter, Backspace), pick the profile \"Keyboard (Fulldex keys)\" in the emulator's Controls.";
     }
     // Over the game's screen: Resume, Controls and Close game, by controller, keys or mouse. The game keeps running.
     internal sealed class GuideOverlay : Form {
@@ -10998,6 +11012,15 @@ static class NativeMonsLauncher {
                 using (var b = new Bitmap(f)) { ulong p; string why; var pic = PlaySnaps.Judge(b, last, out p, out why); if (pic != null) { last = p; pic.Dispose(); } lines.Add(Path.GetFileName(f) + ": " + why); }
             }
             File.WriteAllLines(argv[1], lines.ToArray());
+            return;
+        }
+        // --3ds-config <result> <emulator> <game>: the emulator settings the launcher writes, with no emulator run.
+        if (argv.Length == 4 && argv[0] == "--3ds-config") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var e = Emu3ds.All.FirstOrDefault(x => x.Id == argv[2]); var g = Library.Games.Find(x => x.Id == argv[3]);
+            if (e == null || g == null || g.Ctr == null) { File.WriteAllText(argv[1], "no such emulator or 3DS game"); return; }
+            Ctr3dsSaves.WriteCitraConfig(e, g);
+            File.Copy(Ctr3dsSaves.ConfigFile(e), argv[1], true);
             return;
         }
         // --3ds-save <result> <game> <emulator> prepare|collect: the save hand-off around a session, with no emulator run.
