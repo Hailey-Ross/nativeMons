@@ -201,15 +201,17 @@ class Emu3ds {
     public string Dir { get { return Path.Combine(Config.Emulators, Id); } }
     public string ExePath { get { return Path.Combine(Dir, Exe); } }
     public bool Installed { get { return File.Exists(ExePath); } }
-    // Exe names are upstream's; confirm against our first release of each.
+    public bool Recommended;
+    // In order of preference: the first one installed plays 3DS games unless the player picks another.
+    // AzaharPlus is the recommended one, Azahar the backup when it misbehaves (user, 2026-11-14).
     public static readonly Emu3ds[] All = {
-        new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
-            Tag = "windows-a6aa2ad2e", Sha256 = "f011f57f9c37a1f7abfc6981e8806dd1129321b3875bea71299c2c1e0de19f83", Size = "about 44 MB",
-            Notes = "The best pick for Pokemon: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well." },
         // Azahar with extras: opens encrypted dumps too, built-in cheats. Its system-file downloader is off in our build.
         new Emu3ds { Id = "azaharplus", Name = "AzaharPlus-modified (nativeMons)", Short = "AzaharPlus", Repo = "Hailey-Ross/AzaharPlus", Upstream = "AzaharPlus/AzaharPlus", Exe = "azahar.exe", Asset = "azaharplus-nativemons-windows-x64.zip",
-            Tag = "windows-6113dd2fe", Sha256 = "b405a9e76936358666643f8d7de1d5800eef57fe4a8207d13015410a74cbdd8e", Size = "about 73 MB",
-            Notes = "Azahar with extras: it also opens encrypted dumps, and has built-in cheats. Plays the same as Azahar." },
+            Tag = "windows-3f15f3f40", Sha256 = "70dd3c2ec33bc71974ae421f76cf0d1fcd06db1db9a5670641e5be830d06a410", Size = "about 73 MB", Recommended = true,
+            Notes = "The one to use: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well. Based on Azahar, with extras: it also opens encrypted dumps, and has built-in cheats." },
+        new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
+            Tag = "windows-a6aa2ad2e", Sha256 = "f011f57f9c37a1f7abfc6981e8806dd1129321b3875bea71299c2c1e0de19f83", Size = "about 44 MB",
+            Notes = "The backup: plain Azahar, for when AzaharPlus misbehaves. Needs decrypted dumps." },
     };
     public static bool Enabled { get { return Config.Read("3ds-games.txt", "off") == "on"; } set { Config.Write("3ds-games.txt", value ? "on" : "off"); } }
     // Picked by the player, else the first one installed.
@@ -348,7 +350,7 @@ static class Ctr3dsSaves {
         else if (Directory.Exists(link)) Directory.Move(link, link + ".kept-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         MakeLink(link, EmuData(e));
         File.WriteAllText(SessionFile(e), g.Id);
-        WriteCitraConfig(e);
+        WriteCitraConfig(e, g);
         if (File.Exists(Main(g))) SaveGuard.Backup(g, Main(g), "before-play");
         string save = EmuSave(e, g);
         if (Directory.Exists(Path.Combine(Master(g), "data"))) {
@@ -417,12 +419,20 @@ static class Ctr3dsSaves {
     };
     // Azahar's own settings the launcher keeps: no "are you sure" on close, the launcher's Discord status instead of its
     // own, and (once, so the player's own mapping stays) every controller mapped.
-    static void WriteCitraConfig(Emu3ds e) {
+    static void WriteCitraConfig(Emu3ds e, GameEntry g) {
         string f = Path.Combine(EmuData(e), "config", "qt-config.ini");
         Directory.CreateDirectory(Path.GetDirectoryName(f));
         var lines = File.Exists(f) ? File.ReadAllLines(f).ToList() : new List<string>();
         SetIni(lines, "UI", "confirmClose", "false");
         SetIni(lines, "UI", "enable_discord_presence", "false");
+        // The launcher's Volume (Game options, for this game or all), every launch; unset = the emulator's own.
+        string vol;
+        if (GameOptions.ForGame(g).TryGetValue("vol", out vol)) {
+            SetIni(lines, "Audio", "volume", (int.Parse(vol) / 100.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+            // A volume given to this game inside the emulator would win over the launcher's: back to its global one.
+            string custom = Path.Combine(EmuData(e), "config", "custom", g.Ctr.ToUpperInvariant() + ".ini");
+            try { if (File.Exists(custom)) File.WriteAllText(custom, File.ReadAllText(custom).Replace("volume\\use_global=false", "volume\\use_global=true")); } catch { }
+        }
         // Once per version of these defaults, so the player's own changes stay afterwards. Version 2 (2026-11-13): the
         // profile's own mapping type too (Azahar rewrites every binding to it on save), Vulkan and async shaders.
         string marker = Path.Combine(EmuData(e), "nativemons-defaults-2.txt");
@@ -2240,8 +2250,8 @@ static class GameOptions {
         new GameOption { Key = "button", Name = "Button mode", Icon = '\uE7FC', Values = new[] { "normal", "alt", "lequalsa" }, Labels = new[] { "Normal", "Alternate (LR or Start = X)", "L = A" }, GameOnly = true, FirstGen = 3 },
         new GameOption { Key = "frame", Name = "Text frame", Icon = '\uE8A9', Values = Enumerable.Range(1, 20).Select(i => i.ToString()).ToArray(), Labels = Enumerable.Range(1, 20).Select(i => "Type " + i).ToArray(), GameOnly = true, FirstGen = 3 },
         new GameOption { Key = "vol", Name = "Volume", Icon = '\uE767', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "Overall volume, on every engine." },
-        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex and the Platinum PC port only have the overall volume." },
-        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex and the Platinum PC port only have the overall volume." },
+        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
+        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
         new GameOption { Key = "full", Name = "Fullscreen", Icon = '\uE740', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "On every engine." },
         new GameOption { Key = "wide", Name = "Widescreen", Icon = '\uE799', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "The world on Fulldex and nativeplat, and battles on Gen1Recomp. The Platinum PC port doesn't have it." },
         new GameOption { Key = "smooth", Name = "Smooth scaling", Icon = '\uE91B', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "Softens the picture on Fulldex and nativeplat, instead of sharp pixels." },
@@ -3799,7 +3809,7 @@ class LauncherForm : Form {
         foreach (var emu in Emu3ds.All) {
             var e = emu;
             string state = e.Installed ? (chosen == e ? "Plays your 3DS games" : "Installed") : "Not installed";
-            p.Items.Add(new Item(e.Short, state + ".", true, delegate { pages.Push(EmuDetailPage(e)); }) { Icon = '', Tint = AppColors[App("Emu")], TileHint = state, Info = e.Notes,
+            p.Items.Add(new Item(e.Short + (e.Recommended ? " (recommended)" : " (backup)"), state + ".", true, delegate { pages.Push(EmuDetailPage(e)); }) { Icon = '', Tint = AppColors[App("Emu")], TileHint = state, Info = e.Notes,
                 Records = new[] { "Name: " + e.Name, "Based on: github.com/" + e.Upstream, "Built at: github.com/" + e.Repo } });
         }
         return p;
