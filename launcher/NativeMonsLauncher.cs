@@ -333,9 +333,10 @@ static class Ctr3dsSaves {
             string f = SessionFile(e);
             if (!File.Exists(f)) return null;
             var g = Library.Games.Find(x => x.Id == File.ReadAllText(f).Trim() && x.Ctr != null && x.CtrRom != null);
-            string why = g != null ? Collect(e, g) : null;
-            if (why == null) File.Delete(f);
-            return why;
+            if (g == null) { File.Delete(f); return null; }
+            // Collect removes the marker once done, a refused damaged save included; only a real failure keeps it.
+            string why = Collect(e, g);
+            return File.Exists(f) ? why : null;
         } catch (Exception x) { return x.Message; }
     }
     public static void Prepare(Emu3ds e, GameEntry g) {
@@ -368,9 +369,18 @@ static class Ctr3dsSaves {
     }
     // After play: take the save and states back, then unlink. Null when done, or why the save stayed where it was.
     public static string Collect(Emu3ds e, GameEntry g) {
+        string note = null;
         try {
-            string save = EmuSave(e, g);
-            if (Directory.Exists(save) && File.Exists(Path.Combine(save, "main"))) {
+            string save = EmuSave(e, g), main = Path.Combine(save, "main");
+            // A save that fails the check never replaces the one in use (user, 2026-11-14): it goes to the backups,
+            // marked damaged, and the emulator's copy is removed so the next play gets the last good save.
+            string bad = File.Exists(main) ? SaveGuard.Problem(g, main) : null;
+            if (bad != null) {
+                try { SaveGuard.Backup(g, main, "from-" + e.Id); } catch { }
+                Directory.Delete(save, true);
+                if (EmuMeta(e, g) != null && File.Exists(EmuMeta(e, g))) File.Delete(EmuMeta(e, g));
+                note = "The save " + e.Short + " wrote this time failed its check (" + bad + "), so it wasn't kept: your previous save is still the one in use. The damaged one is in this game's backups.";
+            } else if (Directory.Exists(save) && File.Exists(main)) {
                 Mirror(save, Path.Combine(Master(g), "data"));
                 if (EmuMeta(e, g) != null && File.Exists(EmuMeta(e, g))) SaveGuard.WriteInPlace(EmuMeta(e, g), Path.Combine(Master(g), "metadata"));
             }
@@ -382,7 +392,7 @@ static class Ctr3dsSaves {
                 foreach (var f in StatesOf(states, g)) SaveGuard.WriteInPlace(f, Path.Combine(kept, Path.GetFileName(f)));
             }
             try { File.Delete(SessionFile(e)); } catch { }
-            return null;
+            return note;
         } catch (Exception x) { return "Your save stayed in the emulator's folder and is collected next time: " + x.Message; }
         finally { try { Unlink(e); } catch { } }
     }
@@ -3341,6 +3351,11 @@ class LauncherForm : Form {
         if (screen.StartsWith("emuinstalled-")) {
             var f = screen.Split('-'); var e = Emu3ds.All.FirstOrDefault(x => x.Id == f[1]);
             if (e != null) { pages.Push(EmuPage()); pages.Push(EmuDetailPage(e)); emuInstallName = e.Short; emuInstallAt = (float)clock.Elapsed.TotalSeconds - float.Parse(f[2], System.Globalization.CultureInfo.InvariantCulture); }
+        }
+        // emuask-<id>[-quiet]: the update question before a 3DS game starts.
+        if (screen.StartsWith("emuask-")) {
+            var f = screen.Split('-'); var e = Emu3ds.All.FirstOrDefault(x => x.Id == f[1]); var g = Library.Games.Find(x => x.Ctr != null);
+            if (e != null && g != null) pages.Push(EmuUpdateAskPage(e, g, f.Length > 2));
         }
         if (screen.StartsWith("emu-")) { var e = Emu3ds.All.FirstOrDefault(x => x.Id == screen.Substring(4)); if (e != null) pages.Push(EmuDetailPage(e)); }
         if (screen == "controls") pages.Push(ControlsPage());
@@ -6600,6 +6615,34 @@ class LauncherForm : Form {
         var e = Emu3ds.Default;
         if (e == null) return;
         if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is already open. Close it, then press Play.", null); return; }
+        // An update is asked about before every play, until the player stops reminders for that one update (user, 2026-11-14).
+        if (e.UpdateReady && Config.Read(SkipFile(e), "") != e.Tag) { pages.Push(EmuUpdateAskPage(e, g, false)); return; }
+        Play3dsNow(g, e);
+    }
+    static string SkipFile(Emu3ds e) { return "emu-update-skipped-" + e.Id + ".txt"; }
+    Page EmuUpdateAskPage(Emu3ds e, GameEntry g, bool quiet) {
+        var p = new Page { Title = "Update " + e.Short + "?", Theme = g.Theme, FitBody = true };
+        p.Body = "A newer nativeMons build of " + e.Short + " is ready: " + e.Tag + " (you have " + (e.InstalledTag ?? "an older one") + "). It downloads " + e.Size + ". Your saves aren't touched either way.";
+        p.Items.Add(new Item("Update, then play", "", true, delegate {
+            pages.Pop();
+            string problem = null;
+            Busy("Updating " + e.Short, delegate { problem = Emu3ds.Install(e); return null; }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Not updated", (x ?? problem) + "\n\n" + e.Short + " stays as it was. Press Play again to play with it.", null); return; }
+                Play3dsNow(g, e);
+            });
+        }) { Icon = '', Info = "Gets the new build, checks it, puts it in place, then starts " + g.Title + "." });
+        p.Items.Add(new Item("Play without updating", "", true, delegate {
+            if (quiet) Config.Write(SkipFile(e), e.Tag);
+            pages.Pop();
+            Play3dsNow(g, e);
+        }) { Icon = '', Info = quiet ? "You won't be asked about this update again. A later one asks again." : "You'll be asked again next time." });
+        p.Items.Add(new Item("Do not remind me of this update: " + (quiet ? "On" : "Off"), "", true, delegate {
+            int sel = pages.Peek().Sel;
+            pages.Pop(); var again = EmuUpdateAskPage(e, g, !quiet); again.Sel = sel; pages.Push(again);
+        }) { Icon = '', Info = "Turn on, then choose Play without updating, to stop being asked about " + e.Tag + ". You can still update from Emu at any time." });
+        return p;
+    }
+    void Play3dsNow(GameEntry g, Emu3ds e) {
         string problem = null;
         Busy("Backing up your save", delegate {
             try { Ctr3dsSaves.Prepare(e, g); } catch (Exception x) { problem = x.Message; try { Ctr3dsSaves.Unlink(e); } catch { } }
