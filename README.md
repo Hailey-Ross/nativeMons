@@ -117,7 +117,7 @@ Either way the launcher backs up the save files before each session (newest 30, 
 
 ## 3DS games
 
-Optional, and still being built on Dev. Turn on **3DS games** under **Emu** on the home screen (or in Settings), then install Azahar (the best for Pokémon) or AzaharPlus (Azahar with extras: it also opens encrypted dumps) there. Nothing downloads until you pick one. Each is built from our own fork of it and checked against a pinned checksum before it's put in place. It lives in `emulators\`, which a launcher update never touches, and removing it never touches your saves.
+Optional, and still being built on Dev. Turn on **3DS games** under **Emu** on the home screen (or in Settings), then install AzaharPlus there (recommended: Azahar with extras, and it also opens encrypted dumps). Plain Azahar is there too, as a backup for when AzaharPlus misbehaves. Nothing downloads until you pick one. Each is built from our own fork of it and checked against a pinned checksum before it's put in place. It lives in `emulators\`, which a launcher update never touches, and removing it never touches your saves.
 
 - **ROMs:** decrypted `.3ds` or `.cci` dumps of your own cartridges (GodMode9 on your 3DS). They're played where they are, never copied. No games, keys or system files are included.
 - **Saves** belong to the launcher, in `state\3ds\saves`, not to an emulator: each play hands the save to the emulator you chose and takes it back after, with a backup before and after, so you can switch emulators. Save slots and their backups work as for the other games, and each slot keeps its own save states.
