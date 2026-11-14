@@ -32,6 +32,11 @@ static class Native {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct Point2 { public int X, Y; }
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point2 p);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetShortPathName(string path, StringBuilder shortPath, uint size);
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
@@ -461,6 +466,85 @@ static class Ctr3dsSaves {
         string to = Path.Combine(SaveGuard.BackupFolder(g), "states-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + reason);
         Directory.CreateDirectory(to);
         foreach (var f in states) { SaveGuard.WriteInPlace(f, Path.Combine(to, Path.GetFileName(f))); File.Delete(f); }
+    }
+}
+
+// A 3DS game's wallpapers come from the player's own play (user, 2026-11-14): while it runs and its window is in front,
+// the emulator's top screen is pictured now and then; dark, flat (menus, fades) and repeated pictures are left out.
+static class PlaySnaps {
+    const int Keep = 24;
+    public static void Watch(Process emulator, GameEntry g) {
+        var t = new System.Threading.Thread(delegate() {
+            try { Native.SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch { }   // physical pixels, as the screen has them
+            ulong last = 0;
+            try {
+                if (emulator.WaitForExit(60000)) return;
+                do {
+                    try { var kept = Snap(emulator, g, last); if (kept != 0) last = kept; } catch { }
+                } while (!emulator.WaitForExit(75000));
+            } catch { }
+        }) { IsBackground = true, Priority = System.Threading.ThreadPriority.BelowNormal };
+        t.Start();
+    }
+    // The picture's fingerprint, or 0 when nothing was kept.
+    static ulong Snap(Process emulator, GameEntry g, ulong last) {
+        emulator.Refresh();
+        IntPtr h = emulator.MainWindowHandle;
+        if (h == IntPtr.Zero || Native.IsIconic(h) || Native.GetForegroundWindow() != h) return 0;
+        Native.Rect rc; if (!Native.GetClientRect(h, out rc)) return 0;
+        var at = new Native.Point2(); Native.ClientToScreen(h, ref at);
+        int w = rc.Right - rc.Left, ht = rc.Bottom - rc.Top;
+        if (w < 400 || ht < 300) return 0;
+        using (var shot = new Bitmap(w, ht)) {
+            using (var gr = Graphics.FromImage(shot)) gr.CopyFromScreen(at.X, at.Y, 0, 0, new Size(w, ht));
+            string why; ulong print; Bitmap pic = Judge(shot, last, out print, out why);
+            if (pic == null) return 0;
+            using (pic) Save(g, pic);
+            return print;
+        }
+    }
+    // The emulator window's picture: its top screen if worth keeping, else null and why not.
+    public static Bitmap Judge(Bitmap shot, ulong last, out ulong print, out string why) {
+        print = 0;
+        int w = shot.Width, ht = shot.Height;
+        // The top screen: the largest lit rectangle in the upper part, 5:3 like the 3DS's.
+        var top = GameArtTrim(shot, new Rectangle(0, 0, w - w % 8, (ht * 6 / 10) - (ht * 6 / 10) % 8));
+        float ratio = top.Width / (float)Math.Max(1, top.Height);
+        if (top.Width < 300 || top.Height < 180 || ratio < 1.45f || ratio > 1.9f) { why = "no top screen (" + top.Width + "x" + top.Height + ")"; return null; }
+        var pic = shot.Clone(top, shot.PixelFormat);
+        double mean, spread; print = Look(pic, out mean, out spread);
+        if (mean < 35 || mean > 225 || spread < 28) { pic.Dispose(); why = "too dark, bright or flat (mean " + (int)mean + ", spread " + (int)spread + ")"; return null; }
+        if (last != 0 && Distance(print, last) < 10) { pic.Dispose(); why = "same as the last one"; return null; }
+        why = "kept " + top.Width + "x" + top.Height + " at " + top.X + "," + top.Y;
+        return pic;
+    }
+    static Rectangle GameArtTrim(Bitmap b, Rectangle a) { return GameArt.TrimDarkOf(b, a); }
+    // Brightness, its spread, and a 64-bit fingerprint (8x8 cells brighter than the mean).
+    static ulong Look(Bitmap pic, out double mean, out double spread) {
+        var cells = new double[64]; double sum = 0, sq = 0; int n = 0;
+        for (int cy = 0; cy < 8; cy++) for (int cx = 0; cx < 8; cx++) {
+            double cell = 0; int m = 0;
+            for (int y = cy * pic.Height / 8; y < (cy + 1) * pic.Height / 8; y += 6) for (int x = cx * pic.Width / 8; x < (cx + 1) * pic.Width / 8; x += 6) {
+                var c = pic.GetPixel(x, y); double l = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B;
+                cell += l; m++; sum += l; sq += l * l; n++;
+            }
+            cells[cy * 8 + cx] = m > 0 ? cell / m : 0;
+        }
+        mean = n > 0 ? sum / n : 0; spread = n > 0 ? Math.Sqrt(Math.Max(0, sq / n - mean * mean)) : 0;
+        ulong print = 0; for (int i = 0; i < 64; i++) if (cells[i] > mean) print |= 1UL << i;
+        return print;
+    }
+    static int Distance(ulong a, ulong b) { ulong x = a ^ b; int d = 0; while (x != 0) { x &= x - 1; d++; } return d; }
+    static void Save(GameEntry g, Bitmap pic) {
+        string dir = GameArt.TownsFolder(g.Id); Directory.CreateDirectory(dir);
+        var jpeg = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg");
+        var quality = new System.Drawing.Imaging.EncoderParameters(1);
+        quality.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+        string file = Path.Combine(dir, "play-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".jpg");
+        pic.Save(file, jpeg, quality);
+        // The first becomes the game's own wallpaper; later ones join the random pick.
+        if (!GameArt.HasTown(g.Id)) pic.Save(GameArt.TownFileOf(g.Id), jpeg, quality);
+        foreach (var old in Directory.GetFiles(dir, "play-*.jpg").OrderByDescending(x => x, StringComparer.Ordinal).Skip(Keep)) try { File.Delete(old); } catch { }
     }
 }
 
@@ -1491,6 +1575,9 @@ static class GameArt {
     public static bool HasTown(string id) { return id != null && File.Exists(TownFile(id)); }
     // Gen1Recomp games also picture every other town and city (towns\, done.txt once the set is made).
     static string TownsDir(string id) { return Path.Combine(Folder(id), "towns"); }
+    public static string TownsFolder(string id) { return TownsDir(id); }
+    public static string TownFileOf(string id) { return TownFile(id); }
+    public static Rectangle TrimDarkOf(Bitmap pic, Rectangle a) { return TrimDark(pic, a); }
     static bool TownsByGen1(GameEntry g) { return g.Pc == null && g.TownFrame <= 0 && !g.IsDs && g.Gen1 != null; }
     static bool TownsByNativeplat(GameEntry g) { return g.Pc == null && g.TownFrame <= 0 && g.IsDs && (g.Nativeplat != null || g.TownCore != null); }
     // A set is made once per engine build for DS games: an older build that can't walk the list is tried again after an update.
@@ -1510,6 +1597,8 @@ static class GameArt {
             if (townChosen.TryGetValue(id, out f) && File.Exists(f)) return f;
             var all = new List<string> { TownFile(id) };
             try { if (Directory.Exists(TownsDir(id))) all.AddRange(Directory.GetFiles(TownsDir(id), "*.jpg")); } catch { }
+            all.RemoveAll(x => !File.Exists(x));
+            if (all.Count == 0) all.Add(TownFile(id));
             f = all[townDice.Next(all.Count)];
             townChosen[id] = f;
             return f;
@@ -6713,6 +6802,8 @@ class LauncherForm : Form {
                     Finished(g, code);
                 });
             });
+            // Wallpapers from this session's play, while it runs.
+            if (job != null && jobIsGame) PlaySnaps.Watch(job, g);
         });
     }
     void PlayPc(GameEntry g) {
@@ -8107,6 +8198,9 @@ class LauncherForm : Form {
                 case "flame": Enamel(g, r, th); FlameScene(g, r, th); break;
                 case "tide": Enamel(g, r, th); TideScene(g, r, th); break;
                 case "bolt": Enamel(g, r, th); BoltScene(g, r, th); break;
+                case "kalos": Enamel(g, r, th); KalosScene(g, r, th); break;
+                case "hoenn": Enamel(g, r, th); HoennScene(g, r, th); break;
+                case "alola": Enamel(g, r, th); AlolaScene(g, r, th); break;
                 default: Enamel(g, r, th); break;
             }
         }
@@ -8125,6 +8219,8 @@ class LauncherForm : Form {
                 else if (th.Finish == "silver") { Sheen(g, r, t, Color.White); MoonGlints(g, r, t); }
                 else if (th.Finish == "bolt") Crackle(g, r, t);
                 else if (th.Finish == "flame") Motes(g, r, t, Color.FromArgb(255, 210, 90), -1);
+                else if (th.Finish == "hoenn") Motes(g, r, t, Mix(th.Light, Color.White, 0.4f), -1);
+                else if (th.Finish == "kalos" || th.Finish == "alola") Sheen(g, r, t, Color.White);
             } else if (!th.Plain) Sheen(g, r, t, Color.White);
             g.Restore(st);
         }
@@ -8436,6 +8532,92 @@ class LauncherForm : Form {
                 using (var pen = new Pen(Fade(th.Light, 170), Math.Max(1f, u * 0.005f))) g.DrawArc(pen, x, y, s, s * 1.3f, 195, 150);
                 using (var pen = new Pen(Fade(Color.White, 56), Math.Max(1f, u * 0.004f))) g.DrawArc(pen, x + s * 0.2f, y + s * 0.2f, s * 0.6f, s * 0.8f, 200, 140);
             }
+        }
+    }
+    // ----- 3DS regions, in each version's colours. Kalos: a lattice tower over city lights and filigree arcs.
+    static void KalosScene(Graphics g, RectangleF r, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f);
+        var rnd = new Random(2013);
+        // City lights: soft discs, larger and fainter towards the top.
+        for (int i = 0; i < 26; i++) {
+            float x = r.X + (float)rnd.NextDouble() * r.Width, y = r.Y + (float)rnd.NextDouble() * r.Height * 0.85f;
+            float s = u * (0.03f + 0.07f * (float)rnd.NextDouble());
+            using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, 0.4f), 40 + rnd.Next(50)))) g.FillEllipse(b, x - s, y - s, s * 2, s * 2);
+        }
+        // Filigree: long arcs sweeping in from the left.
+        using (var pen = new Pen(Fade(th.Light, 90), Math.Max(1f, u * 0.006f)))
+            for (int i = 0; i < 4; i++) g.DrawArc(pen, r.X - u * (0.6f + i * 0.25f), r.Bottom - u * (0.55f + i * 0.18f), u * (1.4f + i * 0.5f), u * (1.2f + i * 0.4f), 270, 90);
+        // The tower: a tapering lattice on the right, with a glowing tip.
+        float tx = r.Right - r.Width * 0.24f, top = r.Y + r.Height * 0.3f, baseW = r.Width * 0.26f;
+        var outline = new[] { new PointF(tx - baseW / 2, r.Bottom), new PointF(tx - u * 0.035f, top + u * 0.12f), new PointF(tx, top), new PointF(tx + u * 0.035f, top + u * 0.12f), new PointF(tx + baseW / 2, r.Bottom) };
+        using (var b = new SolidBrush(Fade(th.Deep, 240))) g.FillPolygon(b, outline);
+        using (var pen = new Pen(Fade(Mix(th.Light, Color.White, 0.3f), 190), Math.Max(1.2f, u * 0.005f))) {
+            for (int i = 1; i < 9; i++) {
+                float k = i / 9f, y = r.Bottom - (r.Bottom - top - u * 0.12f) * k, half = (baseW / 2) * (1 - k) + u * 0.035f * k;
+                g.DrawLine(pen, tx - half, y, tx + half, y);
+                if (i < 8) { float k2 = (i + 1) / 9f, y2 = r.Bottom - (r.Bottom - top - u * 0.12f) * k2, half2 = (baseW / 2) * (1 - k2) + u * 0.035f * k2; g.DrawLine(pen, tx - half, y, tx + half2, y2); g.DrawLine(pen, tx + half, y, tx - half2, y2); }
+            }
+        }
+        using (var b = new SolidBrush(Fade(Color.White, 200))) g.FillEllipse(b, tx - u * 0.02f, top - u * 0.02f, u * 0.04f, u * 0.04f);
+        using (var b = new SolidBrush(Fade(th.Light, 60))) g.FillEllipse(b, tx - u * 0.07f, top - u * 0.07f, u * 0.14f, u * 0.14f);
+    }
+    // Hoenn: a volcanic island on layered sea waves.
+    static void HoennScene(Graphics g, RectangleF r, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f);
+        // The island: a broad peak with a cleft crater, left of centre.
+        float cx = r.X + r.Width * 0.62f, sea = r.Bottom - u * 0.3f; u = Math.Max(u, (sea - r.Y - r.Height * 0.4f) / 0.6f);
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+            path.AddLines(new[] { new PointF(cx - u * 0.75f, sea + 2), new PointF(cx - u * 0.12f, sea - u * 0.55f), new PointF(cx - u * 0.04f, sea - u * 0.5f), new PointF(cx + u * 0.04f, sea - u * 0.53f), new PointF(cx + u * 0.14f, sea - u * 0.55f), new PointF(cx + u * 0.8f, sea + 2) });
+            path.CloseFigure();
+            using (var b = new SolidBrush(Fade(th.Deep, 240))) g.FillPath(b, path);
+            using (var pen = new Pen(Fade(th.Light, 170), Math.Max(1.5f, u * 0.006f))) g.DrawPath(pen, path);
+        }
+        for (int i = 2; i >= 0; i--) using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, 0.3f), i == 0 ? 230 : 50))) g.FillEllipse(b, cx - u * (0.07f + i * 0.05f), sea - u * (0.6f + i * 0.03f), u * (0.14f + i * 0.1f), u * (0.08f + i * 0.06f));
+        // Waves: rows of crests, darker and nearer towards the bottom.
+        for (int row = 0; row < 4; row++) {
+            float y = sea + row * u * 0.08f, amp = u * (0.025f + row * 0.008f), len = u * (0.22f + row * 0.05f);
+            using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+                var pts = new List<PointF>();
+                for (float x = r.X - len; x <= r.Right + len; x += len / 8) pts.Add(new PointF(x, y + amp * (float)Math.Sin((x - r.X) / len * Math.PI * 2 + row)));
+                pts.Add(new PointF(r.Right + len, r.Bottom + 2)); pts.Add(new PointF(r.X - len, r.Bottom + 2));
+                path.AddLines(pts.ToArray()); path.CloseFigure();
+                using (var b = new SolidBrush(Fade(Mix(th.Main, th.Deep, 0.3f + row * 0.18f), 230))) g.FillPath(b, path);
+            }
+            using (var pen = new Pen(Fade(th.Light, 120 - row * 20), Math.Max(1f, u * 0.005f)))
+                for (float x = r.X - len; x <= r.Right; x += len) g.DrawArc(pen, x + len * 0.15f, y - amp * 1.2f, len * 0.35f, amp * 1.6f, 200, 120);
+        }
+    }
+    // Alola: a big sun (or moon, on a dark version) behind palm fronds and hibiscus flowers.
+    static void AlolaScene(Graphics g, RectangleF r, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f);
+        float sx = r.Right - r.Width * 0.27f, sy = r.Y + r.Height * 0.43f, sr = r.Width * 0.15f;
+        for (int i = 3; i >= 0; i--) using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, i == 0 ? 0.45f : 0.2f), i == 0 ? 245 : 45))) g.FillEllipse(b, sx - sr * (1 + i * 0.25f), sy - sr * (1 + i * 0.25f), sr * 2 * (1 + i * 0.25f), sr * 2 * (1 + i * 0.25f));
+        // Palm fronds reaching in from the lower left corner.
+        var origin = new PointF(r.X - u * 0.05f, r.Bottom + u * 0.05f);
+        for (int i = 0; i < 6; i++) {
+            double a = -Math.PI / 2 + 0.15 + i * 0.26;
+            float len = u * (0.75f + 0.1f * (i % 2));
+            var tip = new PointF(origin.X + (float)Math.Cos(a) * len, origin.Y + (float)Math.Sin(a) * len * 0.9f);
+            using (var pen = new Pen(Fade(th.Deep, 255), Math.Max(2f, u * 0.016f))) g.DrawLine(pen, origin, tip);
+            for (int l = 1; l <= 9; l++) {
+                float k = l / 10f; var p = new PointF(origin.X + (tip.X - origin.X) * k, origin.Y + (tip.Y - origin.Y) * k);
+                float leaf = u * 0.11f * (float)Math.Sin(k * Math.PI);
+                foreach (int side in new[] { -1, 1 }) {
+                    double la = a + side * 1.0;
+                    using (var pen = new Pen(Fade(th.Deep, 245), Math.Max(1.5f, u * 0.013f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                        g.DrawLine(pen, p, new PointF(p.X + (float)Math.Cos(la) * leaf, p.Y + (float)Math.Sin(la) * leaf + leaf * 0.35f));
+                }
+            }
+        }
+        // Hibiscus flowers along the bottom.
+        var rnd = new Random(2016);
+        for (int i = 0; i < 4; i++) {
+            float fx = r.X + r.Width * (0.35f + i * 0.17f) + (float)rnd.NextDouble() * u * 0.05f, fy = r.Bottom - u * (0.08f + 0.06f * (i % 2)), fr = u * (0.07f + 0.02f * (i % 2));
+            for (int p = 0; p < 5; p++) {
+                double pa = p * Math.PI * 2 / 5 + i;
+                using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, 0.3f), 220))) g.FillEllipse(b, fx + (float)Math.Cos(pa) * fr * 0.6f - fr * 0.55f, fy + (float)Math.Sin(pa) * fr * 0.6f - fr * 0.55f, fr * 1.1f, fr * 1.1f);
+            }
+            using (var b = new SolidBrush(Fade(th.Deep, 230))) g.FillEllipse(b, fx - fr * 0.18f, fy - fr * 0.18f, fr * 0.36f, fr * 0.36f);
         }
     }
     static readonly float[][] BoltShape = { new[] { 0.55f, 0f }, new[] { 0.1f, 0.55f }, new[] { 0.42f, 0.55f }, new[] { 0.22f, 1f }, new[] { 0.9f, 0.38f }, new[] { 0.55f, 0.38f }, new[] { 0.82f, 0f } };
@@ -9402,6 +9584,15 @@ static class NativeMonsLauncher {
         Application.EnableVisualStyles();
         Config.Load();
         // Modes that run without the window (notes/launcher.md, Command line).
+        // --play-snap-test <result> <window.png>...: what the 3DS wallpaper pictures would keep from each window picture.
+        if (argv.Length >= 3 && argv[0] == "--play-snap-test") {
+            var lines = new List<string>(); ulong last = 0;
+            foreach (var f in argv.Skip(2)) {
+                using (var b = new Bitmap(f)) { ulong p; string why; var pic = PlaySnaps.Judge(b, last, out p, out why); if (pic != null) { last = p; pic.Dispose(); } lines.Add(Path.GetFileName(f) + ": " + why); }
+            }
+            File.WriteAllLines(argv[1], lines.ToArray());
+            return;
+        }
         // --3ds-save <result> <game> <emulator> prepare|collect: the save hand-off around a session, with no emulator run.
         if (argv.Length == 5 && argv[0] == "--3ds-save") {
             Library.Scan(LauncherForm.Gen1Cli);
