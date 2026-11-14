@@ -16,7 +16,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300   # gen4recomp's build, then Azahar's and AzaharPlus's, waited for in turn
     steps:
       - uses: actions/create-github-app-token@v2
         id: app
@@ -24,7 +24,7 @@ jobs:
           app-id: ${{ vars.ENGINE_SYNC_APP_ID }}
           private-key: ${{ secrets.ENGINE_SYNC_APP_KEY }}
           owner: Hailey-Ross
-          repositories: nativeMons,gen1recomp,pokemon-fulldex,gen4recomp
+          repositories: nativeMons,gen1recomp,pokemon-fulldex,gen4recomp,azahar,AzaharPlus
 
       - uses: actions/checkout@v7
         with:
