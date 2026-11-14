@@ -208,7 +208,7 @@ class Emu3ds {
             Notes = "The best pick for Pokemon: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well." },
         // Azahar with extras: opens encrypted dumps too, built-in cheats. Its system-file downloader is off in our build.
         new Emu3ds { Id = "azaharplus", Name = "AzaharPlus-modified (nativeMons)", Short = "AzaharPlus", Repo = "Hailey-Ross/AzaharPlus", Upstream = "AzaharPlus/AzaharPlus", Exe = "azahar.exe", Asset = "azaharplus-nativemons-windows-x64.zip",
-            Tag = "windows-3e95a5a92", Sha256 = "700325c3e55931fc312fbafe2bd5aa00607e4e93ebda940152198906ee040887", Size = "about 73 MB",
+            Tag = "windows-dd28556d1", Sha256 = "60c3162ce57ccb6414129c4c1f9e475116646d0ec2e4510e910bd4ee352db1f9", Size = "about 72 MB",
             Notes = "Azahar with extras: it also opens encrypted dumps, and has built-in cheats. Plays the same as Azahar." },
     };
     public static bool Enabled { get { return Config.Read("3ds-games.txt", "off") == "on"; } set { Config.Write("3ds-games.txt", value ? "on" : "off"); } }
