@@ -6,7 +6,7 @@
 2. **Unzip it.** Right-click the downloaded file and choose **Extract All...**, then **Extract**. Put the folder somewhere easy to find, such as your Documents or Desktop (not inside Program Files).
 3. **Open it.** In the new folder, double-click **NativeMonsLauncher**.
    - If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**. This appears because nativeMons is a free project without a paid signing certificate.
-4. **Add your games.** On the home screen, choose **ROMs**, then **Add a folder**, and pick the folder your game files are in. Or just drag that folder onto the nativeMons window.
+4. **Add your games.** The first time, nativeMons walks you through a short setup: choose **Add a folder** and pick the folder your game files are in. Or just drag that folder onto the nativeMons window. Later, more folders go in under **ROMs**.
    - It finds Game Boy, Game Boy Color, Game Boy Advance and DS games (`.gb`, `.gbc`, `.gba`, `.nds`, and `.zip` files holding them). The file names don't matter.
 5. **Wait about a minute the first time.** nativeMons gets your games ready behind its loading screen. After that it opens in about a second.
 6. **Play.** Choose **Games**, pick a game, and press **Play**.
@@ -32,6 +32,7 @@ Where both engines have a game, it starts in Fulldex. Switch on that game's page
 - **D-pad or left stick:** move. **A:** select. **B:** back.
 - **Keyboard:** arrow keys or WASD, Enter, Esc.
 - **Mouse:** hover to select, click to choose, right-click to go back. The D-pad and buttons on the device can be clicked too, and dragging its shell moves the window.
+- **The guide button** (Xbox, or the PS button) opens an overlay while a game runs: resume, that game's controls, or close it.
 - **In a game:** **Settings > Controls** lists each engine's keys, such as saving, fast forward, snapshots and screenshots. **Settings > Screenshots** opens the folders they're saved in.
 
 ## What's in it

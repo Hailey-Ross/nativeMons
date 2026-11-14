@@ -78,7 +78,7 @@ Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. n
 2. **Unzip it.** Right-click the downloaded file and choose **Extract All...**, then **Extract**. Put the folder somewhere easy to find, such as your Documents or Desktop (not inside Program Files).
 3. **Open it.** In the new folder, double-click **NativeMonsLauncher**.
    - If Windows shows **"Windows protected your PC"**, click **More info**, then **Run anyway**. This appears because nativeMons is a free project without a paid signing certificate.
-4. **Add your games.** On the home screen, choose **ROMs**, then **Add a folder**, and pick the folder your game files are in. Or just drag that folder onto the nativeMons window.
+4. **Add your games.** The first time, nativeMons walks you through a short setup: choose **Add a folder** and pick the folder your game files are in. Or just drag that folder onto the nativeMons window. Later, more folders go in under **ROMs**.
    - It finds Game Boy, Game Boy Color, Game Boy Advance and DS games (`.gb`, `.gbc`, `.gba`, `.nds`, and `.zip` files holding them), and 3DS games (`.3ds`, `.cci`). The file names don't matter: games are found by reading each ROM.
    - For 3DS games, also turn on **3DS games** under **Emu** and install an emulator there (see [3DS games](#3ds-games)).
 5. **Wait about a minute the first time.** nativeMons gets your games ready behind its loading screen. After that it opens in about a second.
@@ -210,6 +210,8 @@ Each engine has its own page of options (**Fulldex**, **Gen1Recomp**), stored wh
 **Updates** checks this project's releases when the launcher starts and every 6 hours while it's open. When a new build is ready, a banner appears for a few seconds and Settings gets a badge; nothing downloads until you choose to. The same page switches between **Stable** and **Dev**, and names what you have: a stable build as "version 0.0.5, build N", a dev build as "build N, after version 0.0.5". Updating replaces the launcher and every engine together from one checked download, and changes only the files that differ. Your saves, ROM copies, wallpapers, Pokédex data, settings and anything in `games\` stay as they are. A copy built from source reads as a local build, and any release counts as newer until you build again.
 
 **Controls** lists the keys each engine uses while you play (Fulldex, Gen1Recomp, nativeplat, the Platinum PC port and Infinite Fusion): saving, fast forward, snapshots, screenshots and where to change them.
+
+While a game runs, the controller's guide button (Xbox, or the PS button on a DualShock 4 or DualSense) opens an overlay over it: resume, that game's controls, or close the game.
 
 **Screenshots** opens the folders where nativeplat (F12) and Infinite Fusion (F8) put the screenshots you take. Fulldex and Gen1Recomp have no screenshot key; Windows + Shift + S works in any game.
 
