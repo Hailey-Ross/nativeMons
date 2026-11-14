@@ -8,7 +8,7 @@ Each notable stable release raises the version, and its section here becomes its
 - Gen1Recomp: the latest upstream updates, including Crystal sound fixes and, in the Gen 3 games, trainer party and Continue fixes, the Bag working in Battle Pyramid battles, the gift Castform holding its Mystic Water, and one controller press no longer skipping two menu options.
 - Wallpapers: a random town each start, from every town and city of the game, for every game family.
 - Closing the launcher also closes the games it started in the background, and nothing new starts while it closes.
-- 3DS games, optional and in progress: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon through Azahar, Panda3DS or Mandarine-neo, each installed from Emu on the home screen with its own install animation. Saves stay with the launcher, backed up before and after each play, with save slots and per-slot save states.
+- 3DS games, optional and in progress: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon through Azahar or AzaharPlus, installed from Emu on the home screen with its own install animation. Saves stay with the launcher, backed up before and after each play, with save slots and per-slot save states.
 - A new Collection icon: a phone Pokédex.
 
 ## 0.0.5

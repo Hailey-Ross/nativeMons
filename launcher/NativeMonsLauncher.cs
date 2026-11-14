@@ -206,12 +206,10 @@ class Emu3ds {
         new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
             Tag = "windows-a6aa2ad2e", Sha256 = "f011f57f9c37a1f7abfc6981e8806dd1129321b3875bea71299c2c1e0de19f83", Size = "about 44 MB",
             Notes = "The best pick for Pokemon: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well." },
-        new Emu3ds { Id = "panda3ds", Name = "Panda3DS-modified (nativeMons)", Short = "Panda3DS", Repo = "Hailey-Ross/Panda3DS", Upstream = "wheremyfoodat/Panda3DS", Exe = "Alber.exe", Asset = "panda3ds-nativemons-windows-x64.zip",
-            Tag = "windows-f34351958", Sha256 = "b42e7291c10c281e00ccfe9732c4709056df3cb837efb9d29c179412cd0ba672", Size = "about 28 MB",
-            Notes = "A newer emulator written from scratch. X and Y run well; Sun, Moon and the Ultra games can be unstable." },
-        new Emu3ds { Id = "mandarine", Name = "Mandarine-neo-modified (nativeMons)", Short = "Mandarine-neo", Repo = "Hailey-Ross/mandarine-neo", Upstream = "ptyfyre/mandarine-neo", Exe = "mandarine-qt.exe", Asset = "mandarine-nativemons-windows-x64.zip",
-            Tag = "windows-a3bae48ad", Sha256 = "a565516995b1ee266634bb3f446f7db6c79e6df5a9c425481485fee042049723", Size = "about 49 MB",
-            Notes = "Built on Citra like Azahar, with extra speed options. Updated less often." },
+        // Azahar with extras: opens encrypted dumps too, built-in cheats. Its system-file downloader is off in our build.
+        new Emu3ds { Id = "azaharplus", Name = "AzaharPlus-modified (nativeMons)", Short = "AzaharPlus", Repo = "Hailey-Ross/AzaharPlus", Upstream = "AzaharPlus/AzaharPlus", Exe = "azahar.exe", Asset = "azaharplus-nativemons-windows-x64.zip",
+            Tag = "windows-3e95a5a92", Sha256 = "700325c3e55931fc312fbafe2bd5aa00607e4e93ebda940152198906ee040887", Size = "about 73 MB",
+            Notes = "Azahar with extras: it also opens encrypted dumps, and has built-in cheats. Plays the same as Azahar." },
     };
     public static bool Enabled { get { return Config.Read("3ds-games.txt", "off") == "on"; } set { Config.Write("3ds-games.txt", value ? "on" : "off"); } }
     // Picked by the player, else the first one installed.
@@ -230,8 +228,8 @@ class Emu3ds {
         }
         return false;
     }
-    // An emulator's own data folder ("user" beside Azahar and Mandarine in portable mode) survives updates and removal.
-    static readonly string[] Kept = { "user", "Emulator Files" };
+    // An emulator's own data folder ("user" beside it in portable mode) survives updates and removal.
+    static readonly string[] Kept = { "user" };
     // Download, check, unpack beside, then swap in. Null when done, or why not.
     public static string Install(Emu3ds e) {
         string zip = e.Dir + ".download.zip", temp = e.Dir + ".new", old = e.Dir + ".old";
@@ -246,7 +244,7 @@ class Emu3ds {
             if (hash != e.Sha256) return "The download wasn't the expected file, so it wasn't used.";
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
-            // The zip holds one folder (azahar\, panda3ds\, mandarine\) with the program inside.
+            // The zip holds one folder (azahar\) with the program inside.
             string top = Directory.GetDirectories(temp).Length == 1 && Directory.GetFiles(temp).Length == 0 ? Directory.GetDirectories(temp)[0] : temp;
             if (!File.Exists(Path.Combine(top, e.Exe))) return "The download was missing " + e.Exe + ".";
             File.WriteAllText(Path.Combine(top, "nativemons-tag.txt"), e.Tag);
@@ -292,18 +290,17 @@ static class Ctr3dsSaves {
     public static string Main(GameEntry g) { return Path.Combine(Master(g), "data", "main"); }
     // Each emulator's own data folder (settings, system files), linked in only while it runs.
     public static string EmuData(Emu3ds e) { return Path.Combine(Root, "emu", e.Id); }
-    static bool Citra(Emu3ds e) { return e.Id != "panda3ds"; }
-    // Where the emulator looks for its data: "user" beside Azahar and Mandarine, "Emulator Files" beside Panda3DS.
-    static string Link(Emu3ds e) { return Path.Combine(e.Dir, Citra(e) ? "user" : "Emulator Files"); }
+    // Where the emulator looks for its data: "user" beside its program (Citra's portable mode).
+    static string Link(Emu3ds e) { return Path.Combine(e.Dir, "user"); }
     static string Low(GameEntry g) { return g.Ctr.Substring(8).ToLowerInvariant(); }
     static string High(GameEntry g) { return g.Ctr.Substring(0, 8).ToLowerInvariant(); }
     // The emulator's copy of the save folder, and Citra's format file beside it.
     static string EmuSave(Emu3ds e, GameEntry g) {
-        return Citra(e) ? Path.Combine(EmuData(e), "sdmc", "Nintendo 3DS", new string('0', 32), new string('0', 32), "title", High(g), Low(g), "data", "00000001")
-                        : Path.Combine(EmuData(e), Path.GetFileNameWithoutExtension(g.CtrRom), "SaveData");
+        return Path.Combine(EmuData(e), "sdmc", "Nintendo 3DS", new string('0', 32), new string('0', 32), "title", High(g), Low(g), "data", "00000001");
     }
-    static string EmuMeta(Emu3ds e, GameEntry g) { return Citra(e) ? EmuSave(e, g) + ".metadata" : null; }
-    static string EmuStates(Emu3ds e) { return Citra(e) ? Path.Combine(EmuData(e), "states") : null; }
+    // The save's 16-byte format record. Without it a game sees an unformatted save and sets up a new one over the old.
+    static string EmuMeta(Emu3ds e, GameEntry g) { return EmuSave(e, g) + ".metadata"; }
+    static string EmuStates(Emu3ds e) { return Path.Combine(EmuData(e), "states"); }
     static string[] StatesOf(string dir, GameEntry g) { return dir != null && Directory.Exists(dir) ? Directory.GetFiles(dir, g.Ctr.ToUpperInvariant() + ".*.cst") : new string[0]; }
 
     public static bool IsLink(string dir) { try { return Directory.Exists(dir) && (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0; } catch { return false; } }
@@ -350,7 +347,7 @@ static class Ctr3dsSaves {
         else if (Directory.Exists(link)) Directory.Move(link, link + ".kept-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         MakeLink(link, EmuData(e));
         File.WriteAllText(SessionFile(e), g.Id);
-        if (!Citra(e)) WritePandaConfig(e); else WriteCitraConfig(e);
+        WriteCitraConfig(e);
         if (File.Exists(Main(g))) SaveGuard.Backup(g, Main(g), "before-play");
         string save = EmuSave(e, g);
         if (Directory.Exists(Path.Combine(Master(g), "data"))) {
@@ -416,29 +413,26 @@ static class Ctr3dsSaves {
         var lines = File.Exists(f) ? File.ReadAllLines(f).ToList() : new List<string>();
         SetIni(lines, "UI", "confirmClose", "false");
         SetIni(lines, "UI", "enable_discord_presence", "false");
-        string marker = Path.Combine(EmuData(e), "nativemons-controls.txt");
-        // Only Azahar understands "any controller" (maptype:all); Mandarine-neo needs each pad's id.
-        if (e.Id == "azahar" && !File.Exists(marker)) {
+        // Once per version of these defaults, so the player's own changes stay afterwards. Version 2 (2026-11-13): the
+        // profile's own mapping type too (Azahar rewrites every binding to it on save), Vulkan and async shaders.
+        string marker = Path.Combine(EmuData(e), "nativemons-defaults-2.txt");
+        if (!File.Exists(marker)) {
             foreach (var m in PadMap) {
                 var parts = ("api:controller,engine:sdl,guid:0,maptype:all,port:0," + m[1]).Split(',').OrderBy(x => x, StringComparer.Ordinal);
                 SetIni(lines, "Controls", "profiles\\1\\" + m[0], "\"" + string.Join(",", parts.ToArray()) + "\"");
             }
+            // 0 = all controllers (Settings::InputMappingType).
+            SetIni(lines, "Controls", "profiles\\1\\input_maptype", "0");
             if (!lines.Any(l => l.StartsWith("profiles\\size="))) SetIni(lines, "Controls", "profiles\\size", "1");
-            File.WriteAllText(marker, "Controller mapping written by nativeMons. Delete this file to have it written again.");
+            // Vulkan (2), and shaders compiled in the background so a new effect doesn't freeze the game.
+            SetIni(lines, "Renderer", "graphics_api", "2");
+            SetIni(lines, "Renderer", "async_shader_compilation", "true");
+            File.WriteAllText(marker, "Controller mapping, Vulkan and async shaders written by nativeMons. Delete this file to have them written again.");
+            try { File.Delete(Path.Combine(EmuData(e), "nativemons-controls.txt")); } catch { }
         }
         File.WriteAllLines(f, lines.ToArray());
     }
-    // Panda3DS reads config.toml from its working folder (its data folder here); portable mode keeps its data beside it.
-    static void WritePandaConfig(Emu3ds e) {
-        string f = Path.Combine(EmuData(e), "config.toml");
-        var lines = File.Exists(f) ? File.ReadAllLines(f).ToList() : new List<string>();
-        lines.RemoveAll(l => l.Trim().StartsWith("UsePortableBuild"));
-        int at = lines.FindIndex(l => l.Trim() == "[General]");
-        if (at < 0) { lines.Insert(0, "[General]"); at = 0; }
-        lines.Insert(at + 1, "UsePortableBuild = true");
-        File.WriteAllLines(f, lines.ToArray());
-    }
-    public static string WorkingDir(Emu3ds e) { return Citra(e) ? e.Dir : EmuData(e); }
+    public static string WorkingDir(Emu3ds e) { return e.Dir; }
     // When the launcher changes a save (Move Pokemon), the slot's states go to the backups with the old save,
     // so loading an old state can't undo the change (user, 2026-11-13).
     public static void StashStates(GameEntry g, string reason) {
@@ -2609,7 +2603,7 @@ static class Library {
         if (g.Pc == "custom") return "Its program has moved or been deleted.";
         if (g.Pc != null) return "Not installed yet. Select it to install.";
         if (g.Ctr != null) {
-            if (g.CtrRom == null && g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is encrypted. Emulators need a decrypted dump of your cartridge, made with GodMode9 on your 3DS.";
+            if (g.CtrRom == null && g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is encrypted. Azahar needs a decrypted dump of your cartridge (GodMode9 on your 3DS makes one), or pick AzaharPlus under Emu, which opens encrypted dumps too.";
             if (g.CtrRom == null) return "No ROM found. Add the folder with your decrypted .3ds dump under ROM folders.";
             if (!Emu3ds.Enabled) return "Found " + Path.GetFileName(g.CtrRom) + ". Turn on 3DS games under Emu on the home screen to play it.";
             return "Found " + Path.GetFileName(g.CtrRom) + ". Install an emulator under Emu on the home screen to play it.";
@@ -2663,7 +2657,13 @@ static class Library {
         // Kept from the first time there's a choice, so moving or adding files can't change it later.
         if (g.Roms.Count > 1 && g.Chosen.Sha1 != saved) Config.Write("rom-" + g.Id + ".txt", g.Chosen.Sha1);
         if (g.FulldexCode != null) g.FulldexRom = g.Chosen.File;
-        if (g.Ctr != null) { var r = g.Chosen.Encrypted ? Ranked(g).FirstOrDefault(x => !x.Encrypted) : g.Chosen; g.CtrRom = r != null ? r.File : null; if (r == null) { g.FoundUnsupported = g.Chosen.File; } }
+        if (g.Ctr != null) {
+            // AzaharPlus opens encrypted dumps too; Azahar only decrypted ones.
+            bool takesEncrypted = Emu3ds.Default != null && Emu3ds.Default.Id == "azaharplus";
+            var r = g.Chosen.Encrypted && !takesEncrypted ? Ranked(g).FirstOrDefault(x => !x.Encrypted) : g.Chosen;
+            g.CtrRom = r != null ? r.File : null;
+            if (r == null) g.FoundUnsupported = g.Chosen.File;
+        }
         // An engine with an exact list uses the chosen dump if it's on the list, or its best one that is.
         if (g.Gen1 != null) { var r = g.Chosen.Gen1Ok ? g.Chosen : Ranked(g).FirstOrDefault(x => x.Gen1Ok); g.Gen1Rom = r != null ? r.File : null; }
         if (g.Nativeplat != null) { var r = g.Chosen.NativeplatOk ? g.Chosen : Ranked(g).FirstOrDefault(x => x.NativeplatOk); g.NativeplatRom = r != null ? r.File : null; }
@@ -5921,7 +5921,7 @@ class LauncherForm : Form {
             + "\n\nThe GBA player is ours, in our Fulldex fork, on mGBA by endrift and contributors (MPL-2.0), after Pokemon GBA Widescreen by mamesj. Widescreen for romhacks and the versions our patches don't cover comes from PokeDaisy's EXPAND (GPL-3.0). Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy"
             + "\n\nRomhacks' title screens are captured with mGBA by endrift and contributors (github.com/mgba-emu/mgba, MPL-2.0), as its libretro core."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
-            + "\n\nOptional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons: Azahar by the Azahar team, from Citra (github.com/azahar-emu/azahar, GPL-2.0-or-later; ours: github.com/Hailey-Ross/azahar); Panda3DS by wheremyfoodat and contributors (github.com/wheremyfoodat/Panda3DS, GPL-3.0; ours: github.com/Hailey-Ross/Panda3DS); Mandarine-neo by ptyfyre and contributors, from Citra (github.com/ptyfyre/mandarine-neo, GPL-2.0; ours: github.com/Hailey-Ross/mandarine-neo). Not the official builds, and not affiliated with nativeMons."
+            + "\n\nOptional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons: Azahar by the Azahar team, from Citra (github.com/azahar-emu/azahar, GPL-2.0-or-later; ours: github.com/Hailey-Ross/azahar); AzaharPlus by its contributors, from Azahar (github.com/AzaharPlus/AzaharPlus, GPL-3.0; ours, without its system-file downloader: github.com/Hailey-Ross/AzaharPlus). Not the official builds, and not affiliated with nativeMons."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
