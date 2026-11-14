@@ -28,7 +28,7 @@ GAME FREAK inc. or The Pokémon Company.
 
 Plus **[Pokémon Infinite Fusion](#pokémon-infinite-fusion)**, a PC fan game with no ROM, which the launcher installs and runs as its own program.
 
-**Not supported yet:** Generation 6 and later (3DS and Switch games).
+**3DS games (Generations 6 and 7), optional and in progress on Dev:** X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon, played through a [3DS emulator](#3ds-games) you choose. Switch games aren't supported.
 
 **Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them.
 
@@ -114,6 +114,15 @@ A game's page in **Games** has Play, its engine, ROM version, saves, game option
 - **Add an existing installation.** The launcher runs your own copy where it is and never changes its files, and its saves stay where the game keeps them, in `%APPDATA%\infinitefusion`. Update it with the game's own updater. **Remove from the launcher** only forgets it.
 
 Either way the launcher backs up the save files before each session (newest 30, under `state\save-backups`), and the game keeps backups of its own too. About 5 GB (Infinite Fusion 2: about 3 GB). The Play tile and wallpaper come from each game's own title screen and region map. Move Pokémon, quick start and the save tools don't apply to them. Both count toward **My Collection**, each with a Pokédex of its own under **Romhacks and fan games**.
+
+## 3DS games
+
+Optional, and still being built on Dev. Turn on **3DS games** under **Emu** on the home screen (or in Settings), then install an emulator there: Azahar (the best for Pokémon), Panda3DS or Mandarine-neo. Nothing downloads until you pick one. Each is built from our own fork of it and checked against a pinned checksum before it's put in place. It lives in `emulators\`, which a launcher update never touches, and removing it never touches your saves.
+
+- **ROMs:** decrypted `.3ds` or `.cci` dumps of your own cartridges (GodMode9 on your 3DS). They're played where they are, never copied. No games, keys or system files are included.
+- **Saves** belong to the launcher, in `state\3ds\saves`, not to an emulator: each play hands the save to the emulator you chose and takes it back after, with a backup before and after, so you can switch emulators. Save slots and their backups work as for the other games, and each slot keeps its own save states.
+- **Controllers:** Azahar gets every connected controller mapped, laid out as on a 3DS; change it in Azahar's own Controls.
+- Not yet: My Collection and Move Pokemon for 3DS saves.
 
 ## Other PC games
 
@@ -243,6 +252,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [rcheevos](https://github.com/RetroAchievements/rcheevos) by the RetroAchievements team (MIT), for RetroAchievements in the GBA player, through Pokémon Fulldex's achievements code.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.
+- Optional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons (the source of each build is on its release): [Azahar](https://github.com/azahar-emu/azahar) by the Azahar team, from Citra (GPL-2.0-or-later; our fork: [Hailey-Ross/azahar](https://github.com/Hailey-Ross/azahar)); [Panda3DS](https://github.com/wheremyfoodat/Panda3DS) by wheremyfoodat and contributors (GPL-3.0; [Hailey-Ross/Panda3DS](https://github.com/Hailey-Ross/Panda3DS)); [Mandarine-neo](https://github.com/ptyfyre/mandarine-neo) by ptyfyre and contributors, from Citra (GPL-2.0; [Hailey-Ross/mandarine-neo](https://github.com/Hailey-Ross/mandarine-neo)). Shown as "Azahar-modified (nativeMons)" and so on; they aren't the official builds, and their authors aren't affiliated with nativeMons.
 - The [Gen1Recomp community mod index](https://github.com/bryanthaboi/gen1recomp-mod-index), read for **Find mods**. Its listings are by the mods' authors; the mods are theirs.
 - [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) by Hails.
 - Pokédex entries from [PokéAPI](https://pokeapi.co).

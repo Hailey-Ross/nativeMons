@@ -23,6 +23,7 @@
 | **Fulldex** (widescreen, 60 fps) | FireRed, LeafGreen, Emerald, HeartGold, SoulSilver, Platinum, Black, White, Black 2, White 2 |
 | **Platinum PC port** (native, optional) | Platinum |
 | **nativeplat** (native) | Diamond, Pearl, Platinum (optional) |
+| **A 3DS emulator you choose** (optional, in progress) | X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun, Ultra Moon: turn on 3DS games under **Emu**, then install Azahar, Panda3DS or Mandarine-neo there. Needs decrypted `.3ds` dumps of your own cartridges. |
 
 Where both engines have a game, it starts in Fulldex. Switch on that game's page. The engines share one save, if your ROM works with both. The Platinum PC port's download has only the program: its game files are unpacked from your own ROM, on your PC.
 
