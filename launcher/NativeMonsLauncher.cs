@@ -471,6 +471,139 @@ static class Ctr3dsSaves {
 
 // A 3DS game's wallpapers come from the player's own play (user, 2026-11-14): while it runs and its window is in front,
 // the emulator's top screen is pictured now and then; dark, flat (menus, fades) and repeated pictures are left out.
+// The home screen's wallpaper: a drawn scene, pictures from the player's own games, or a picture they chose for a game.
+static class Wallpaper {
+    public static bool Chosen { get { return Config.Read("wallpaper.txt", "") != ""; } }
+    public static bool Drawn { get { return Config.Read("wallpaper.txt", "") == "drawn"; } set { Config.Write("wallpaper.txt", value ? "drawn" : "play"); } }
+    static string Dir { get { return Path.Combine(Config.State, "wallpapers"); } }
+    static readonly string[] Kinds = { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
+    public const string Filter = "Pictures (*.png, *.jpg, *.bmp, *.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif";
+    public static string Own(string id) {
+        if (id == null || !Directory.Exists(Dir)) return null;
+        foreach (var k in Kinds) { var f = Path.Combine(Dir, id + k); if (File.Exists(f)) return f; }
+        return null;
+    }
+    // A copy is kept, so the player's own file can move or go.
+    public static string Set(string id, string file) {
+        try { using (var test = Image.FromFile(file)) { } } catch { return "That file isn't a picture nativeMons can show. PNG, JPG, BMP and GIF work."; }
+        try {
+            Remove(id);
+            Directory.CreateDirectory(Dir);
+            File.Copy(file, Path.Combine(Dir, id + Path.GetExtension(file).ToLowerInvariant()), true);
+            return null;
+        } catch (Exception e) { return "Couldn't keep a copy of it: " + e.Message; }
+    }
+    public static void Remove(string id) {
+        lock (gate) { if (cached != null) cached.Dispose(); cached = null; cachedFile = null; }
+        foreach (var k in Kinds) { var f = Path.Combine(Dir, id + k); if (File.Exists(f)) File.Delete(f); }
+        if (File.Exists(CreditFile(id))) File.Delete(CreditFile(id));
+    }
+    // Where a found picture came from, kept beside it.
+    static string CreditFile(string id) { return Path.Combine(Dir, id + ".credit.txt"); }
+    public static string Credit(string id) { try { return File.Exists(CreditFile(id)) ? File.ReadAllText(CreditFile(id)).Trim() : null; } catch { return null; } }
+    public static void SetCredit(string id, string text) { try { File.WriteAllText(CreditFile(id), text ?? ""); } catch { } }
+    static readonly object gate = new object();
+    static string cachedFile; static DateTime cachedTime; static Bitmap cached;
+    // Fills the screen with the game's own picture, cropped to fit. False when it has none.
+    public static bool DrawOwn(Graphics g, string id, RectangleF screen) {
+        var f = Own(id);
+        if (f == null) return false;
+        lock (gate) {
+            var t = File.GetLastWriteTimeUtc(f);
+            if (cachedFile != f || cachedTime != t) {
+                if (cached != null) cached.Dispose();
+                cached = null; cachedFile = f; cachedTime = t;
+                try {
+                    using (var img = Image.FromFile(f)) {
+                        float k = Math.Min(1f, 1600f / Math.Max(img.Width, img.Height));
+                        cached = new Bitmap(img, Math.Max(1, (int)(img.Width * k)), Math.Max(1, (int)(img.Height * k)));
+                    }
+                } catch { }
+            }
+            if (cached == null) return false;
+            float s = Math.Max(screen.Width / cached.Width, screen.Height / cached.Height);
+            var st = g.Save();
+            g.SetClip(screen, System.Drawing.Drawing2D.CombineMode.Intersect);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.DrawImage(cached, screen.X + (screen.Width - cached.Width * s) / 2, screen.Y + (screen.Height - cached.Height * s) / 2, cached.Width * s, cached.Height * s);
+            g.Restore(st);
+            return true;
+        }
+    }
+}
+// Find a wallpaper: fan art from wallhaven.cc (safe for work only) or free-license art from Openverse, fetched when the
+// player asks. Nothing is bundled; a picture they pick is kept as that game's own, with where it came from.
+class WallResult { public string Title, Thumb, Full, Page, Credit; public volatile Bitmap Pic; public volatile bool Failed; }
+// What the launcher's own browser is choosing: a folder, or one or more files of some kinds.
+class BrowseRequest {
+    public string Title, Hint; public bool Folders, Multi; public string[] Kinds = new string[0]; public Action<string[]> Done;
+    public readonly HashSet<string> Picked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+}
+static class WallFind {
+    public const string Fan = "wallhaven", Free = "openverse";
+    static System.Net.WebClient Web() {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        var w = new System.Net.WebClient(); w.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; return w;
+    }
+    static string Str(Dictionary<string, object> d, string k) { object v; return d != null && d.TryGetValue(k, out v) && v != null ? v.ToString() : ""; }
+    // One page of results, and whether there are more.
+    public static List<WallResult> Search(string source, string query, int page, out bool more) {
+        var list = new List<WallResult>(); more = false;
+        string q = Uri.EscapeDataString(query);
+        string json;
+        using (var w = Web()) json = w.DownloadString(source == Fan
+            ? "https://wallhaven.cc/api/v1/search?q=" + q + "&purity=100&categories=110&sorting=relevance&page=" + page
+            : "https://api.openverse.org/v1/images/?q=" + q + "&mature=false&page_size=20&page=" + page);
+        var root = new JavaScriptSerializer { MaxJsonLength = 1 << 24 }.Deserialize<Dictionary<string, object>>(json);
+        if (source == Fan) {
+            var data = root["data"] as System.Collections.ArrayList;
+            var meta = root.ContainsKey("meta") ? root["meta"] as Dictionary<string, object> : null;
+            int last; more = meta != null && int.TryParse(Str(meta, "last_page"), out last) && page < last;
+            if (data != null) foreach (Dictionary<string, object> d in data) {
+                var thumbs = d["thumbs"] as Dictionary<string, object>;
+                list.Add(new WallResult { Title = Str(d, "resolution"), Thumb = Str(thumbs, "large"), Full = Str(d, "path"), Page = Str(d, "url"), Credit = "From wallhaven.cc, " + Str(d, "url") });
+            }
+        } else {
+            var data = root["results"] as System.Collections.ArrayList;
+            int count; more = int.TryParse(Str(root, "page_count"), out count) && page < count;
+            if (data != null) foreach (Dictionary<string, object> d in data) {
+                string lic = "CC " + Str(d, "license").ToUpperInvariant() + " " + Str(d, "license_version");
+                if (Str(d, "license") == "cc0") lic = "CC0"; else if (Str(d, "license") == "pdm") lic = "Public domain";
+                list.Add(new WallResult { Title = Str(d, "title"), Thumb = Str(d, "thumbnail"), Full = Str(d, "url"), Page = Str(d, "foreign_landing_url"),
+                    Credit = "\"" + Str(d, "title") + "\" by " + Str(d, "creator") + ", " + lic.Trim() + ". " + Str(d, "foreign_landing_url") });
+            }
+        }
+        return list;
+    }
+    // Thumbnails arrive one by one in the background; done is called after each.
+    public static void LoadThumbs(List<WallResult> list, Action done) {
+        foreach (var one in list) {
+            var r = one;
+            if (r.Pic != null || r.Failed) continue;
+            Task.Run(delegate {
+                try { using (var w = Web()) using (var ms = new MemoryStream(w.DownloadData(r.Thumb))) using (var img = Image.FromStream(ms)) r.Pic = new Bitmap(img); }
+                catch { r.Failed = true; }
+                done();
+            });
+        }
+    }
+    // The full picture, into a temporary file the caller removes.
+    public static string Download(WallResult r) {
+        string ext = Path.GetExtension(new Uri(r.Full).AbsolutePath).ToLowerInvariant();
+        if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".gif" && ext != ".bmp") ext = ".jpg";
+        string tmp = Path.Combine(Path.GetTempPath(), "nativemons-wallpaper-" + Guid.NewGuid().ToString("N") + ext);
+        using (var w = Web()) w.DownloadFile(r.Full, tmp);
+        return tmp;
+    }
+    static readonly Dictionary<string, string> Regions = new Dictionary<string, string> {
+        { "red", "Kanto" }, { "blue", "Kanto" }, { "yellow", "Kanto" }, { "firered", "Kanto" }, { "leafgreen", "Kanto" },
+        { "gold", "Johto" }, { "silver", "Johto" }, { "crystal", "Johto" }, { "heartgold", "Johto" }, { "soulsilver", "Johto" },
+        { "ruby", "Hoenn" }, { "sapphire", "Hoenn" }, { "emerald", "Hoenn" }, { "omegaruby", "Hoenn" }, { "alphasapphire", "Hoenn" },
+        { "diamond", "Sinnoh" }, { "pearl", "Sinnoh" }, { "platinum", "Sinnoh" },
+        { "black", "Unova" }, { "white", "Unova" }, { "black2", "Unova" }, { "white2", "Unova" },
+        { "x", "Kalos" }, { "y", "Kalos" }, { "sun", "Alola" }, { "moon", "Alola" }, { "ultrasun", "Alola" }, { "ultramoon", "Alola" } };
+    public static string RegionOf(string id) { string r; return id != null && Regions.TryGetValue(id, out r) ? r : null; }
+}
 static class PlaySnaps {
     const int Keep = 24;
     public static void Watch(Process emulator, GameEntry g) {
@@ -3303,6 +3436,11 @@ class Page {
     public BoxView Boxes;        // Move Pokemon's box screen
     public bool Main;
     public Theme Theme;
+    public List<WallResult> Gallery;   // Find a wallpaper's results, shown as a grid
+    public Bitmap Picture;       // a wallpaper's preview, shown above the buttons
+    public BrowseRequest Browse; // a folder in the launcher's own browser
+    public int Step = -1;        // a step of the guided first-time setup
+    public bool StepOnly;        // that one step on its own, for players who set up before it existed
 }
 
 // Move Pokemon as boxes, as Pokemon HOME shows them: two games' boxes, with Pokemon dragged between them.
@@ -3452,6 +3590,48 @@ class LauncherForm : Form {
         if (screen == "folder-added") { firstSetup = true; pages.Push(FoldersPage()); pages.Push(FolderAddedPage(Config.RomFolders().FirstOrDefault() ?? "")); }
         if (screen == "credits") pages.Push(CreditsPage());
         if (screen == "settings") pages.Push(SettingsPage());
+        if (screen == "wallpaper") pages.Push(WallpaperPage(true));
+        // setup-<step>[only][@seconds]: a setup step, that far into its entrance (all the way by default).
+        // setupslide-<from>-<to>@seconds: the slide between two steps, that far in.
+        if (screen.StartsWith("setup")) {
+            float now = (float)clock.Elapsed.TotalSeconds, at = 99;
+            string spec = screen; int atSign = spec.IndexOf('@');
+            if (atSign > 0) { at = float.Parse(spec.Substring(atSign + 1), System.Globalization.CultureInfo.InvariantCulture); spec = spec.Substring(0, atSign); }
+            inSetup = true;
+            if (spec.StartsWith("setupslide-")) {
+                var f = spec.Split('-');
+                setupFrom = SetupPage(int.Parse(f[1]), false); pages.Push(SetupPage(int.Parse(f[2]), false));
+                setupDir = int.Parse(f[2]) > int.Parse(f[1]) ? 1 : -1;
+            } else {
+                bool only = spec.EndsWith("only");
+                pages.Push(SetupPage(int.Parse(spec.Substring(6, 1)), only));
+            }
+            setupAt = now - at;
+        }
+        if (screen == "wallpapers") { pages.Push(SettingsPage()); pages.Push(WallpaperPage(false)); }
+        if (screen == "ownwallpapers") pages.Push(OwnWallpapersPage());
+        if (screen == "findwall" && current != null) pages.Push(FindWallpaperPage(current));
+        // browse, browsedir:<folder>, browsefiles:<folder>: the launcher's own browser.
+        if (screen == "browse") pages.Push(BrowsePage(new BrowseRequest { Title = "Choose your ROM folder", Folders = true, Kinds = RomKinds, Hint = "Open the folder that holds your ROMs, then choose Use this folder." }, null));
+        if (screen == "browsedir" && previewId != null) pages.Push(BrowsePage(new BrowseRequest { Title = "Choose your ROM folder", Folders = true, Kinds = RomKinds }, previewId));
+        if (screen == "browsefiles" && previewId != null) { var rq = new BrowseRequest { Title = "Choose ROMs", Multi = true, Kinds = RomKinds }; foreach (var f in Directory.GetFiles(previewId).Where(x => RomKinds.Contains(Path.GetExtension(x).ToLowerInvariant())).Take(2)) rq.Picked.Add(f); pages.Push(BrowsePage(rq, previewId)); }
+        // wallresults[-free]:<game>: a real search, waiting up to 20 s for its thumbnails.
+        if ((screen == "wallresults" || screen == "wallresults-free") && current != null) {
+            bool more; string name = current.Title.Replace("Pokemon ", "").ToLowerInvariant();
+            var found = WallFind.Search(screen == "wallresults" ? WallFind.Fan : WallFind.Free, "pokemon " + name, 1, out more);
+            pages.Push(WallResultsPage(current, screen == "wallresults" ? WallFind.Fan : WallFind.Free, "pokemon " + name, found, 1, more));
+            WallFind.LoadThumbs(found, delegate { });
+            for (int i = 0; i < 200 && found.Any(r => r.Pic == null && !r.Failed); i++) System.Threading.Thread.Sleep(100);
+        }
+        // wallpreview:<game>: the first fan-art result's preview, downloaded for real and deleted after.
+        if (screen == "wallpreview" && current != null) {
+            bool more; var found = WallFind.Search(WallFind.Fan, "pokemon " + current.Title.Replace("Pokemon ", "").ToLowerInvariant(), 1, out more);
+            var r = found.Skip(1).First();
+            string got = WallFind.Download(r);
+            using (var img = Image.FromFile(got)) { var p = new Page { Title = "Preview", Theme = current.Theme, Picture = new Bitmap(img, img.Width / 2, img.Height / 2), Body = r.Credit }; p.Items.Add(new Item("Use for " + current.Title.Replace("Pokemon ", ""), "", true, null)); p.Items.Add(new Item("Open its page", "", true, null)); pages.Push(p); }
+            File.Delete(got);
+        }
+        if (screen == "ownwallpaper" && current != null) pages.Push(OwnWallpaperPage(current));
         // optpick-<key>: the value list of one of Game options' long settings.
         if (screen.StartsWith("optpick-")) { var o = GameOptions.All.FirstOrDefault(x => x.Key == screen.Substring(8)); if (o != null) { pages.Push(GameOptionsPage(null)); pages.Push(OptionPickPage(null, o)); } }
         if (screen == "emu") pages.Push(EmuPage());
@@ -3770,8 +3950,11 @@ class LauncherForm : Form {
         // For tests: straight to a screen once the start is done, with no key presses to miss (NATIVEMONS_TEST_OPEN=move).
         if (Environment.GetEnvironmentVariable("NATIVEMONS_TEST_OPEN") == "move") OpenBoxView();
         if (err != null) ShowText("Something went wrong", err, null);
-        else if (Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) { firstSetup = true; pages.Push(FoldersPage()); }
+        // NATIVEMONS_TEST_SETUP=1: the guided setup even where games are already found, to try it out.
+        else if ((Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) || Environment.GetEnvironmentVariable("NATIVEMONS_TEST_SETUP") == "1") StartSetup();
         else AskAboutEncrypted();
+        // Asked once, also on the first start of the version that brought the choice.
+        if (err == null && !firstSetup && !Wallpaper.Chosen) { setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds; pages.Push(SetupPage(3, true)); }
         Invalidate();
     }
     // A shortcut started while the launcher is open (see Main), or --launcher at start.
@@ -3887,6 +4070,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.SaveTools), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
         p.Items.Add(new Item("Game options", "", true, delegate { pages.Push(GameOptionsPage(null)); }) { Icon = '\uE8D2', Info = "Volume, fullscreen, text speed, battle style and more, for every game." });
+        p.Items.Add(new Item("Wallpapers: " + (Wallpaper.Drawn ? "Drawn scenes" : "From your games"), "", true, delegate { pages.Push(WallpaperPage(false)); }) { Icon = '\uE790', Info = "Drawn scenes or pictures from your own play, and a picture of your own for any game." });
         p.Items.Add(new Item("Controls", "", true, delegate { pages.Push(ControlsPage()); }) { Icon = '\uE765', Info = "The keys each engine uses while you play: saving, fast forward, snapshots, screenshots." });
         p.Items.Add(new Item("Screenshots", "", true, delegate { pages.Push(ScreenshotsPage()); }) { Icon = '', Info = "Open the folders where nativeplat and Infinite Fusion put the screenshots you take while you play." });
         p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, and DS games on Fulldex. Select to turn it " + (QuickStart ? "off" : "on") + "." });
@@ -5870,18 +6054,509 @@ class LauncherForm : Form {
     bool firstSetup;   // the ROM folders page opened by itself because nothing is set up yet
     string FinishFoldersLabel { get { return firstSetup ? "Complete setup" : "Done"; } }
     void FinishFolders() {
+        bool setup = firstSetup;
         firstSetup = false;
         while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+        if (setup && !Wallpaper.Chosen) pages.Push(WallpaperPage(true));
+    }
+    // ---------- Find a wallpaper ----------
+    Page FindWallpaperPage(GameEntry g) {
+        var p = new Page { Title = "Find a wallpaper", Theme = g.Theme, FitBody = true };
+        p.Body = "Fan art comes from wallhaven.cc, safe-for-work pictures only. Free-license art comes from Openverse, with its artist and license kept beside it. Pictures are only downloaded when you pick one, and the artists' rights stay theirs.";
+        string name = g.Title.Replace("Pokemon ", ""), region = WallFind.RegionOf(g.Id);
+        var searches = new List<string[]> { new[] { WallFind.Fan, "pokemon " + name.ToLowerInvariant(), "Fan art: " + name } };
+        if (region != null) searches.Add(new[] { WallFind.Fan, "pokemon " + region.ToLowerInvariant(), "Fan art: " + region });
+        searches.Add(new[] { WallFind.Fan, "pokemon", "Fan art: all Pokemon" });
+        searches.Add(new[] { WallFind.Free, "pokemon " + name.ToLowerInvariant(), "Free-license art: " + name });
+        searches.Add(new[] { WallFind.Free, "pokemon", "Free-license art: all Pokemon" });
+        foreach (var s in searches) {
+            var one = s;
+            p.Items.Add(new Item(one[2], "", true, delegate { RunWallSearch(g, one[0], one[1], 1, null); }) { Icon = '', Info = one[0] == WallFind.Fan ? "Searches wallhaven.cc for \"" + one[1] + "\"." : "Searches Openverse for \"" + one[1] + "\". Every result there carries a Creative Commons license or is public domain." });
+        }
+        return p;
+    }
+    void RunWallSearch(GameEntry g, string source, string query, int page, List<WallResult> before) {
+        List<WallResult> found = null; bool more = false; string problem = null;
+        Busy("Searching", delegate { try { found = WallFind.Search(source, query, page, out more); } catch (Exception e) { problem = e.Message; } return null; }, delegate(string e) {
+            if (problem != null || e != null) { ShowText("Couldn't search", "The search didn't answer: " + (problem ?? e) + "\n\nCheck your internet connection and try again.", null); return; }
+            var all = before != null ? before.Concat(found).ToList() : found;
+            if (all.Count == 0) { ShowText("Nothing found", "No pictures for \"" + query + "\". Try another search.", null); return; }
+            int sel = 0;
+            if (before != null) { sel = before.Count; pages.Pop(); }
+            var res = WallResultsPage(g, source, query, all, page, more); res.Sel = Math.Min(sel, res.Items.Count - 1);
+            pages.Push(res);
+            WallFind.LoadThumbs(found, delegate { dirty = true; });
+        });
+    }
+    Page WallResultsPage(GameEntry g, string source, string query, List<WallResult> all, int page, bool more) {
+        var p = new Page { Title = source == WallFind.Fan ? "Fan art" : "Free-license art", Theme = g.Theme, Gallery = all };
+        foreach (var one in all) { var r = one; p.Items.Add(new Item(r.Title, "", true, delegate { OpenWallPreview(g, r); })); }
+        if (more) p.Items.Add(new Item("More", "", true, delegate { RunWallSearch(g, source, query, page + 1, all); }));
+        return p;
+    }
+    void OpenWallPreview(GameEntry g, WallResult r) {
+        string file = null, problem = null;
+        Busy("Getting the picture", delegate { try { file = WallFind.Download(r); } catch (Exception e) { problem = e.Message; } return null; }, delegate(string e) {
+            if (problem != null || e != null || file == null) { ShowText("Couldn't get it", "The picture didn't download: " + (problem ?? e), null); return; }
+            Bitmap pic = null;
+            try { using (var img = Image.FromFile(file)) { float k = Math.Min(1f, 1400f / Math.Max(img.Width, img.Height)); pic = new Bitmap(img, Math.Max(1, (int)(img.Width * k)), Math.Max(1, (int)(img.Height * k))); } }
+            catch { try { File.Delete(file); } catch { } ShowText("Couldn't use it", "That download isn't a picture nativeMons can show.", null); return; }
+            var p = new Page { Title = "Preview", Theme = g.Theme, Picture = pic, Body = r.Credit };
+            p.Items.Add(new Item("Use for " + g.Title.Replace("Pokemon ", ""), "", true, delegate {
+                string bad = Wallpaper.Set(g.Id, file);
+                try { File.Delete(file); } catch { }
+                if (bad != null) { ShowText("Not used", bad, null); return; }
+                Wallpaper.SetCredit(g.Id, r.Credit);
+                pic.Dispose();
+                // Back to the game's own picture page, which now shows it.
+                while (pages.Count > 1 && pages.Peek().Title != g.Title) pages.Pop();
+                if (pages.Peek().Title == g.Title) RebuildTop(delegate { return OwnWallpaperPage(g); });
+                Invalidate();
+            }));
+            p.Items.Add(new Item("Open its page", "", r.Page != "", delegate { try { Process.Start(new ProcessStartInfo(r.Page) { UseShellExecute = true }); } catch { } }));
+            p.OnBack = delegate { pages.Pop(); try { File.Delete(file); } catch { } };
+            pages.Push(p);
+        });
+    }
+    static int GalleryMove(int sel, string a, int count) {
+        int n = a == "left" ? sel - 1 : a == "right" ? sel + 1 : a == "up" ? sel - 2 : a == "down" ? sel + 2 : sel;
+        return Math.Max(0, Math.Min(count - 1, n));
+    }
+    // Results as a grid of two, each cropped as it would fill the screen; the grid follows the selection.
+    void RenderGallery(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
+        var accent = Accent(th);
+        float y0 = BackButton(g, w, h, m, top, accent);
+        Write(g, p.Title, titleFont, PhoneText, new RectangleF(m, y0, w - 2 * m, titleFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Center, false);
+        y0 += titleFont.Height * 1.5f;
+        float gap = m * 0.6f, cw = (w - 2 * m - gap) / 2, ch = cw * 1.45f, rowH = ch + gap, viewH = bottom - y0;
+        int rows = (p.Items.Count + 1) / 2, selRow = p.Sel / 2;
+        float want = Math.Max(0, Math.Min(rows * rowH - viewH, selRow * rowH - (viewH - rowH) / 2));
+        if (p.ScrollRow < 0) p.ScrollRow = want;
+        p.ScrollRow += (want - p.ScrollRow) * 0.25f;
+        if (Math.Abs(want - p.ScrollRow) > 0.5f) scrolling = true; else p.ScrollRow = want;
+        var st = g.Save();
+        g.SetClip(new RectangleF(0, y0, w, viewH), System.Drawing.Drawing2D.CombineMode.Intersect);
+        for (int i = 0; i < p.Items.Count; i++) {
+            float x = m + (i % 2) * (cw + gap), y = y0 + (i / 2) * rowH - p.ScrollRow;
+            if (y > bottom || y + ch < y0) continue;
+            bool sel = i == p.Sel; float lift = sel ? selEase * ch * 0.02f : 0;
+            var c = new RectangleF(x, y - lift, cw, ch);
+            using (var path = Round(c, cw * 0.08f)) {
+                var r = i < p.Gallery.Count ? p.Gallery[i] : null;
+                var pic = r != null ? r.Pic : null;
+                var cs = g.Save();
+                g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+                using (var b = new SolidBrush(r == null ? Fade(accent, 30) : Color.FromArgb(226, 228, 234))) g.FillRectangle(b, c);
+                if (pic != null) { float s = Math.Max(c.Width / pic.Width, c.Height / pic.Height); g.DrawImage(pic, c.X + (c.Width - pic.Width * s) / 2, c.Y + (c.Height - pic.Height * s) / 2, pic.Width * s, pic.Height * s); }
+                else if (r == null) Write(g, "More", itemBold, accent, c, StringAlignment.Center, StringAlignment.Center, false);
+                else if (r.Failed) Write(g, "Couldn't load", smallFont, PhoneSub, c, StringAlignment.Center, StringAlignment.Center, false);
+                else { SpinningBall(g, c.X + c.Width / 2, c.Y + c.Height / 2, cw * 0.28f, t); spinning = true; }
+                g.Restore(cs);
+                using (var pen = new Pen(sel ? accent : PhoneLine, sel ? Math.Max(3f, w * 0.008f) : 1)) g.DrawPath(pen, path);
+            }
+            hits.Add(new KeyValuePair<RectangleF, int>(c, i));
+        }
+        g.Restore(st);
+    }
+    // A found picture as the home screen would show it, its credit, and what to do with it.
+    void RenderPreview(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
+        var accent = Accent(th);
+        float y0 = BackButton(g, w, h, m, top, accent) + h * 0.006f;
+        float bH = h * 0.06f, gap = h * 0.012f, by = bottom - h * 0.01f - p.Items.Count * (bH + gap);
+        float credH = g.MeasureString(p.Body ?? "", smallFont, (int)(w - 2 * m)).Height + 4;
+        float ph = by - credH - gap * 2 - y0, pw = Math.Min(w - 2 * m, ph * 0.62f);
+        var c = new RectangleF((w - pw) / 2, y0, pw, ph);
+        using (var path = Round(c, pw * 0.06f)) {
+            var st = g.Save();
+            g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            var pic = p.Picture; float s = Math.Max(c.Width / pic.Width, c.Height / pic.Height);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
+            g.DrawImage(pic, c.X + (c.Width - pic.Width * s) / 2, c.Y + (c.Height - pic.Height * s) / 2, pic.Width * s, pic.Height * s);
+            g.Restore(st);
+            using (var pen = new Pen(PhoneLine, 2)) g.DrawPath(pen, path);
+        }
+        Write(g, p.Body ?? "", smallFont, PhoneSub, new RectangleF(m, c.Bottom + gap, w - 2 * m, credH), StringAlignment.Center, StringAlignment.Near, true);
+        for (int i = 0; i < p.Items.Count; i++) {
+            var it = p.Items[i]; bool sel = i == p.Sel; float fill = sel ? selEase : 0;
+            var r = new RectangleF(m, by + i * (bH + gap), w - 2 * m, bH);
+            using (var path = Round(r, bH / 2)) {
+                using (var b = new SolidBrush(Mix(PhoneRow, accent, fill))) g.FillPath(b, path);
+                using (var pen = new Pen(Mix(PhoneLine, accent, fill), Math.Max(1.5f, h * 0.002f))) g.DrawPath(pen, path);
+            }
+            Write(g, it.Text, sel ? itemBold : itemFont, it.On ? Mix(PhoneText, Color.White, fill) : Text3, r, StringAlignment.Center, StringAlignment.Center, false);
+            hits.Add(new KeyValuePair<RectangleF, int>(r, i));
+        }
+    }
+    // ---------- guided first-time setup: welcome, your games, 3DS games, wallpapers, done ----------
+    const int SetupSteps = 5;
+    const float SetupSlide = 0.42f, SetupFade = 0.5f;
+    bool inSetup;
+    Page setupFrom, setupLeaving; float setupAt = -10, setupShotAt = -10; int setupDir = 1; Bitmap setupShot;
+    void StartSetup() {
+        inSetup = true; firstSetup = true;
+        setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds;
+        pages.Push(SetupPage(0, false));
+    }
+    void SetupGo(int step) {
+        var from = pages.Peek();
+        setupFrom = from; setupDir = step > from.Step ? 1 : -1; setupAt = (float)clock.Elapsed.TotalSeconds;
+        pages.Pop(); pages.Push(SetupPage(step, false));
+    }
+    // Back on the same step after a search: its parts ease in again with the new count.
+    void SetupAgain(int step) {
+        while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+        setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds;
+        pages.Push(SetupPage(step, false));
+    }
+    void SetupFinish() {
+        setupLeaving = pages.Peek(); setupShotAt = (float)clock.Elapsed.TotalSeconds;
+        inSetup = false; firstSetup = false; setupFrom = null;
+        while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+        ReplaceMain();
+    }
+    static readonly string[] SetupTitles = { "Welcome to nativeMons", "Where are your games?", "Play 3DS games too?", "Pick a wallpaper", "You're all set" };
+    Page SetupPage(int step, bool only) {
+        var p = new Page { Title = only ? "New: wallpapers" : SetupTitles[step], Step = step, StepOnly = only };
+        int have = Library.Games.Count(g => g.Playable), folders = Config.RomFolders().Count + Config.RomFiles().Count;
+        switch (step) {
+            case 0:
+                p.Body = "Your Pokemon games, running natively on your PC. Let's get them ready: it takes about a minute.";
+                p.Items.Add(new Item("Get started", "", true, delegate { SetupGo(1); }));
+                p.OnBack = delegate { };
+                break;
+            case 1:
+                var withRom = Library.Games.Where(x => !x.Playable && (x.FulldexRom != null || x.CtrRom != null || x.FoundUnsupported != null)).ToList();
+                p.Body = have > 0 ? "Found " + have + " of " + Library.Games.Count + " games. Add another folder if you keep some elsewhere."
+                    : withRom.Count > 0 ? "Found ROMs for " + withRom.Count + (withRom.Count == 1 ? " game" : " games") + ", but none can start yet. " + Library.WhyNotPlayable(withRom[0])
+                    : folders > 0 ? "No games found there yet. Try the folder that holds your ROMs: every folder inside it is searched too."
+                    : "Choose the folder with your ROMs. Every folder inside it is searched too, and file names don't matter. You can also drop ROMs here.";
+                p.Items.Add(new Item(folders > 0 ? "Add another folder" : "Add a folder", "", true, delegate { AddFolder(); }));
+                p.Items.Add(new Item("Add a ROM file", "", true, delegate { AddRomFile(); }));
+                p.Items.Add(new Item(have > 0 || withRom.Count > 0 ? "Next" : "Skip for now", "", true, delegate { SetupGo(2); }));
+                p.Sel = have > 0 || withRom.Count > 0 ? 2 : 0;
+                p.OnBack = delegate { SetupGo(0); };
+                break;
+            case 2:
+                p.Body = "X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon play through an emulator you pick later, from Emu. Nothing downloads now.";
+                p.Items.Add(new Item("Yes, show 3DS games", "", true, delegate { Emu3ds.Enabled = true; ReplaceMain(); SetupGo(3); }));
+                p.Items.Add(new Item("Not now", "", true, delegate { Emu3ds.Enabled = false; ReplaceMain(); SetupGo(3); }));
+                p.Sel = Emu3ds.Enabled ? 0 : 1;
+                p.OnBack = delegate { SetupGo(1); };
+                break;
+            case 3:
+                p.Body = "A scene drawn in each game's colors, or pictures from your own play. You can also give any game a picture of your own, in Settings.";
+                Action<bool> pick = delegate(bool drawn) { Wallpaper.Drawn = drawn; if (only) SetupFinish(); else SetupGo(4); };
+                p.Items.Add(new Item("Drawn scenes", "", true, delegate { pick(true); }));
+                p.Items.Add(new Item("Pictures from your games", "", true, delegate { pick(false); }));
+                p.Sel = Wallpaper.Chosen && !Wallpaper.Drawn ? 1 : 0;
+                p.OnBack = only ? (Action)delegate { SetupFinish(); } : delegate { SetupGo(2); };
+                break;
+            default:
+                p.Body = (have == 1 ? "1 game is" : have + " games are") + " ready to play.\n3DS games: " + (Emu3ds.Enabled ? "on" : "off") + ". Wallpapers: " + (Wallpaper.Drawn ? "drawn scenes" : "from your games") + ".\nAll of this can be changed in Settings.";
+                p.Items.Add(new Item(have > 0 ? "Start playing" : "Go to the home screen", "", true, delegate { SetupFinish(); }));
+                p.OnBack = delegate { SetupGo(3); };
+                break;
+        }
+        return p;
+    }
+    // A step: its picture, title, words and buttons, each easing in a moment after the last.
+    void RenderSetup(Graphics g, Page p, int w, int h, float t, Theme th, float appear, bool live) {
+        float m = w * 0.07f, top = h * 0.055f;
+        var accent = Accent(th);
+        Func<float, float> ease = d => Ease((appear - d) / 0.4f);
+        Func<float, int> alpha = d => (int)(255 * ease(d));
+        // The picture.
+        float size = w * (p.Items.Count > 2 ? 0.27f : 0.32f), cx = w / 2f, ay = h * (p.StepOnly ? 0.11f : 0.14f);
+        float pop = BackOut((appear - 0.02f) / 0.5f), k = Math.Max(0, pop);
+        if (k > 0) {
+            var st = g.Save();
+            g.TranslateTransform(cx, ay + size / 2); g.ScaleTransform(0.6f + 0.4f * k, 0.6f + 0.4f * k); g.TranslateTransform(-cx, -(ay + size / 2));
+            SetupArt(g, p, new RectangleF(cx - size / 2, ay, size, size), t, appear, th, live);
+            g.Restore(st);
+        }
+        float y = ay + size + h * 0.045f;
+        // Title and words, rising into place.
+        float rise = (1 - ease(0.1f)) * h * 0.02f;
+        var tr = new RectangleF(m, y + rise, w - 2 * m, titleFont.Height * 1.5f);
+        var tf = FitFont(g, p.Title, tr.Size, heroFont, 0.6f, false);
+        Write(g, p.Title, tf, Fade(PhoneText, alpha(0.1f)), tr, StringAlignment.Center, StringAlignment.Center, false);
+        y += tr.Height + h * 0.012f;
+        string body = p.Body ?? "";
+        if (p.Step == 1) {
+            // The count climbs as the step eases in.
+            int have = Library.Games.Count(x => x.Playable), shown = (int)Math.Round(have * Ease((appear - 0.2f) / 0.9f));
+            if (have > 0) body = body.Replace("Found " + have + " of", "Found " + shown + " of");
+        }
+        float bh = g.MeasureString(body, bodyFont, (int)(w - 2 * m)).Height + 2;
+        rise = (1 - ease(0.18f)) * h * 0.02f;
+        Write(g, body, bodyFont, Fade(PhoneSub, alpha(0.18f)), new RectangleF(m, y + rise, w - 2 * m, bh), StringAlignment.Center, StringAlignment.Near, true);
+        y += bh + h * 0.02f;
+        if (p.Step == 1) SetupFolders(g, w, m, y, alpha(0.26f));
+        // Buttons, stacked from the bottom: the selected one filled in the game's color.
+        float bH = h * 0.068f, gap = h * 0.014f, by = h * 0.93f - p.Items.Count * (bH + gap);
+        for (int i = 0; i < p.Items.Count; i++) {
+            var it = p.Items[i];
+            float d = 0.3f + i * 0.06f, a = ease(d), shift = (1 - a) * h * 0.03f;
+            var r = new RectangleF(m, by + i * (bH + gap) + shift, w - 2 * m, bH);
+            bool sel = i == p.Sel;
+            float fill = sel ? (live ? selEase : 1) : 0;
+            using (var path = Round(r, bH / 2)) {
+                using (var b = new SolidBrush(Fade(Mix(PhoneRow, accent, fill), (int)(255 * a)))) g.FillPath(b, path);
+                using (var pen = new Pen(Fade(Mix(PhoneLine, accent, fill), (int)(255 * a)), Math.Max(1.5f, h * 0.002f))) g.DrawPath(pen, path);
+            }
+            Write(g, it.Text, sel ? itemBold : itemFont, Fade(Mix(PhoneText, Color.White, fill), (int)(255 * a)), r, StringAlignment.Center, StringAlignment.Center, false);
+            if (live && a > 0.5f) hits.Add(new KeyValuePair<RectangleF, int>(r, i));
+        }
+        // Where you are: a dot per step, the current one stretched into a pill.
+        if (!p.StepOnly) {
+            float dot = Math.Max(5f, w * 0.014f), gapD = dot * 1.1f, pill = dot * 3.2f;
+            float moveK = live && setupFrom != null ? Ease((t - setupAt) / SetupSlide) : 1;
+            int from = setupFrom != null && live ? setupFrom.Step : p.Step;
+            float total = (SetupSteps - 1) * (dot + gapD) + pill, dx = (w - total) / 2, dy = top + h * 0.03f;
+            for (int i = 0; i < SetupSteps; i++) {
+                float wi = dot + (pill - dot) * (i == p.Step ? moveK : i == from ? 1 - moveK : 0);
+                using (var path = Round(new RectangleF(dx, dy, wi, dot), dot / 2)) using (var b = new SolidBrush(i <= p.Step ? Fade(accent, i == p.Step ? 255 : 150) : PhoneLine)) g.FillPath(b, path);
+                dx += wi + gapD;
+            }
+        }
+    }
+    void SetupFolders(Graphics g, int w, float m, float y, int a) {
+        var names = Config.RomFolders().Select(f => Path.GetFileName(f.TrimEnd('\\'))).Concat(Config.RomFiles().Select(Path.GetFileName)).ToList();
+        if (names.Count == 0 || a <= 0) return;
+        string line = string.Join("   ", names.Take(3).ToArray()) + (names.Count > 3 ? "   +" + (names.Count - 3) + " more" : "");
+        var r = new RectangleF(m, y, w - 2 * m, smallFont.Height * 2f);
+        using (var path = Round(r, r.Height / 2)) using (var b = new SolidBrush(Fade(PhoneRow, a))) g.FillPath(b, path);
+        Write(g, "  " + line, smallFont, Fade(PhoneSub, a), r, StringAlignment.Center, StringAlignment.Center, false);
+    }
+    void SetupArt(Graphics g, Page p, RectangleF r, float t, float appear, Theme th, bool live) {
+        switch (p.Step) {
+            case 0: SpinningBall(g, r.X + r.Width / 2, r.Y + r.Height / 2, r.Width * 0.82f, t); spinning = true; break;
+            case 1: GlossTile(g, r, r.Width * 0.24f, AppColors[App("ROMs")]); AppArt(g, App("ROMs"), r, AppColors[App("ROMs")]); break;
+            case 2: GlossTile(g, r, r.Width * 0.24f, AppColors[App("Emu")]); AppArt(g, App("Emu"), r, AppColors[App("Emu")]); break;
+            case 3: {
+                // The two choices, side by side, the selected one raised and ringed.
+                var sample = th != null && th.Finish != "plain" ? th : (Library.Games.Find(x => x.Id == "crystal") ?? Library.Games.FirstOrDefault(x => x.Theme != null)).Theme;
+                float cw = r.Width * 0.8f, ch = r.Height * 1.05f, gapC = r.Width * 0.12f;
+                for (int i = 0; i < 2; i++) {
+                    bool sel = p.Sel == i;
+                    float lift = sel ? (live ? selEase : 1) * r.Height * 0.06f : 0;
+                    var c = new RectangleF(r.X + r.Width / 2 + (i == 0 ? -gapC / 2 - cw : gapC / 2), r.Y - lift, cw, ch);
+                    var st = g.Save();
+                    using (var path = Round(c, cw * 0.12f)) {
+                        g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+                        if (i == 0) { var layer = LayerFor((int)c.Width, (int)c.Height, sample); g.DrawImage(layer.Picture, c.X, c.Y, c.Width, c.Height); }
+                        else if (!GameArt.DrawTown(g, sample.GameId, c, c)) {
+                            using (var b = new SolidBrush(Color.FromArgb(72, 76, 88))) g.FillRectangle(b, c);
+                            using (var big = new Font("Segoe MDL2 Assets", c.Width * 0.3f, GraphicsUnit.Pixel)) Write(g, "", big, Color.FromArgb(220, 255, 255, 255), c, StringAlignment.Center, StringAlignment.Center, false);
+                        }
+                        g.Restore(st);
+                        using (var pen = new Pen(sel ? Accent(th) : PhoneLine, Math.Max(2f, cw * (sel ? 0.03f : 0.012f)))) g.DrawPath(pen, path);
+                    }
+                    if (live) hits.Add(new KeyValuePair<RectangleF, int>(c, i));
+                }
+                break;
+            }
+            default: {
+                // A check mark drawing itself in a green disc.
+                var green = Color.FromArgb(46, 164, 79);
+                float d = r.Width * 0.9f, k = Ease((appear - 0.15f) / 0.5f);
+                var c = new RectangleF(r.X + (r.Width - d) / 2, r.Y + (r.Height - d) / 2, d, d);
+                using (var b = new SolidBrush(green)) g.FillEllipse(b, c);
+                var pts = new[] { new PointF(c.X + d * 0.28f, c.Y + d * 0.52f), new PointF(c.X + d * 0.44f, c.Y + d * 0.67f), new PointF(c.X + d * 0.73f, c.Y + d * 0.36f) };
+                float l1 = Vector(pts[0], pts[1]), l2 = Vector(pts[1], pts[2]), done = k * (l1 + l2);
+                var path = new List<PointF> { pts[0] };
+                if (done <= l1) path.Add(new PointF(pts[0].X + (pts[1].X - pts[0].X) * done / l1, pts[0].Y + (pts[1].Y - pts[0].Y) * done / l1));
+                else { path.Add(pts[1]); float f = (done - l1) / l2; path.Add(new PointF(pts[1].X + (pts[2].X - pts[1].X) * f, pts[1].Y + (pts[2].Y - pts[1].Y) * f)); }
+                if (k > 0) using (var pen = new Pen(Color.White, d * 0.09f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) g.DrawLines(pen, path.ToArray());
+                // A ring of little sparks bursting out as it completes.
+                float burst = Ease((appear - 0.55f) / 0.6f);
+                if (burst > 0 && burst < 1) for (int i = 0; i < 10; i++) {
+                    double a = i * Math.PI / 5; float rr = d * (0.55f + 0.35f * burst), s = d * 0.035f * (1 - burst);
+                    using (var b = new SolidBrush(Fade(i % 2 == 0 ? green : Color.FromArgb(240, 180, 40), (int)(255 * (1 - burst))))) g.FillEllipse(b, c.X + d / 2 + (float)Math.Cos(a) * rr - s, c.Y + d / 2 + (float)Math.Sin(a) * rr - s, s * 2, s * 2);
+                }
+                break;
+            }
+        }
+    }
+    static float Vector(PointF a, PointF b) { float dx = b.X - a.X, dy = b.Y - a.Y; return (float)Math.Sqrt(dx * dx + dy * dy); }
+    // The setup's slide between steps: the old step leaves one way as the new one comes in from the other.
+    void RenderSetupFlow(Graphics g, Page p, int w, int h, float t, Theme th) {
+        float k = Ease((t - setupAt) / SetupSlide);
+        if (setupFrom != null && k < 1) {
+            var st = g.Save();
+            g.TranslateTransform(-setupDir * k * w * 0.6f, 0);
+            RenderSetup(g, setupFrom, w, h, t, th, 99, false);
+            g.Restore(st);
+            using (var b = new SolidBrush(Fade(PhoneBg, (int)(255 * k)))) g.FillRectangle(b, 0, 0, w, h);
+            st = g.Save();
+            g.TranslateTransform(setupDir * (1 - k) * w, 0);
+            RenderSetup(g, p, w, h, t, th, t - setupAt, true);
+            g.Restore(st);
+        } else {
+            if (setupFrom != null && k >= 1) setupFrom = null;
+            RenderSetup(g, p, w, h, t, th, t - setupAt, true);
+        }
+    }
+    // Leaving setup: the last step fades and grows away over the home screen.
+    void RenderSetupLeaving(Graphics g, int w, int h, float t, Theme th) {
+        if (setupLeaving == null) return;
+        if (setupShot == null || setupShot.Width != w || setupShot.Height != h) {
+            if (setupShot != null) setupShot.Dispose();
+            setupShot = new Bitmap(Math.Max(1, w), Math.Max(1, h));
+            using (var sg = Graphics.FromImage(setupShot)) {
+                sg.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias; sg.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                sg.Clear(PhoneBg); RenderSetup(sg, setupLeaving, w, h, t, th, 99, false);
+            }
+        }
+        float k = Ease((t - setupShotAt) / SetupFade);
+        if (k >= 1) { setupShot.Dispose(); setupShot = null; setupLeaving = null; return; }
+        float s = 1 + 0.08f * k;
+        var dest = new RectangleF(w / 2f - w * s / 2, h / 2f - h * s / 2, w * s, h * s);
+        using (var ia = new System.Drawing.Imaging.ImageAttributes()) {
+            ia.SetColorMatrix(new System.Drawing.Imaging.ColorMatrix { Matrix33 = 1 - k });
+            g.DrawImage(setupShot, Rectangle.Round(dest), 0, 0, setupShot.Width, setupShot.Height, GraphicsUnit.Pixel, ia);
+        }
+    }
+    // Rebuilds the page under the one closing, keeping its selection, so its labels show what just changed.
+    void BackAndRebuild(Func<Page> make) {
+        pages.Pop();
+        if (pages.Count == 0) return;
+        int sel = pages.Peek().Sel; pages.Pop();
+        var n = make(); n.Sel = Math.Max(0, Math.Min(sel, n.Items.Count - 1)); pages.Push(n);
+    }
+    void RebuildTop(Func<Page> make) {
+        int sel = pages.Peek().Sel; pages.Pop();
+        var n = make(); n.Sel = Math.Max(0, Math.Min(sel, n.Items.Count - 1)); pages.Push(n);
+    }
+    Page WallpaperPage(bool asking) {
+        var p = new Page { Title = "Wallpapers", FitBody = true };
+        p.Body = "The home screen can show a scene drawn for each game, or pictures from your own play: the towns captured from your games, and snapshots taken while you play 3DS games. A game with no pictures yet shows its scene." + (asking ? "\n\nYou can change this, or give any game a picture of your own, in Settings." : "");
+        bool chosen = Wallpaper.Chosen, drawn = Wallpaper.Drawn;
+        Action<bool> pick = delegate(bool v) {
+            Wallpaper.Drawn = v;
+            if (asking) pages.Pop(); else RebuildTop(delegate { return WallpaperPage(false); });
+            Invalidate();
+        };
+        p.Items.Add(new Item("Drawn scenes" + (chosen && drawn ? " (in use)" : ""), "", true, delegate { pick(true); }) { Icon = '',
+            Info = "Each game's own drawn scene, in its colors. No snapshots are taken while you play." });
+        p.Items.Add(new Item("Pictures from your games" + (chosen && !drawn ? " (in use)" : ""), "", true, delegate { pick(false); }) { Icon = '',
+            Info = "Towns captured from your games, and pictures of the top screen taken while you play a 3DS game. They stay on your PC. Games without any show their drawn scene." });
+        if (!asking) {
+            int own = Library.Games.Count(g => Wallpaper.Own(g.Id) != null);
+            p.Items.Add(new Item("Your own pictures", own == 0 ? "None yet." : own + (own == 1 ? " game has one." : " games have one."), true, delegate { pages.Push(OwnWallpapersPage()); }) { Icon = '',
+                Info = "Pick any picture on your PC for a game. It shows behind the home screen whenever that game is in front, instead of the choice above." });
+            p.OnBack = delegate { BackAndRebuild(SettingsPage); };
+        }
+        return p;
+    }
+    Page OwnWallpapersPage() {
+        var p = new Page { Title = "Your own pictures" };
+        foreach (var game in Library.Games) {
+            var g = game;
+            bool has = Wallpaper.Own(g.Id) != null;
+            p.Items.Add(new Item(g.Title, has ? "Your picture." : "", true, delegate { pages.Push(OwnWallpaperPage(g)); }) { Theme = g.Theme, TileHint = has ? "Your picture" : "",
+                Info = has ? "Shows your own picture. Select to change or remove it." : "Shows the wallpaper chosen under Wallpapers. Select to pick a picture of your own." });
+        }
+        p.OnBack = delegate { BackAndRebuild(delegate { return WallpaperPage(false); }); };
+        return p;
+    }
+    Page OwnWallpaperPage(GameEntry g) {
+        bool has = Wallpaper.Own(g.Id) != null;
+        var p = new Page { Title = g.Title, Theme = g.Theme, FitBody = true };
+        string credit = has ? Wallpaper.Credit(g.Id) : null;
+        p.Body = has ? "Your picture shows behind the home screen whenever " + g.Title + " is in front." + (credit != null ? "\n\n" + credit : "") : "Pick a picture on your PC, or find one online, to show behind the home screen whenever " + g.Title + " is in front. nativeMons keeps its own copy, so the original can move or go.";
+        p.Items.Add(new Item("Find a wallpaper", "", true, delegate { pages.Push(FindWallpaperPage(g)); }) { Icon = '', Info = "Search fan art and free-license art online. Only what you pick is downloaded." });
+        p.Items.Add(new Item(has ? "Choose another picture" : "Choose a picture", "", true, delegate {
+            Browse(new BrowseRequest { Title = "Choose a picture", Kinds = PictureKinds,
+                Hint = "Open the folder with your picture and select it. PNG, JPG, BMP and GIF work.",
+                Done = delegate(string[] picked) {
+                    string problem = Wallpaper.Set(g.Id, picked[0]);
+                    if (problem != null) { ShowText("Not used", problem, null); return; }
+                    RebuildTop(delegate { return OwnWallpaperPage(g); });
+                } });
+        }) { Icon = '', Info = "PNG, JPG, BMP or GIF. It's cropped to fill the screen." });
+        p.Items.Add(new Item("Remove your picture", "", has, delegate {
+            Wallpaper.Remove(g.Id);
+            RebuildTop(delegate { return OwnWallpaperPage(g); });
+            Invalidate();
+        }) { Icon = '', Info = has ? "Goes back to the wallpaper chosen under Wallpapers. Only nativeMons' copy is deleted." : "This game has no picture of your own." });
+        p.OnBack = delegate { BackAndRebuild(OwnWallpapersPage); };
+        return p;
+    }
+    // ---------- the launcher's own browser, in place of Windows' dialogs ----------
+    static readonly string[] RomKinds = { ".gb", ".gbc", ".gba", ".nds", ".3ds", ".cci", ".zip" };
+    static readonly string[] PictureKinds = { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
+    // Opens at the last folder browsed, with its parents underneath, so Back walks up the way you'd expect.
+    void Browse(BrowseRequest req) {
+        pages.Push(BrowsePage(req, null));
+        string last = Config.Read("browse-last.txt", "").Trim();
+        if (last == "" || !Directory.Exists(last)) return;
+        var trail = new List<string>();
+        for (var d = new DirectoryInfo(last); d != null; d = d.Parent) trail.Insert(0, d.FullName);
+        foreach (var d in trail) pages.Push(BrowsePage(req, d));
+    }
+    void BrowseFinish(BrowseRequest req, string[] paths, string at) {
+        if (at != null) Config.Write("browse-last.txt", at);
+        while (pages.Count > 1 && pages.Peek().Browse == req) pages.Pop();
+        req.Done(paths);
+        Invalidate();
+    }
+    static string Folder(string path) { var n = Path.GetFileName(path.TrimEnd('\\')); return n == "" ? path : n; }
+    Page BrowsePage(BrowseRequest req, string dir) {
+        var p = new Page { Title = dir == null ? req.Title : Folder(dir), Browse = req, FitBody = true };
+        if (dir == null) {
+            p.Body = req.Hint;
+            var places = new List<string[]> {
+                new[] { "Desktop", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory) },
+                new[] { "Documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) },
+                new[] { "Downloads", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads") },
+                new[] { "Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures) } };
+            foreach (var pl in places) {
+                var one = pl;
+                if (one[1] != "" && Directory.Exists(one[1])) p.Items.Add(new Item(one[0], "", true, delegate { pages.Push(BrowsePage(req, one[1])); }) { Icon = one[0] == "Desktop" ? IcoDesktop : one[0] == "Documents" ? IcoDocs : one[0] == "Downloads" ? IcoDown : IcoPics, TileHint = one[1], Info = one[1] });
+            }
+            foreach (var drive in DriveInfo.GetDrives()) {
+                var d = drive; string label = "";
+                try { if (!d.IsReady) continue; label = d.VolumeLabel; } catch { continue; }
+                string free = ""; try { free = (d.AvailableFreeSpace / 1073741824L) + " GB free of " + (d.TotalSize / 1073741824L) + " GB"; } catch { }
+                p.Items.Add(new Item((label != "" ? label : "Local disk") + " (" + d.Name.TrimEnd('\\') + ")", "", true, delegate { pages.Push(BrowsePage(req, d.RootDirectory.FullName)); }) { Icon = d.DriveType == DriveType.Removable ? IcoUsb : IcoDrive, TileHint = free, Info = d.Name + (free != "" ? "\n\n" + free : "") });
+            }
+            return p;
+        }
+        string[] subs = new string[0], files = new string[0];
+        try {
+            subs = new DirectoryInfo(dir).GetDirectories().Where(x => (x.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0).Select(x => x.FullName).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
+            files = Directory.GetFiles(dir).Where(f => req.Kinds.Contains(Path.GetExtension(f).ToLowerInvariant())).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
+        } catch (Exception e) { p.Body = dir + "\n\nCan't look inside: " + e.Message; return p; }
+        p.Body = dir;
+        if (req.Folders) p.Items.Add(new Item("Use this folder", "", true, delegate { BrowseFinish(req, new[] { dir }, dir); }) { Icon = IcoUse,
+            TileHint = files.Length == 0 ? "No ROMs right here; folders inside are searched too." : files.Length + (files.Length == 1 ? " ROM here" : " ROMs here") + ", and folders inside are searched too.",
+            Info = "Every folder inside " + Folder(dir) + " is searched too." });
+        if (req.Multi && req.Picked.Count > 0) p.Items.Add(new Item("Add " + req.Picked.Count + (req.Picked.Count == 1 ? " file" : " files"), "", true, delegate { BrowseFinish(req, req.Picked.ToArray(), dir); }) { Icon = IcoAdd, Info = string.Join("\n", req.Picked.Select(Path.GetFileName).ToArray()) });
+        foreach (var sub in subs) { var s = sub; p.Items.Add(new Item(Folder(s), "", true, delegate { pages.Push(BrowsePage(req, s)); }) { Icon = IcoFolder, Info = s }); }
+        foreach (var file in files) {
+            var f = file; bool picked = req.Picked.Contains(f);
+            string size = ""; try { size = (new FileInfo(f).Length / 1024 + 1) + " KB"; } catch { }
+            p.Items.Add(new Item(Path.GetFileName(f) + (picked ? ": Selected" : ""), "", !req.Folders, delegate {
+                if (!req.Multi) { BrowseFinish(req, new[] { f }, dir); return; }
+                if (!req.Picked.Remove(f)) req.Picked.Add(f);
+                RebuildTop(delegate { return BrowsePage(req, dir); });
+            }) { Icon = FileIcon(f), TileHint = req.Folders ? "" : size, Info = req.Folders ? f + "\n\nPick the folder to use every ROM in it." : f + (size != "" ? "\n\n" + size : "") });
+        }
+        if (subs.Length == 0 && files.Length == 0) p.Body = dir + "\n\nNothing here to pick.";
+        if (p.Items.Count > 40) p.Jump = 10;
+        return p;
     }
     void AddFolder() {
-        using (var d = new FolderBrowserDialog { Description = "Choose a folder with your ROMs (.gb, .gbc, .gba, .nds)" }) {
-            if (d.ShowDialog(this) != DialogResult.OK) return;
-            string chosen = d.SelectedPath;
-            var l = Config.RomFolders();
-            if (!l.Contains(chosen)) { l.Add(chosen); Config.SaveRomFolders(l); }
-            while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
-            Rescan(delegate { pages.Push(FoldersPage()); pages.Push(FolderAddedPage(chosen)); });
-        }
+        Browse(new BrowseRequest { Title = "Choose your ROM folder", Folders = true, Kinds = RomKinds,
+            Hint = "Open the folder that holds your ROMs, then choose Use this folder. Every folder inside it is searched too.",
+            Done = delegate(string[] picked) {
+                string chosen = picked[0];
+                var l = Config.RomFolders();
+                if (!l.Contains(chosen)) { l.Add(chosen); Config.SaveRomFolders(l); }
+                while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
+                Rescan(delegate { if (inSetup) SetupAgain(1); else { pages.Push(FoldersPage()); pages.Push(FolderAddedPage(chosen)); } });
+            } });
     }
     // Says what the search found and how to carry on, with the likely next step selected.
     Page FolderAddedPage(string folder) {
@@ -5923,10 +6598,9 @@ class LauncherForm : Form {
         return p;
     }
     void AddRomFile() {
-        using (var d = new OpenFileDialog { Filter = "ROM or zip (*.gb, *.gbc, *.gba, *.nds, *.zip)|*.gb;*.gbc;*.gba;*.nds;*.zip|All files (*.*)|*.*", Title = "Choose a ROM", Multiselect = true }) {
-            if (d.ShowDialog(this) != DialogResult.OK) return;
-            TakeDrop(d.FileNames);
-        }
+        Browse(new BrowseRequest { Title = "Choose ROMs", Multi = true, Kinds = RomKinds,
+            Hint = "Open the folder with your ROM and select it. Select several to add them together. A .zip works too: its ROMs are copied out.",
+            Done = delegate(string[] picked) { TakeDrop(picked); } });
     }
     // ---------- dropped files ----------
     bool CanTakeDrop() { return job == null && !starting && pages.Count > 0 && pages.Peek().Boxes == null; }
@@ -5951,6 +6625,8 @@ class LauncherForm : Form {
             PickCurrent();
             ReplaceMain();
             if (e != null) { ShowText("Something went wrong", e, null); return; }
+            // During setup the step itself says what was found.
+            if (inSetup) { SetupAgain(1); if (saves.Count > 0) ImportSaveFiles(saves); AskAboutEncrypted(); return; }
             var lines = new List<string>();
             foreach (var f in folders) lines.Add("Folder added: " + f);
             foreach (var f in added) lines.Add(Path.GetFileName(f) + ": " + WhatRomIs(f));
@@ -6803,7 +7479,7 @@ class LauncherForm : Form {
                 });
             });
             // Wallpapers from this session's play, while it runs.
-            if (job != null && jobIsGame) PlaySnaps.Watch(job, g);
+            if (job != null && jobIsGame && !Wallpaper.Drawn) PlaySnaps.Watch(job, g);
         });
     }
     void PlayPc(GameEntry g) {
@@ -7655,9 +8331,14 @@ class LauncherForm : Form {
         string over = PromptAt(e.Location);
         if (over != hoverPrompt) { hoverPrompt = over; Cursor = over != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
         if (BoxMouseMove(e)) return;
+        // Only a mouse that really moved picks a row: a still cursor must not take the selection from the keys.
+        var at = System.Windows.Forms.Cursor.Position;
+        if (at == lastMouse) return;
+        lastMouse = at;
         int i = HitAt(e.Location);
         if (job == null && over != "N" && over != "NX" && over != "C" && i >= 0 && pages.Count > 0 && pages.Peek().Sel != i) { pages.Peek().Sel = i; Invalidate(); }
     }
+    Point lastMouse;
     protected override void OnMouseClick(MouseEventArgs e) {
         base.OnMouseClick(e);
         if (Morphing) return;
@@ -7708,6 +8389,7 @@ class LauncherForm : Form {
                 } else if (it.On && it.Run != null) it.Run();
             }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
+            else if (p.Gallery != null) p.Sel = GalleryMove(p.Sel, a, p.Items.Count);
             else if ((a == "left" && p.Items[p.Sel].Fold == 1) || (a == "right" && p.Items[p.Sel].Fold == 2)) p.Items[p.Sel].Run();
             else if ((a == "left" || a == "right") && p.Items[p.Sel].Fold != 0) { }
             else if (p.Jump > 0 && a == "left") p.Sel = Math.Max(0, p.Sel - p.Jump);
@@ -7779,7 +8461,7 @@ class LauncherForm : Form {
         Invalidate();
         if (gone) { poweredOff = true; Close(); }
     }
-    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOff >= 0 || t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null || openRun != null || t - openAt < OpenTime + 0.3f || t - bounceAt < 1.4f; }
+    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOff >= 0 || setupLeaving != null || t - setupAt < 1.4f || (pages.Count > 0 && pages.Peek().Step == 0) || t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null || openRun != null || t - openAt < OpenTime + 0.3f || t - bounceAt < 1.4f; }
     // An app opening: its icon grows to fill the screen, then the screen it opens has its rows pop in one by one.
     const float OpenTime = 0.3f;
     float openAt = -10, bounceAt = -10; int openApp; RectangleF openFrom; Action openRun; bool bounceArm;
@@ -8041,7 +8723,108 @@ class LauncherForm : Form {
         g.Restore(st);
     }
     // The list rows' common icons in the same style: white stickers with a dark outline. False: draw the glyph instead.
+    // The browser's own little icons: drawn shapes on the row's colored tile, with a face on the folders.
+    const char IcoFolder = '', IcoUse = '', IcoDesktop = '', IcoDocs = '', IcoDown = '', IcoPics = '', IcoDrive = '', IcoUsb = '',
+        IcoGb = '', IcoGbc = '', IcoGba = '', IcoNds = '', Ico3ds = '', IcoZip = '', IcoPic = '', IcoAdd = '';
+    static readonly Dictionary<char, Color> BrowseTints = new Dictionary<char, Color> {
+        { IcoFolder, Color.FromArgb(245, 176, 48) }, { IcoUse, Color.FromArgb(46, 164, 79) }, { IcoDesktop, Color.FromArgb(40, 124, 232) }, { IcoDocs, Color.FromArgb(72, 120, 210) },
+        { IcoDown, Color.FromArgb(124, 84, 214) }, { IcoPics, Color.FromArgb(226, 72, 140) }, { IcoDrive, Color.FromArgb(92, 104, 124) }, { IcoUsb, Color.FromArgb(24, 164, 150) },
+        { IcoGb, Color.FromArgb(118, 118, 140) }, { IcoGbc, Color.FromArgb(150, 90, 200) }, { IcoGba, Color.FromArgb(64, 72, 180) }, { IcoNds, Color.FromArgb(70, 72, 84) },
+        { Ico3ds, Color.FromArgb(210, 56, 60) }, { IcoZip, Color.FromArgb(240, 142, 30) }, { IcoPic, Color.FromArgb(226, 72, 140) }, { IcoAdd, Color.FromArgb(46, 164, 79) } };
+    static char FileIcon(string file) {
+        switch (Path.GetExtension(file).ToLowerInvariant()) {
+            case ".gb": return IcoGb; case ".gbc": return IcoGbc; case ".gba": return IcoGba; case ".nds": return IcoNds;
+            case ".3ds": case ".cci": return Ico3ds; case ".zip": return IcoZip;
+            default: return IcoPic;
+        }
+    }
+    static bool BrowseArt(Graphics g, char icon, RectangleF r) {
+        if (icon < IcoFolder || icon > IcoAdd) return false;
+        float s = r.Width, lw = Math.Max(1.2f, s * 0.045f);
+        Func<float, float, PointF> P = (x, y) => new PointF(r.X + x * s, r.Y + y * s);
+        Func<float, float, float, float, RectangleF> R = (x, y, w, h) => new RectangleF(r.X + x * s, r.Y + y * s, w * s, h * s);
+        var ink = new Pen(Ink, lw) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round, StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
+        Action<PointF[], Color> shape = (pts, c) => { using (var b = new SolidBrush(c)) g.FillPolygon(b, pts); g.DrawPolygon(ink, pts); };
+        Action<RectangleF, float, Color> box = (rr, rad, c) => { using (var path = Round(rr, rad * s)) { using (var b = new SolidBrush(c)) g.FillPath(b, path); g.DrawPath(ink, path); } };
+        Action<float, float, float, Color> dot = (x, y, d, c) => { using (var b = new SolidBrush(c)) g.FillEllipse(b, r.X + (x - d) * s, r.Y + (y - d) * s, d * 2 * s, d * 2 * s); };
+        Action<float, float> face = (x, y) => {
+            dot(x - 0.09f, y, 0.032f, Ink); dot(x + 0.09f, y, 0.032f, Ink);
+            dot(x - 0.08f, y - 0.012f, 0.01f, Color.White); dot(x + 0.1f, y - 0.012f, 0.01f, Color.White);
+            g.DrawArc(ink, r.X + (x - 0.05f) * s, r.Y + (y + 0.01f) * s, 0.1f * s, 0.07f * s, 20, 140);
+            dot(x - 0.17f, y + 0.06f, 0.03f, Color.FromArgb(255, 150, 160)); dot(x + 0.17f, y + 0.06f, 0.03f, Color.FromArgb(255, 150, 160));
+        };
+        Action folder = () => {
+            shape(new[] { P(0.18f, 0.3f), P(0.4f, 0.3f), P(0.46f, 0.37f), P(0.82f, 0.37f), P(0.82f, 0.76f), P(0.18f, 0.76f) }, Color.FromArgb(255, 232, 170));
+            shape(new[] { P(0.18f, 0.44f), P(0.82f, 0.44f), P(0.82f, 0.76f), P(0.18f, 0.76f) }, Color.White);
+        };
+        // A cartridge: body with a cut corner, a colored label, grip ridges.
+        Action<RectangleF, Color, Color> cart = (c, body, label) => {
+            float cut = c.Width * 0.22f;
+            shape(new[] { new PointF(c.X, c.Y), new PointF(c.Right - cut, c.Y), new PointF(c.Right, c.Y + cut), new PointF(c.Right, c.Bottom), new PointF(c.X, c.Bottom) }, body);
+            var lab = new RectangleF(c.X + c.Width * 0.14f, c.Y + c.Height * 0.2f, c.Width * 0.72f, c.Height * 0.42f);
+            using (var b = new SolidBrush(label)) g.FillRectangle(b, lab);
+            g.DrawRectangle(ink, lab.X, lab.Y, lab.Width, lab.Height);
+            dot((lab.X + lab.Width / 2 - r.X) / s, (lab.Y + lab.Height / 2 - r.Y) / s, Math.Min(lab.Width, lab.Height) / s * 0.22f, Color.White);
+            for (int k = 0; k < 3; k++) { float y = c.Bottom - c.Height * (0.1f + k * 0.07f); g.DrawLine(ink, c.X + c.Width * 0.3f, y, c.Right - c.Width * 0.3f, y); }
+        };
+        switch (icon) {
+            case IcoFolder: folder(); face(0.5f, 0.57f); break;
+            case IcoUse:
+                folder();
+                dot(0.68f, 0.66f, 0.16f, Color.FromArgb(46, 164, 79)); g.DrawEllipse(ink, r.X + 0.52f * s, r.Y + 0.5f * s, 0.32f * s, 0.32f * s);
+                using (var pen = new Pen(Color.White, lw * 1.3f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) g.DrawLines(pen, new[] { P(0.61f, 0.66f), P(0.66f, 0.72f), P(0.76f, 0.6f) });
+                break;
+            case IcoDesktop:
+                box(R(0.2f, 0.26f, 0.6f, 0.38f), 0.05f, Color.White);
+                using (var b = new SolidBrush(Color.FromArgb(160, 206, 250))) g.FillRectangle(b, R(0.26f, 0.31f, 0.48f, 0.27f));
+                g.DrawLine(ink, P(0.5f, 0.64f), P(0.5f, 0.73f)); g.DrawLine(ink, P(0.36f, 0.74f), P(0.64f, 0.74f));
+                face(0.5f, 0.43f); break;
+            case IcoDocs:
+                shape(new[] { P(0.3f, 0.2f), P(0.6f, 0.2f), P(0.72f, 0.32f), P(0.72f, 0.8f), P(0.3f, 0.8f) }, Color.White);
+                shape(new[] { P(0.6f, 0.2f), P(0.6f, 0.32f), P(0.72f, 0.32f) }, Color.FromArgb(220, 228, 240));
+                for (int k = 0; k < 3; k++) g.DrawLine(ink, P(0.38f, 0.5f + k * 0.08f), P(0.64f - (k == 2 ? 0.1f : 0), 0.5f + k * 0.08f));
+                break;
+            case IcoDown:
+                using (var pen = new Pen(Ink, lw * 3.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) { g.DrawLine(pen, P(0.5f, 0.22f), P(0.5f, 0.56f)); g.DrawLines(pen, new[] { P(0.36f, 0.44f), P(0.5f, 0.58f), P(0.64f, 0.44f) }); g.DrawLines(pen, new[] { P(0.24f, 0.62f), P(0.24f, 0.76f), P(0.76f, 0.76f), P(0.76f, 0.62f) }); }
+                using (var pen = new Pen(Color.White, lw * 1.6f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) { g.DrawLine(pen, P(0.5f, 0.22f), P(0.5f, 0.56f)); g.DrawLines(pen, new[] { P(0.36f, 0.44f), P(0.5f, 0.58f), P(0.64f, 0.44f) }); g.DrawLines(pen, new[] { P(0.24f, 0.62f), P(0.24f, 0.76f), P(0.76f, 0.76f), P(0.76f, 0.62f) }); }
+                break;
+            case IcoPics: case IcoPic:
+                box(R(0.2f, 0.26f, 0.6f, 0.48f), 0.05f, Color.White);
+                using (var b = new SolidBrush(Color.FromArgb(170, 214, 250))) g.FillRectangle(b, R(0.26f, 0.32f, 0.48f, 0.36f));
+                using (var b = new SolidBrush(Color.FromArgb(96, 186, 96))) g.FillPolygon(b, new[] { P(0.26f, 0.68f), P(0.4f, 0.48f), P(0.52f, 0.6f), P(0.6f, 0.52f), P(0.74f, 0.68f) });
+                dot(0.62f, 0.41f, 0.05f, Color.FromArgb(255, 210, 60)); break;
+            case IcoDrive:
+                box(R(0.16f, 0.34f, 0.68f, 0.34f), 0.07f, Color.White);
+                g.DrawLine(ink, P(0.24f, 0.56f), P(0.56f, 0.56f));
+                dot(0.7f, 0.56f, 0.04f, Color.FromArgb(80, 220, 120));
+                face(0.42f, 0.44f); break;
+            case IcoUsb:
+                box(R(0.36f, 0.32f, 0.28f, 0.46f), 0.06f, Color.White);
+                box(R(0.41f, 0.18f, 0.18f, 0.14f), 0.01f, Color.FromArgb(200, 204, 214));
+                using (var b = new SolidBrush(Ink)) { g.FillRectangle(b, R(0.44f, 0.22f, 0.04f, 0.04f)); g.FillRectangle(b, R(0.52f, 0.22f, 0.04f, 0.04f)); }
+                face(0.5f, 0.52f); break;
+            case IcoGb: cart(R(0.28f, 0.2f, 0.44f, 0.6f), Color.FromArgb(206, 206, 212), Color.FromArgb(120, 110, 190)); break;
+            case IcoGbc: cart(R(0.28f, 0.2f, 0.44f, 0.6f), Color.FromArgb(200, 170, 236), Color.FromArgb(250, 210, 80)); break;
+            case IcoGba: cart(R(0.2f, 0.3f, 0.6f, 0.42f), Color.FromArgb(150, 156, 236), Color.FromArgb(240, 120, 120)); break;
+            case IcoNds: cart(R(0.3f, 0.26f, 0.4f, 0.48f), Color.FromArgb(90, 92, 104), Color.FromArgb(120, 200, 250)); break;
+            case Ico3ds: cart(R(0.3f, 0.26f, 0.4f, 0.48f), Color.White, Color.FromArgb(240, 90, 90)); break;
+            case IcoZip:
+                box(R(0.24f, 0.24f, 0.52f, 0.54f), 0.08f, Color.FromArgb(255, 226, 170));
+                for (int k = 0; k < 6; k++) { float y = 0.28f + k * 0.07f; g.DrawLine(ink, P(0.46f, y), P(0.54f, y)); }
+                box(R(0.44f, 0.66f, 0.12f, 0.08f), 0.02f, Color.FromArgb(200, 204, 214));
+                break;
+            case IcoAdd:
+                box(R(0.28f, 0.2f, 0.36f, 0.46f), 0.03f, Color.FromArgb(220, 240, 226));
+                box(R(0.22f, 0.28f, 0.36f, 0.46f), 0.03f, Color.White);
+                dot(0.66f, 0.66f, 0.15f, Color.FromArgb(46, 164, 79)); g.DrawEllipse(ink, r.X + 0.51f * s, r.Y + 0.51f * s, 0.3f * s, 0.3f * s);
+                using (var pen = new Pen(Color.White, lw * 1.3f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) { g.DrawLine(pen, P(0.66f, 0.58f), P(0.66f, 0.74f)); g.DrawLine(pen, P(0.58f, 0.66f), P(0.74f, 0.66f)); }
+                break;
+        }
+        ink.Dispose();
+        return true;
+    }
     static bool RowArt(Graphics g, char icon, RectangleF r, Color tint) {
+        if (BrowseArt(g, icon, r)) return true;
         switch (icon) {
             case '': AppArt(g, App("Settings"), r, tint); return true;
             case '': AppArt(g, App("Collection"), r, tint); return true;
@@ -8200,7 +8983,8 @@ class LauncherForm : Form {
                 case "bolt": Enamel(g, r, th); BoltScene(g, r, th); break;
                 case "kalos": Enamel(g, r, th); KalosScene(g, r, th); break;
                 case "hoenn": Enamel(g, r, th); HoennScene(g, r, th); break;
-                case "alola": Enamel(g, r, th); AlolaScene(g, r, th); break;
+                case "hoenn-sea": Enamel(g, r, th); StormScene(g, r, th); break;
+                case "alola": case "alola-moon": case "alola-ultrasun": case "alola-ultramoon": Enamel(g, r, th); AlolaScene(g, r, th); break;
                 default: Enamel(g, r, th); break;
             }
         }
@@ -8220,7 +9004,9 @@ class LauncherForm : Form {
                 else if (th.Finish == "bolt") Crackle(g, r, t);
                 else if (th.Finish == "flame") Motes(g, r, t, Color.FromArgb(255, 210, 90), -1);
                 else if (th.Finish == "hoenn") Motes(g, r, t, Mix(th.Light, Color.White, 0.4f), -1);
-                else if (th.Finish == "kalos" || th.Finish == "alola") Sheen(g, r, t, Color.White);
+                else if (th.Finish == "hoenn-sea") StormLive(g, r, t);
+                else if (th.Finish.StartsWith("alola")) { Sheen(g, r, t, Color.White); SunGlints(g, r, t, th); }
+                else if (th.Finish == "kalos") Sheen(g, r, t, Color.White);
             } else if (!th.Plain) Sheen(g, r, t, Color.White);
             g.Restore(st);
         }
@@ -8534,90 +9320,402 @@ class LauncherForm : Form {
             }
         }
     }
-    // ----- 3DS regions, in each version's colours. Kalos: a lattice tower over city lights and filigree arcs.
+    // ----- 3DS regions, in each version's colors. Kalos: a lattice tower over mansard roofs with lit windows.
     static void KalosScene(Graphics g, RectangleF r, Theme th) {
         float u = Math.Min(r.Height, r.Width * 0.55f);
         var rnd = new Random(2013);
-        // City lights: soft discs, larger and fainter towards the top.
-        for (int i = 0; i < 26; i++) {
-            float x = r.X + (float)rnd.NextDouble() * r.Width, y = r.Y + (float)rnd.NextDouble() * r.Height * 0.85f;
-            float s = u * (0.03f + 0.07f * (float)rnd.NextDouble());
-            using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, 0.4f), 40 + rnd.Next(50)))) g.FillEllipse(b, x - s, y - s, s * 2, s * 2);
+        Color ink = Mix(th.Deep, Color.Black, 0.35f), glow = Mix(th.Light, Color.White, 0.45f);
+        SoftGlow(g, new PointF(r.X + r.Width * 0.5f, r.Bottom - u * 0.15f), r.Width * 0.8f, Fade(glow, 120));
+        for (int i = 0; i < 3; i++) Cloud(g, r.X + r.Width * (0.06f + i * 0.34f), r.Y + r.Height * (0.1f + 0.12f * (i % 2)), u * (0.36f - i * 0.05f), Fade(Color.White, 54));
+        float tH = r.Height * 0.64f, tx = r.Right - r.Width * 0.27f, bw = Math.Min(tH * 0.5f, r.Width * 0.42f);
+        // Far roofs, then the tower, then near roofs that leave its arch clear.
+        for (float x = r.X - u * 0.05f; x < r.Right;) {
+            float w = u * (0.08f + 0.1f * (float)rnd.NextDouble()), h = r.Height * (0.32f + 0.14f * (float)rnd.NextDouble());
+            using (var b = new SolidBrush(Fade(Mix(th.Deep, th.Main, 0.45f), 215))) g.FillRectangle(b, x, r.Bottom - h, w + 1, h + 1);
+            x += w;
         }
-        // Filigree: long arcs sweeping in from the left.
-        using (var pen = new Pen(Fade(th.Light, 90), Math.Max(1f, u * 0.006f)))
-            for (int i = 0; i < 4; i++) g.DrawArc(pen, r.X - u * (0.6f + i * 0.25f), r.Bottom - u * (0.55f + i * 0.18f), u * (1.4f + i * 0.5f), u * (1.2f + i * 0.4f), 270, 90);
-        // The tower: a tapering lattice on the right, with a glowing tip.
-        float tx = r.Right - r.Width * 0.24f, top = r.Y + r.Height * 0.3f, baseW = r.Width * 0.26f;
-        var outline = new[] { new PointF(tx - baseW / 2, r.Bottom), new PointF(tx - u * 0.035f, top + u * 0.12f), new PointF(tx, top), new PointF(tx + u * 0.035f, top + u * 0.12f), new PointF(tx + baseW / 2, r.Bottom) };
-        using (var b = new SolidBrush(Fade(th.Deep, 240))) g.FillPolygon(b, outline);
-        using (var pen = new Pen(Fade(Mix(th.Light, Color.White, 0.3f), 190), Math.Max(1.2f, u * 0.005f))) {
-            for (int i = 1; i < 9; i++) {
-                float k = i / 9f, y = r.Bottom - (r.Bottom - top - u * 0.12f) * k, half = (baseW / 2) * (1 - k) + u * 0.035f * k;
-                g.DrawLine(pen, tx - half, y, tx + half, y);
-                if (i < 8) { float k2 = (i + 1) / 9f, y2 = r.Bottom - (r.Bottom - top - u * 0.12f) * k2, half2 = (baseW / 2) * (1 - k2) + u * 0.035f * k2; g.DrawLine(pen, tx - half, y, tx + half2, y2); g.DrawLine(pen, tx + half, y, tx - half2, y2); }
+        LatticeTower(g, tx, r.Bottom, tH, bw, ink, Fade(glow, 150));
+        Color[] lit = { Color.FromArgb(255, 214, 120), Color.FromArgb(255, 172, 196), Color.FromArgb(255, 238, 176) };
+        int n = 0;
+        for (float x = r.X - u * 0.03f; x < r.Right;) {
+            float w = u * (0.11f + 0.08f * (float)rnd.NextDouble()), h = r.Height * (0.18f + 0.12f * (float)rnd.NextDouble());
+            if (x + w > tx - bw * 0.62f && x < tx + bw * 0.62f) { x = tx + bw * 0.62f; continue; }
+            float top = r.Bottom - h, roof = u * 0.035f;
+            using (var b = new SolidBrush(ink)) {
+                g.FillPolygon(b, new[] { new PointF(x, r.Bottom + 1), new PointF(x, top), new PointF(x + roof * 0.6f, top - roof), new PointF(x + w - roof * 0.6f, top - roof), new PointF(x + w, top), new PointF(x + w, r.Bottom + 1) });
+                if (++n == 2) {
+                    float dw = w * 0.62f, dx = x + (w - dw) / 2, dy = top - roof;
+                    g.FillPie(b, dx, dy - dw * 0.7f, dw, dw * 1.4f, 180, 180);
+                    g.FillRectangle(b, x + w / 2 - dw * 0.07f, dy - dw * 0.92f, dw * 0.14f, dw * 0.25f);
+                } else g.FillRectangle(b, x + w * 0.7f, top - roof - u * 0.03f, u * 0.018f, u * 0.04f);
             }
+            float ws = Math.Max(2f, u * 0.014f);
+            for (float wy = top + u * 0.025f; wy < r.Bottom - u * 0.02f; wy += u * 0.036f)
+                for (float wx = x + u * 0.018f; wx < x + w - u * 0.018f; wx += u * 0.03f) {
+                    bool on = rnd.NextDouble() < 0.45;
+                    using (var b = new SolidBrush(on ? Fade(lit[rnd.Next(3)], 215) : Fade(glow, 26))) g.FillRectangle(b, wx, wy, ws, ws * 1.4f);
+                }
+            x += w + u * 0.004f;
         }
-        using (var b = new SolidBrush(Fade(Color.White, 200))) g.FillEllipse(b, tx - u * 0.02f, top - u * 0.02f, u * 0.04f, u * 0.04f);
-        using (var b = new SolidBrush(Fade(th.Light, 60))) g.FillEllipse(b, tx - u * 0.07f, top - u * 0.07f, u * 0.14f, u * 0.14f);
     }
-    // Hoenn: a volcanic island on layered sea waves.
-    static void HoennScene(Graphics g, RectangleF r, Theme th) {
-        float u = Math.Min(r.Height, r.Width * 0.55f);
-        // The island: a broad peak with a cleft crater, left of centre.
-        float cx = r.X + r.Width * 0.62f, sea = r.Bottom - u * 0.3f; u = Math.Max(u, (sea - r.Y - r.Height * 0.4f) / 0.6f);
+    static void LatticeTower(Graphics g, float cx, float bottom, float h, float bw, Color fill, Color line) {
+        float y1 = bottom - h * 0.3f, y2 = bottom - h * 0.56f, y3 = bottom - h * 0.93f, top = bottom - h;
+        var left = new[] {
+            new PointF(cx - bw * 0.5f, bottom), new PointF(cx - bw * 0.4f, bottom - h * 0.12f), new PointF(cx - bw * 0.32f, bottom - h * 0.22f), new PointF(cx - bw * 0.27f, y1),
+            new PointF(cx - bw * 0.17f, bottom - h * 0.42f), new PointF(cx - bw * 0.12f, y2 + h * 0.04f), new PointF(cx - bw * 0.1f, y2),
+            new PointF(cx - bw * 0.05f, bottom - h * 0.72f), new PointF(cx - bw * 0.025f, y3 + h * 0.06f), new PointF(cx - bw * 0.02f, y3) };
+        var right = left.Reverse().Select(p => new PointF(2 * cx - p.X, p.Y)).ToArray();
         using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
-            path.AddLines(new[] { new PointF(cx - u * 0.75f, sea + 2), new PointF(cx - u * 0.12f, sea - u * 0.55f), new PointF(cx - u * 0.04f, sea - u * 0.5f), new PointF(cx + u * 0.04f, sea - u * 0.53f), new PointF(cx + u * 0.14f, sea - u * 0.55f), new PointF(cx + u * 0.8f, sea + 2) });
+            path.AddBeziers(left);
+            path.AddLine(cx - bw * 0.02f, y3, cx, top);
+            path.AddLine(cx, top, cx + bw * 0.02f, y3);
+            path.AddBeziers(right);
+            path.AddLine(cx + bw * 0.5f, bottom, cx + bw * 0.3f, bottom);
+            path.AddBezier(new PointF(cx + bw * 0.3f, bottom), new PointF(cx + bw * 0.26f, bottom - h * 0.17f), new PointF(cx - bw * 0.26f, bottom - h * 0.17f), new PointF(cx - bw * 0.3f, bottom));
             path.CloseFigure();
-            using (var b = new SolidBrush(Fade(th.Deep, 240))) g.FillPath(b, path);
-            using (var pen = new Pen(Fade(th.Light, 170), Math.Max(1.5f, u * 0.006f))) g.DrawPath(pen, path);
+            using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+            var st = g.Save();
+            g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            float step = Math.Max(3f, bw * 0.055f);
+            using (var pen = new Pen(Fade(line, line.A / 2), 1))
+                for (float d = -h; d < bw + h; d += step) { g.DrawLine(pen, cx - bw / 2 + d, bottom, cx - bw / 2 + d - h, top); g.DrawLine(pen, cx - bw / 2 + d - h, bottom, cx - bw / 2 + d, top); }
+            g.Restore(st);
+            using (var pen = new Pen(line, Math.Max(1f, bw * 0.008f))) g.DrawPath(pen, path);
         }
-        for (int i = 2; i >= 0; i--) using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, 0.3f), i == 0 ? 230 : 50))) g.FillEllipse(b, cx - u * (0.07f + i * 0.05f), sea - u * (0.6f + i * 0.03f), u * (0.14f + i * 0.1f), u * (0.08f + i * 0.06f));
-        // Waves: rows of crests, darker and nearer towards the bottom.
-        for (int row = 0; row < 4; row++) {
-            float y = sea + row * u * 0.08f, amp = u * (0.025f + row * 0.008f), len = u * (0.22f + row * 0.05f);
-            using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
-                var pts = new List<PointF>();
-                for (float x = r.X - len; x <= r.Right + len; x += len / 8) pts.Add(new PointF(x, y + amp * (float)Math.Sin((x - r.X) / len * Math.PI * 2 + row)));
-                pts.Add(new PointF(r.Right + len, r.Bottom + 2)); pts.Add(new PointF(r.X - len, r.Bottom + 2));
-                path.AddLines(pts.ToArray()); path.CloseFigure();
-                using (var b = new SolidBrush(Fade(Mix(th.Main, th.Deep, 0.3f + row * 0.18f), 230))) g.FillPath(b, path);
-            }
-            using (var pen = new Pen(Fade(th.Light, 120 - row * 20), Math.Max(1f, u * 0.005f)))
-                for (float x = r.X - len; x <= r.Right; x += len) g.DrawArc(pen, x + len * 0.15f, y - amp * 1.2f, len * 0.35f, amp * 1.6f, 200, 120);
+        foreach (var p in new[] { new[] { y1, 0.64f }, new[] { y2, 0.3f } }) {
+            var deck = new RectangleF(cx - bw * p[1] / 2, p[0] - h * 0.022f, bw * p[1], h * 0.03f);
+            using (var b = new SolidBrush(fill)) g.FillRectangle(b, deck);
+            using (var pen = new Pen(line, Math.Max(1f, bw * 0.008f))) g.DrawRectangle(pen, deck.X, deck.Y, deck.Width, deck.Height);
+        }
+        float tip = Math.Max(2f, bw * 0.025f);
+        SoftGlow(g, new PointF(cx, top), tip * 5, Fade(Color.White, 150));
+        using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, cx - tip / 2, top - tip / 2, tip, tip);
+    }
+    static void SoftGlow(Graphics g, PointF c, float rad, Color color) {
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+            path.AddEllipse(c.X - rad, c.Y - rad, rad * 2, rad * 2);
+            using (var pg = new System.Drawing.Drawing2D.PathGradientBrush(path)) { pg.CenterColor = color; pg.SurroundColors = new[] { Fade(color, 0) }; g.FillPath(pg, path); }
         }
     }
-    // Alola: a big sun (or moon, on a dark version) behind palm fronds and hibiscus flowers.
+    static void Cloud(Graphics g, float x, float y, float w, Color c) {
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath { FillMode = System.Drawing.Drawing2D.FillMode.Winding }) {
+            path.AddEllipse(x, y - w * 0.04f, w * 0.42f, w * 0.24f);
+            path.AddEllipse(x + w * 0.2f, y - w * 0.2f, w * 0.42f, w * 0.4f);
+            path.AddEllipse(x + w * 0.48f, y - w * 0.08f, w * 0.42f, w * 0.28f);
+            path.AddRectangle(new RectangleF(x + w * 0.16f, y + w * 0.06f, w * 0.6f, w * 0.14f));
+            using (var b = new SolidBrush(c)) g.FillPath(b, path);
+        }
+    }
+    static PointF Bez(PointF a, PointF b, PointF c, PointF d, float t) {
+        float s = 1 - t;
+        return new PointF(s * s * s * a.X + 3 * s * s * t * b.X + 3 * s * t * t * c.X + t * t * t * d.X, s * s * s * a.Y + 3 * s * s * t * b.Y + 3 * s * t * t * c.Y + t * t * t * d.Y);
+    }
+    static void Rays(Graphics g, PointF o, float reach, int n, Color c) {
+        using (var b = new SolidBrush(c))
+            for (int i = 0; i < n; i += 2) {
+                double a0 = i * Math.PI * 2 / n, a1 = (i + 1) * Math.PI * 2 / n;
+                g.FillPolygon(b, new[] { o, new PointF(o.X + (float)Math.Cos(a0) * reach, o.Y + (float)Math.Sin(a0) * reach), new PointF(o.X + (float)Math.Cos(a1) * reach, o.Y + (float)Math.Sin(a1) * reach) });
+            }
+    }
+    // Hoenn: a smoking volcano before a rayed sun, a great curling wave, and spray on the rocks.
+    static void HoennScene(Graphics g, RectangleF r, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f), horizon = r.Bottom - Math.Max(u * 0.42f, r.Height * 0.3f);
+        Color sea = Mix(Color.FromArgb(40, 92, 140), th.Main, 0.35f), ink = Mix(th.Deep, Color.Black, 0.4f), foam = Color.FromArgb(246, 242, 228), glow = Mix(th.Light, Color.White, 0.45f);
+        var sun = new PointF(r.X + r.Width * 0.3f, horizon - u * 0.62f);
+        var st = g.Save();
+        g.SetClip(new RectangleF(r.X, r.Y, r.Width, horizon - r.Y), System.Drawing.Drawing2D.CombineMode.Intersect);
+        Rays(g, sun, Math.Max(r.Width, r.Height) * 1.4f, 48, Fade(glow, 34));
+        g.Restore(st);
+        float sr = u * 0.13f;
+        SoftGlow(g, sun, sr * 2.2f, Fade(glow, 120));
+        using (var b = new SolidBrush(Fade(glow, 235))) g.FillEllipse(b, sun.X - sr, sun.Y - sr, sr * 2, sr * 2);
+        using (var pen = new Pen(Fade(ink, 160), Math.Max(1f, u * 0.006f))) { g.DrawEllipse(pen, sun.X - sr, sun.Y - sr, sr * 2, sr * 2); g.DrawEllipse(pen, sun.X - sr * 1.15f, sun.Y - sr * 1.15f, sr * 2.3f, sr * 2.3f); }
+        // The volcano, with pale ridges, lava and a rising plume.
+        float vx = r.X + r.Width * 0.64f, vh = u * 0.55f, vw = u * 1.05f, crater = horizon - vh;
+        var rnd = new Random(2014);
+        for (int i = 9; i >= 0; i--) {
+            float k = i / 9f, pr = u * (0.05f + 0.07f * k);
+            var c = new PointF(vx + u * 0.12f * k * k + (float)Math.Sin(i * 1.7f) * u * 0.03f, crater - u * 0.06f - u * 0.5f * k);
+            using (var b = new SolidBrush(Fade(Mix(Color.FromArgb(108, 94, 82), th.Deep, 0.3f), 235))) g.FillEllipse(b, c.X - pr, c.Y - pr, pr * 2, pr * 2);
+            using (var b = new SolidBrush(Fade(Mix(Color.FromArgb(214, 200, 176), th.Light, 0.2f), 120))) g.FillEllipse(b, c.X - pr * 0.8f, c.Y - pr * 0.9f, pr * 1.1f, pr * 0.9f);
+        }
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+            path.AddBezier(new PointF(vx - vw * 0.62f, horizon + 2), new PointF(vx - vw * 0.3f, horizon - vh * 0.25f), new PointF(vx - vw * 0.16f, crater + vh * 0.2f), new PointF(vx - vw * 0.09f, crater));
+            path.AddLine(vx - vw * 0.09f, crater, vx - vw * 0.03f, crater + vh * 0.05f);
+            path.AddLine(vx - vw * 0.03f, crater + vh * 0.05f, vx + vw * 0.04f, crater + vh * 0.02f);
+            path.AddLine(vx + vw * 0.04f, crater + vh * 0.02f, vx + vw * 0.1f, crater);
+            path.AddBezier(new PointF(vx + vw * 0.1f, crater), new PointF(vx + vw * 0.18f, crater + vh * 0.2f), new PointF(vx + vw * 0.32f, horizon - vh * 0.25f), new PointF(vx + vw * 0.62f, horizon + 2));
+            path.CloseFigure();
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(vx - vw, crater - 1, vw * 2, vh + 4), Mix(ink, th.Main, 0.35f), ink, 90f)) g.FillPath(b, path);
+            var clip = g.Save();
+            g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            using (var pen = new Pen(Fade(glow, 60), Math.Max(1.5f, u * 0.012f)) { EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                for (int i = -4; i <= 4; i++) g.DrawBezier(pen, vx + i * vw * 0.02f, crater + vh * 0.06f, vx + i * vw * 0.05f, crater + vh * 0.4f, vx + i * vw * 0.1f, horizon - vh * 0.3f, vx + i * vw * 0.16f, horizon + 2);
+            foreach (int side in new[] { -1, 1, -1 }) {
+                float off = side * vw * (0.05f + 0.04f * (float)rnd.NextDouble());
+                using (var pen = new Pen(Color.FromArgb(214, 70, 30), Math.Max(2f, u * 0.024f)) { EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                    g.DrawBezier(pen, vx, crater + vh * 0.03f, vx + off * 0.5f, crater + vh * 0.3f, vx + off * 1.2f, crater + vh * 0.5f, vx + off * 1.9f, crater + vh * (0.62f + 0.2f * (float)rnd.NextDouble()));
+                using (var pen = new Pen(Color.FromArgb(255, 196, 80), Math.Max(1f, u * 0.009f)) { EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                    g.DrawBezier(pen, vx, crater + vh * 0.03f, vx + off * 0.5f, crater + vh * 0.3f, vx + off * 1.2f, crater + vh * 0.5f, vx + off * 1.6f, crater + vh * 0.55f);
+            }
+            g.Restore(clip);
+            using (var pen = new Pen(Fade(ink, 220), Math.Max(1f, u * 0.006f))) g.DrawPath(pen, path);
+        }
+        SoftGlow(g, new PointF(vx, crater), u * 0.09f, Fade(Color.FromArgb(255, 150, 60), 170));
+        // The sea in bands of foam lines.
+        var seaRect = new RectangleF(r.X, horizon, r.Width, r.Bottom - horizon + 1);
+        Gradient(g, seaRect, new[] { Mix(sea, Color.White, 0.25f), sea, Mix(sea, ink, 0.6f) }, new[] { 0f, 0.4f, 1f });
+        for (int row = 0; row < 7; row++) {
+            float y = horizon + (r.Bottom - horizon) * (row + 0.5f) / 7f, amp = u * (0.006f + row * 0.003f);
+            using (var pen = new Pen(Fade(foam, 90 + row * 12), Math.Max(1f, u * (0.004f + row * 0.0012f))))
+            using (var path = WaveLine(r, y, amp, row * 1.3f)) g.DrawPath(pen, path);
+        }
+        // Rocks with spray on the right, the great wave on the left.
+        float rx = r.Right - r.Width * 0.16f, ry = r.Bottom - (r.Bottom - horizon) * 0.35f;
+        for (int i = 0; i < 2; i++) {
+            float w = u * (0.22f - i * 0.08f), h = u * (0.11f - i * 0.03f), x = rx - u * 0.12f * i;
+            using (var b = new SolidBrush(Mix(ink, th.Deep, 0.3f))) g.FillPolygon(b, new[] { new PointF(x - w / 2, ry + h * 0.4f), new PointF(x - w * 0.3f, ry - h * 0.5f), new PointF(x + w * 0.05f, ry - h * 0.7f), new PointF(x + w * 0.4f, ry - h * 0.2f), new PointF(x + w / 2, ry + h * 0.4f) });
+        }
+        for (int i = 0; i < 18; i++) {
+            float a = (float)(rnd.NextDouble() * Math.PI), d = u * (0.05f + 0.12f * (float)rnd.NextDouble()), s = u * (0.01f + 0.02f * (float)rnd.NextDouble());
+            float fx = rx - u * 0.06f + (float)Math.Cos(a) * d * 1.4f, fy = ry - (float)Math.Sin(a) * d * 0.7f;
+            using (var b = new SolidBrush(Fade(foam, 120 + rnd.Next(110)))) g.FillEllipse(b, fx - s, fy - s, s * 2, s * 2);
+        }
+        GreatWave(g, r.X - u * 0.12f, r.Bottom + 2, Math.Min(u * 1.0f, r.Width * 0.7f), u * 0.5f, sea, foam, ink);
+    }
+    // Alpha Sapphire: a raging storm at sea, with banks of cloud, lightning and towering waves.
+    static void StormScene(Graphics g, RectangleF r, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f), horizon = r.Bottom - Math.Max(u * 0.5f, r.Height * 0.5f);
+        Color storm = Color.FromArgb(70, 80, 100), ink = Mix(th.Deep, Color.Black, 0.5f), foam = Color.FromArgb(236, 242, 248);
+        Color sea = Mix(Color.FromArgb(24, 64, 100), th.Main, 0.3f);
+        Gradient(g, new RectangleF(r.X, r.Y, r.Width, horizon - r.Y + 1), new[] { Fade(Mix(th.Deep, Color.Black, 0.45f), 235), Fade(Mix(th.Deep, storm, 0.5f), 220), Fade(Mix(th.Main, storm, 0.55f), 225) }, new[] { 0f, 0.55f, 1f });
+        SoftGlow(g, new PointF(r.X + r.Width * 0.28f, horizon), u * 0.45f, Fade(Mix(th.Light, Color.White, 0.5f), 110));
+        // Banks of cloud, darker and lower towards the sea, each with a pale rim.
+        for (int layer = 0; layer < 3; layer++) {
+            float y = r.Y + (horizon - r.Y) * (0.15f + 0.3f * layer), size = u * (0.2f + 0.05f * layer);
+            Color body = Mix(Mix(storm, th.Deep, 0.4f), Color.Black, 0.15f + 0.12f * layer), rim = Mix(body, Color.White, 0.3f);
+            for (int pass = 0; pass < 2; pass++)
+                for (float x = r.X - size * (layer % 2 == 0 ? 0.5f : 1.1f); x < r.Right + size; x += size * 0.9f) {
+                    float d = size * (0.8f + 0.5f * (float)Math.Abs(Math.Sin(x * 0.37f + layer)));
+                    using (var b = new SolidBrush(Fade(pass == 0 ? rim : body, 235))) g.FillEllipse(b, x - d / 2, y - d / 2 + (pass == 0 ? -u * 0.012f : 0), d, d * 0.7f);
+                }
+        }
+        // The lightning, in front of the clouds.
+        var rnd = new Random(2015);
+        var bolt = new List<PointF> { new PointF(r.X + r.Width * 0.66f, r.Y + (horizon - r.Y) * 0.4f) };
+        while (bolt[bolt.Count - 1].Y < horizon) { var q = bolt[bolt.Count - 1]; bolt.Add(new PointF(q.X + (float)(rnd.NextDouble() - 0.5) * u * 0.1f, q.Y + u * (0.04f + 0.04f * (float)rnd.NextDouble()))); }
+        var fork = new List<PointF> { bolt[bolt.Count / 3] }; var fork2 = new List<PointF> { bolt[bolt.Count / 2] };
+        for (int i = 0; i < 4; i++) { var q = fork[fork.Count - 1]; fork.Add(new PointF(q.X + u * (0.02f + 0.04f * (float)rnd.NextDouble()), q.Y + u * (0.03f + 0.03f * (float)rnd.NextDouble()))); }
+        for (int i = 0; i < 3; i++) { var q = fork2[fork2.Count - 1]; fork2.Add(new PointF(q.X - u * (0.02f + 0.04f * (float)rnd.NextDouble()), q.Y + u * (0.03f + 0.03f * (float)rnd.NextDouble()))); }
+        SoftGlow(g, bolt[bolt.Count / 2], u * 0.45f, Fade(Color.FromArgb(200, 220, 255), 140));
+        SoftGlow(g, bolt[0], u * 0.25f, Fade(Color.FromArgb(230, 240, 255), 170));
+        foreach (var line in new[] { bolt, fork, fork2 }) {
+            using (var pen = new Pen(Fade(Color.FromArgb(180, 210, 255), 130), Math.Max(4f, u * 0.04f)) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) g.DrawLines(pen, line.ToArray());
+            using (var pen = new Pen(Color.FromArgb(252, 253, 255), Math.Max(2f, u * 0.013f)) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round }) g.DrawLines(pen, line.ToArray());
+        }
+        // The sea in woodblock style: white lines on deep blue, then rows of small clawed waves, growing nearer.
+        Gradient(g, new RectangleF(r.X, horizon, r.Width, r.Bottom - horizon + 1), new[] { Mix(sea, storm, 0.3f), sea, Mix(sea, Color.Black, 0.45f) }, new[] { 0f, 0.4f, 1f });
+        for (int i = 0; i < 10; i++) {
+            float y = horizon + (r.Bottom - horizon) * (i + 0.5f) / 10f;
+            using (var pen = new Pen(Fade(foam, 70 + i * 6), Math.Max(1f, u * 0.003f))) using (var path = WaveLine(r, y, u * (0.004f + i * 0.0015f), i * 1.9f)) g.DrawPath(pen, path);
+        }
+        for (int row = 0; row < 4; row++) {
+            float k = row / 3f, hh = u * (0.05f + 0.09f * k), ww = hh * 1.7f, y = horizon + (r.Bottom - horizon) * (0.12f + 0.3f * row) + hh * 0.3f;
+            for (float x = r.X - ww * (row % 2 == 0 ? 0.2f : 0.9f); x < r.Right; x += ww * 1.45f)
+                GreatWave(g, x, y, ww, hh, Mix(sea, Color.FromArgb(120, 200, 220), 0.2f + 0.1f * k), foam, ink);
+        }
+        float gh = Math.Max(u * 0.7f, (r.Bottom - horizon) * 0.9f);
+        GreatWave(g, r.X - u * 0.08f, r.Bottom + 2, Math.Min(gh * 1.9f, r.Width * 0.85f), gh, Mix(sea, Color.FromArgb(120, 200, 220), 0.35f), foam, ink);
+    }
+    // Rain driving across, and now and then a flash.
+    static void StormLive(Graphics g, RectangleF r, float t) {
+        float u = Math.Min(r.Height, r.Width * 0.55f), len = u * 0.06f;
+        using (var pen = new Pen(Fade(Color.FromArgb(220, 230, 245), 70), Math.Max(1f, u * 0.003f)))
+            for (int i = 0; i < 50; i++) {
+                float seed = (i * 0.618f) % 1f, fall = (t * (0.5f + 0.3f * seed) + seed * 7f) % 1f;
+                float x = r.X + (((i * 0.381f) % 1f) * 1.3f - fall * 0.3f) * r.Width, y = r.Y + fall * (r.Height + len) - len;
+                g.DrawLine(pen, x, y, x - len * 0.35f, y + len);
+            }
+        float p = t % 9f, a = p < 0.2f ? 1 - p / 0.2f : (p > 0.32f && p < 0.5f ? 0.6f * (1 - (p - 0.32f) / 0.18f) : 0);
+        if (a > 0) using (var b = new SolidBrush(Fade(Color.FromArgb(225, 235, 255), (int)(70 * a)))) g.FillRectangle(b, r);
+    }
+    static void GreatWave(Graphics g, float x, float y, float w, float h, Color body, Color foam, Color ink) {
+        var back = new[] { new PointF(x, y), new PointF(x + w * 0.08f, y - h * 0.55f), new PointF(x + w * 0.2f, y - h), new PointF(x + w * 0.45f, y - h) };
+        var curl = new[] { back[3], new PointF(x + w * 0.66f, y - h), new PointF(x + w * 0.84f, y - h * 0.82f), new PointF(x + w * 0.8f, y - h * 0.56f) };
+        var under = new[] { curl[3], new PointF(x + w * 0.74f, y - h * 0.44f), new PointF(x + w * 0.6f, y - h * 0.5f), new PointF(x + w * 0.58f, y - h * 0.64f) };
+        var front = new[] { under[3], new PointF(x + w * 0.56f, y - h * 0.3f), new PointF(x + w * 0.78f, y - h * 0.06f), new PointF(x + w, y) };
+        float line = Math.Max(1f, h * 0.012f);
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+            foreach (var c in new[] { back, curl, under, front }) path.AddBezier(c[0], c[1], c[2], c[3]);
+            path.CloseFigure();
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x, y - h - 2, w, h + 4), Mix(body, Color.White, 0.12f), Mix(body, ink, 0.6f), 90f)) g.FillPath(b, path);
+            var st = g.Save();
+            g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            using (var pen = new Pen(Fade(Mix(body, Color.White, 0.4f), 210), h * 0.14f))
+                g.DrawBezier(pen, back[0].X + w * 0.05f, back[0].Y, back[1].X + w * 0.05f, back[1].Y + h * 0.04f, back[2].X + w * 0.04f, back[2].Y + h * 0.08f, curl[1].X, curl[1].Y + h * 0.1f);
+            using (var pen = new Pen(Fade(foam, 190), Math.Max(1f, h * 0.009f)))
+                for (int k = 1; k <= 8; k++) {
+                    float dx = k * w * 0.032f, dy = k * h * 0.045f;
+                    g.DrawBezier(pen, back[0].X + dx, back[0].Y, back[1].X + dx, back[1].Y + dy, back[2].X + dx, back[2].Y + dy, curl[1].X - dx * 0.2f, curl[1].Y + dy);
+                }
+            g.Restore(st);
+            using (var pen = new Pen(ink, line)) g.DrawPath(pen, path);
+        }
+        using (var pen = new Pen(foam, Math.Max(1.5f, h * 0.05f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+            g.DrawBezier(pen, curl[0].X - w * 0.05f, curl[0].Y + h * 0.03f, curl[1].X, curl[1].Y + h * 0.03f, curl[2].X - w * 0.02f, curl[2].Y + h * 0.02f, curl[3].X - w * 0.02f, curl[3].Y);
+        // Claws: foam fingers reaching down and forward from the crest and lip, each curling back at its tip.
+        for (int i = 0; i <= 16; i++) {
+            float t = i / 16f;
+            PointF p, q;
+            if (t < 0.75f) { float tt = 0.2f + t / 0.75f * 0.8f; p = Bez(curl[0], curl[1], curl[2], curl[3], tt); q = Bez(curl[0], curl[1], curl[2], curl[3], Math.Min(1f, tt + 0.02f)); }
+            else { float tt = (t - 0.75f) / 0.25f * 0.45f; p = Bez(under[0], under[1], under[2], under[3], tt); q = Bez(under[0], under[1], under[2], under[3], tt + 0.02f); }
+            double tan = Math.Atan2(q.Y - p.Y, q.X - p.X), baseA = tan + 0.9;
+            float sz = h * (0.07f + 0.06f * (float)Math.Sin(t * Math.PI));
+            for (int f = -1; f <= 1; f++) {
+                double a = baseA + f * 0.45;
+                var tip = new PointF(p.X + (float)Math.Cos(a) * sz, p.Y + (float)Math.Sin(a) * sz);
+                var c1 = new PointF(p.X + (float)Math.Cos(a) * sz * 0.5f, p.Y + (float)Math.Sin(a) * sz * 0.5f);
+                var c2 = new PointF(tip.X + (float)Math.Cos(a + 1.6) * sz * 0.35f, tip.Y + (float)Math.Sin(a + 1.6) * sz * 0.35f);
+                var end = new PointF(tip.X + (float)Math.Cos(a + 2.4) * sz * 0.3f, tip.Y + (float)Math.Sin(a + 2.4) * sz * 0.3f);
+                using (var pen = new Pen(ink, Math.Max(1.5f, sz * 0.3f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) g.DrawBezier(pen, p, c1, c2, end);
+                using (var pen = new Pen(foam, Math.Max(1f, sz * 0.18f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) g.DrawBezier(pen, p, c1, c2, end);
+            }
+        }
+        // Spray falling ahead of the lip.
+        var rnd = new Random(1831 + (int)h);
+        for (int i = 0; i < 18; i++) {
+            float s = h * (0.01f + 0.018f * (float)rnd.NextDouble());
+            float fx = x + w * (0.62f + 0.32f * (float)rnd.NextDouble()), fy = y - h * (0.3f + 0.55f * (float)rnd.NextDouble());
+            using (var b = new SolidBrush(Fade(foam, 235))) g.FillEllipse(b, fx - s, fy - s, s * 2, s * 2);
+        }
+    }
+    // Alola: a rayed sunset (Sun) or a moonlit night (Moon) over the sea, a palm island, clouds, and a leaning palm.
+    // Ultra versions give the sun or moon a glow in the complementary color.
+    static float AlolaHorizon(RectangleF r) { float u = Math.Min(r.Height, r.Width * 0.55f); return r.Bottom - Math.Max(u * 0.4f, r.Height * 0.42f); }
+    static PointF AlolaSky(RectangleF r, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f), sea = AlolaHorizon(r);
+        return th.Finish.Contains("moon") ? new PointF(r.X + r.Width * 0.66f, sea - Math.Min(u * 0.4f, (sea - r.Y) * 0.5f)) : new PointF(r.X + r.Width * 0.64f, sea);
+    }
+    static Color Complement(Color c) { int m = Math.Max(c.R, Math.Max(c.G, c.B)) + Math.Min(c.R, Math.Min(c.G, c.B)); return Color.FromArgb(m - c.R, m - c.G, m - c.B); }
     static void AlolaScene(Graphics g, RectangleF r, Theme th) {
-        float u = Math.Min(r.Height, r.Width * 0.55f);
-        float sx = r.Right - r.Width * 0.27f, sy = r.Y + r.Height * 0.43f, sr = r.Width * 0.15f;
-        for (int i = 3; i >= 0; i--) using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, i == 0 ? 0.45f : 0.2f), i == 0 ? 245 : 45))) g.FillEllipse(b, sx - sr * (1 + i * 0.25f), sy - sr * (1 + i * 0.25f), sr * 2 * (1 + i * 0.25f), sr * 2 * (1 + i * 0.25f));
-        // Palm fronds reaching in from the lower left corner.
-        var origin = new PointF(r.X - u * 0.05f, r.Bottom + u * 0.05f);
-        for (int i = 0; i < 6; i++) {
-            double a = -Math.PI / 2 + 0.15 + i * 0.26;
-            float len = u * (0.75f + 0.1f * (i % 2));
-            var tip = new PointF(origin.X + (float)Math.Cos(a) * len, origin.Y + (float)Math.Sin(a) * len * 0.9f);
-            using (var pen = new Pen(Fade(th.Deep, 255), Math.Max(2f, u * 0.016f))) g.DrawLine(pen, origin, tip);
-            for (int l = 1; l <= 9; l++) {
-                float k = l / 10f; var p = new PointF(origin.X + (tip.X - origin.X) * k, origin.Y + (tip.Y - origin.Y) * k);
-                float leaf = u * 0.11f * (float)Math.Sin(k * Math.PI);
+        float u = Math.Min(r.Height, r.Width * 0.55f), sea = AlolaHorizon(r);
+        bool night = th.Finish.Contains("moon"), ultra = th.Finish.Contains("ultra");
+        Color warm = night ? Color.FromArgb(150, 170, 230) : Color.FromArgb(255, 168, 72), glow = Mix(th.Light, Color.White, 0.45f), ink = Mix(th.Deep, Color.Black, 0.45f);
+        Color halo = ultra ? Mix(Complement(th.Light), Color.White, 0.15f) : night ? Color.FromArgb(220, 228, 255) : Mix(glow, warm, 0.3f);
+        Color trail = ultra ? Mix(halo, Color.White, 0.3f) : night ? Color.FromArgb(226, 234, 255) : Color.FromArgb(255, 226, 160);
+        if (night) Gradient(g, new RectangleF(r.X, r.Y, r.Width, sea - r.Y + 1), new[] { Fade(Mix(th.Deep, Color.Black, 0.3f), 200), Fade(th.Deep, 170), Fade(Mix(th.Main, warm, 0.3f), 200) }, new[] { 0f, 0.6f, 1f });
+        else Gradient(g, new RectangleF(r.X, r.Y, r.Width, sea - r.Y + 1), new[] { Fade(th.Deep, 0), Fade(Mix(th.Main, warm, 0.35f), 140), Fade(Mix(th.Light, warm, 0.6f), 225) }, new[] { 0f, 0.6f, 1f });
+        var sun = AlolaSky(r, th);
+        float sr = u * (night ? 0.13f : 0.2f);
+        var st = g.Save();
+        g.SetClip(new RectangleF(r.X, r.Y, r.Width, sea - r.Y), System.Drawing.Drawing2D.CombineMode.Intersect);
+        var rnd = new Random(2016);
+        if (night) {
+            for (int i = 0; i < 40; i++) {
+                float x = r.X + (float)rnd.NextDouble() * r.Width, y = r.Y + (float)rnd.NextDouble() * (sea - r.Y) * 0.9f, d = u * (0.004f + 0.006f * (float)rnd.NextDouble());
+                using (var b = new SolidBrush(Fade(Color.White, 120 + rnd.Next(120)))) g.FillEllipse(b, x - d, y - d, d * 2, d * 2);
+            }
+            if (ultra) Rays(g, sun, Math.Max(r.Width, r.Height) * 1.4f, 56, Fade(halo, 30));
+            SoftGlow(g, sun, sr * (ultra ? 4.2f : 3f), Fade(halo, ultra ? 200 : 110));
+            if (ultra) SoftGlow(g, sun, sr * 1.8f, Fade(halo, 230));
+            using (var b = new SolidBrush(Color.FromArgb(240, 242, 250))) g.FillEllipse(b, sun.X - sr, sun.Y - sr, sr * 2, sr * 2);
+            using (var b = new SolidBrush(Fade(Mix(th.Light, Color.FromArgb(150, 156, 176), 0.6f), 120))) {
+                g.FillEllipse(b, sun.X - sr * 0.5f, sun.Y - sr * 0.45f, sr * 0.42f, sr * 0.34f);
+                g.FillEllipse(b, sun.X + sr * 0.12f, sun.Y + sr * 0.1f, sr * 0.5f, sr * 0.4f);
+                g.FillEllipse(b, sun.X + sr * 0.22f, sun.Y - sr * 0.58f, sr * 0.24f, sr * 0.22f);
+                g.FillEllipse(b, sun.X - sr * 0.55f, sun.Y + sr * 0.3f, sr * 0.22f, sr * 0.2f);
+            }
+            if (ultra) using (var pen = new Pen(Fade(halo, 230), Math.Max(1.5f, u * 0.008f))) g.DrawEllipse(pen, sun.X - sr, sun.Y - sr, sr * 2, sr * 2);
+        } else {
+            Rays(g, sun, Math.Max(r.Width, r.Height) * 1.4f, 40, Fade(ultra ? halo : glow, ultra ? 56 : 40));
+            SoftGlow(g, sun, sr * (ultra ? 3.2f : 2.4f), Fade(halo, ultra ? 210 : 150));
+            using (var b = new SolidBrush(Mix(glow, Color.FromArgb(255, 220, 120), 0.4f))) g.FillEllipse(b, sun.X - sr, sun.Y - sr, sr * 2, sr * 2);
+            if (ultra) using (var pen = new Pen(Fade(halo, 240), Math.Max(1.5f, u * 0.01f))) g.DrawEllipse(pen, sun.X - sr, sun.Y - sr, sr * 2, sr * 2);
+        }
+        g.Restore(st);
+        // Clouds lit from below.
+        for (int i = 0; i < 4; i++) {
+            float cw = u * (0.42f - i * 0.06f), cx = r.X + r.Width * (0.02f + i * 0.26f), cy = r.Y + (sea - r.Y) * (0.22f + 0.18f * (i % 2));
+            Cloud(g, cx, cy + u * 0.012f, cw, Fade(night ? halo : Mix(glow, warm, 0.5f), night ? 90 : 150));
+            Cloud(g, cx, cy, cw, Fade(Mix(th.Deep, th.Main, 0.4f), night ? 190 : 210));
+        }
+        // The sea, the sun's or moon's path on it, and a palm island on the horizon.
+        Gradient(g, new RectangleF(r.X, sea, r.Width, r.Bottom - sea + 1), night ? new[] { Mix(Color.FromArgb(30, 60, 110), th.Main, 0.3f), Mix(Color.FromArgb(8, 16, 40), th.Deep, 0.4f) } : new[] { Mix(Color.FromArgb(40, 120, 168), th.Main, 0.3f), Mix(Color.FromArgb(20, 60, 110), th.Deep, 0.4f) }, new[] { 0f, 1f });
+        if (night) SoftGlow(g, new PointF(sun.X, sea), sr * 1.6f, Fade(halo, ultra ? 120 : 70));
+        for (int i = 0; i < 9; i++) {
+            float k = i / 8f, y = sea + u * 0.02f + k * (r.Bottom - sea) * 0.6f, half = (night ? u * 0.2f : sr) * (0.9f - 0.6f * k);
+            using (var pen = new Pen(Fade(trail, 170 - i * 14), Math.Max(1f, u * 0.01f))) g.DrawLine(pen, sun.X - half, y, sun.X + half, y);
+        }
+        using (var b = new SolidBrush(ink)) {
+            float ix = r.X + r.Width * 0.08f, iw = r.Width * 0.36f;
+            g.FillPie(b, ix, sea - u * 0.05f, iw, u * 0.1f, 180, 180);
+            for (int i = 0; i < 3; i++) {
+                float px = ix + iw * (0.3f + i * 0.2f), ph = u * (0.13f + 0.03f * (i % 2));
+                using (var pen = new Pen(ink, Math.Max(1.5f, u * 0.008f))) g.DrawBezier(pen, px, sea - u * 0.03f, px + u * 0.01f, sea - ph * 0.5f, px + u * 0.03f, sea - ph * 0.8f, px + u * 0.025f, sea - ph);
+                for (int f = 0; f < 6; f++) Frond(g, new PointF(px + u * 0.025f, sea - ph), -Math.PI / 2 + (f - 2.5) * 0.55, u * 0.07f, u * 0.03f, ink, Math.Max(1f, u * 0.006f));
+            }
+        }
+        using (var pen = new Pen(Fade(Color.White, 90), Math.Max(1f, u * 0.004f)))
+            for (int i = 0; i < 3; i++) using (var path = WaveLine(r, sea + (r.Bottom - sea) * (0.55f + i * 0.15f), u * 0.008f, i * 2.1f)) g.DrawPath(pen, path);
+        // The beach and a palm leaning out over it.
+        Color sand = Mix(Color.FromArgb(236, 206, 150), night ? th.Deep : th.Light, night ? 0.45f : 0.2f);
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath()) {
+            path.AddBezier(new PointF(r.X - 4, r.Bottom - u * 0.2f), new PointF(r.X + r.Width * 0.2f, r.Bottom - u * 0.2f), new PointF(r.X + r.Width * 0.4f, r.Bottom - u * 0.06f), new PointF(r.X + r.Width * 0.62f, r.Bottom + 2));
+            path.AddLine(r.X + r.Width * 0.62f, r.Bottom + 2, r.X - 4, r.Bottom + 2);
+            path.CloseFigure();
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(r.X, r.Bottom - u * 0.21f, r.Width, u * 0.22f), sand, Mix(sand, th.Deep, 0.35f), 90f)) g.FillPath(b, path);
+            using (var pen = new Pen(Fade(Color.White, 200), Math.Max(1.5f, u * 0.008f))) g.DrawBezier(pen, r.X - 4, r.Bottom - u * 0.2f, r.X + r.Width * 0.2f, r.Bottom - u * 0.2f, r.X + r.Width * 0.4f, r.Bottom - u * 0.06f, r.X + r.Width * 0.62f, r.Bottom + 2);
+        }
+        var foot = new PointF(r.X + r.Width * 0.14f, r.Bottom - u * 0.1f);
+        var crown = new PointF(r.X + r.Width * 0.34f, Math.Max(r.Y + u * 0.2f, sea - u * 0.45f));
+        var c1 = new PointF(foot.X + (crown.X - foot.X) * 0.05f, foot.Y - (foot.Y - crown.Y) * 0.4f);
+        var c2 = new PointF(foot.X + (crown.X - foot.X) * 0.45f, crown.Y + (foot.Y - crown.Y) * 0.15f);
+        Color bark = Mix(ink, Color.FromArgb(110, 80, 50), 0.35f);
+        float tw = Math.Max(3f, u * 0.045f);
+        var lside = new List<PointF>(); var rside = new List<PointF>();
+        for (int i = 0; i <= 30; i++) {
+            float t = i / 30f, w = tw * (1 - 0.45f * t) / 2;
+            PointF p = Bez(foot, c1, c2, crown, t), q = Bez(foot, c1, c2, crown, Math.Min(1f, t + 0.01f)), o = Bez(foot, c1, c2, crown, Math.Max(0f, t - 0.01f));
+            float dx = q.X - o.X, dy = q.Y - o.Y, d = (float)Math.Sqrt(dx * dx + dy * dy) + 0.001f;
+            lside.Add(new PointF(p.X - dy / d * w, p.Y + dx / d * w)); rside.Add(new PointF(p.X + dy / d * w, p.Y - dx / d * w));
+        }
+        rside.Reverse(); lside.AddRange(rside);
+        using (var b = new SolidBrush(bark)) g.FillPolygon(b, lside.ToArray());
+        using (var pen = new Pen(Fade(Mix(bark, Color.White, 0.3f), 150), Math.Max(1f, u * 0.004f)))
+            for (int i = 1; i < 14; i++) { float t = i / 14f, w = tw * (1 - 0.45f * t) / 2; var p = Bez(foot, c1, c2, crown, t); g.DrawLine(pen, p.X - w * 0.9f, p.Y + w * 0.25f, p.X + w * 0.9f, p.Y - w * 0.25f); }
+        Color leaf = Mix(ink, Color.FromArgb(40, 90, 50), 0.4f);
+        for (int f = 0; f < 9; f++) {
+            double a = -Math.PI + f * Math.PI / 8 + (f % 2) * 0.12;
+            Frond(g, crown, a, u * (0.36f + 0.05f * (f % 3)), u * 0.16f, leaf, Math.Max(1.5f, u * 0.012f));
+        }
+        using (var b = new SolidBrush(Mix(bark, warm, 0.2f)))
+            for (int i = 0; i < 3; i++) { float s = u * 0.028f; g.FillEllipse(b, crown.X - s * 1.6f + i * s * 1.05f, crown.Y + s * 0.1f + (i % 2) * s * 0.5f, s, s); }
+    }
+    static void Frond(Graphics g, PointF o, double a, float len, float droop, Color c, float wid) {
+        var spine = new PointF[9];
+        for (int k = 0; k < 9; k++) { float t = k / 8f; spine[k] = new PointF(o.X + (float)Math.Cos(a) * len * t, o.Y + (float)Math.Sin(a) * len * t + droop * t * t); }
+        using (var b = new SolidBrush(c)) using (var pen = new Pen(c, wid) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) {
+            g.DrawCurve(pen, spine);
+            for (int k = 1; k < 8; k++) {
+                float t = k / 8f, leafLen = len * (0.08f + 0.26f * (float)Math.Sin(t * Math.PI)), bw = Math.Max(1.5f, len * 0.05f * (1 - t * 0.5f));
+                double dir = Math.Atan2(spine[k + 1].Y - spine[k - 1].Y, spine[k + 1].X - spine[k - 1].X);
                 foreach (int side in new[] { -1, 1 }) {
-                    double la = a + side * 1.0;
-                    using (var pen = new Pen(Fade(th.Deep, 245), Math.Max(1.5f, u * 0.013f)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
-                        g.DrawLine(pen, p, new PointF(p.X + (float)Math.Cos(la) * leaf, p.Y + (float)Math.Sin(la) * leaf + leaf * 0.35f));
+                    double la = dir + side * 0.75;
+                    var tip = new PointF(spine[k].X + (float)Math.Cos(la) * leafLen, spine[k].Y + (float)Math.Sin(la) * leafLen + leafLen * 0.5f);
+                    float nx = (float)Math.Cos(dir) * bw, ny = (float)Math.Sin(dir) * bw;
+                    g.FillPolygon(b, new[] { new PointF(spine[k].X - nx, spine[k].Y - ny), new PointF(spine[k].X + nx, spine[k].Y + ny), tip });
                 }
             }
         }
-        // Hibiscus flowers along the bottom.
-        var rnd = new Random(2016);
-        for (int i = 0; i < 4; i++) {
-            float fx = r.X + r.Width * (0.35f + i * 0.17f) + (float)rnd.NextDouble() * u * 0.05f, fy = r.Bottom - u * (0.08f + 0.06f * (i % 2)), fr = u * (0.07f + 0.02f * (i % 2));
-            for (int p = 0; p < 5; p++) {
-                double pa = p * Math.PI * 2 / 5 + i;
-                using (var b = new SolidBrush(Fade(Mix(th.Light, Color.White, 0.3f), 220))) g.FillEllipse(b, fx + (float)Math.Cos(pa) * fr * 0.6f - fr * 0.55f, fy + (float)Math.Sin(pa) * fr * 0.6f - fr * 0.55f, fr * 1.1f, fr * 1.1f);
-            }
-            using (var b = new SolidBrush(Fade(th.Deep, 230))) g.FillEllipse(b, fx - fr * 0.18f, fy - fr * 0.18f, fr * 0.36f, fr * 0.36f);
+    }
+    static void SunGlints(Graphics g, RectangleF r, float t, Theme th) {
+        float u = Math.Min(r.Height, r.Width * 0.55f), sea = AlolaHorizon(r), sx = AlolaSky(r, th).X;
+        Color c = th.Finish.Contains("ultra") ? Mix(Complement(th.Light), Color.White, 0.5f) : th.Finish.Contains("moon") ? Color.FromArgb(232, 238, 255) : Color.FromArgb(255, 240, 200);
+        for (int i = 0; i < 14; i++) {
+            float depth = (i * 0.618f) % 1f, beat = 0.5f + 0.5f * (float)Math.Sin(t * 1.6f + i * 1.9f);
+            float y = sea + u * 0.03f + depth * (r.Bottom - sea) * 0.6f, spread = u * (0.05f + 0.2f * depth);
+            float x = sx + (((i * 0.381f) % 1f) - 0.5f) * 2 * spread + (float)Math.Sin(t * 0.6f + i) * u * 0.015f, len = u * (0.02f + 0.04f * depth);
+            using (var pen = new Pen(Fade(c, (int)(210 * beat)), Math.Max(1f, u * 0.006f))) g.DrawLine(pen, x - len, y, x + len, y);
         }
     }
     static readonly float[][] BoltShape = { new[] { 0.55f, 0f }, new[] { 0.1f, 0.55f }, new[] { 0.42f, 0.55f }, new[] { 0.22f, 1f }, new[] { 0.9f, 0.38f }, new[] { 0.55f, 0.38f }, new[] { 0.82f, 0f } };
@@ -9001,10 +10099,11 @@ class LauncherForm : Form {
         float m = w * 0.045f, top = h * 0.055f, bottom = h * 0.965f;
         if (home) {
             float bandTop = top + (bottom - top) * 0.31f, bandBottom = AppsTop(pages.Peek(), w, h, m, bottom);
-            bool town = GameArt.DrawTown(g, th.GameId, all, new RectangleF(0, bandTop, w, Math.Max(1, bandBottom - bandTop)));
+            bool town = Wallpaper.DrawOwn(g, th.GameId, all) || (!Wallpaper.Drawn && GameArt.DrawTown(g, th.GameId, all, new RectangleF(0, bandTop, w, Math.Max(1, bandBottom - bandTop))));
             if (!town) VersionFill(g, all, 0, th, t);
             using (var b = new SolidBrush(Color.FromArgb(town ? 30 : 80, 0, 0, 0))) g.FillRectangle(b, all);
         } else using (var b = new SolidBrush(PhoneBg)) g.FillRectangle(b, all);
+        bool setup = job == null && pages.Count > 0 && pages.Peek().Step >= 0;
         string key = job != null ? "job" : pages.Count + "|" + (pages.Count > 0 ? pages.Peek().Title : "");
         if (key != screenKey) {
             if (TestLog != null) try { File.AppendAllText(TestLog, key + Environment.NewLine); } catch { }
@@ -9019,8 +10118,13 @@ class LauncherForm : Form {
         }
         float ease = Ease((t - screenAt) / 0.18f);
         var content = g.Save();
-        g.TranslateTransform(screenDir * (1 - ease) * w * 0.04f, 0);
+        if (!setup) g.TranslateTransform(screenDir * (1 - ease) * w * 0.04f, 0);
         if (job != null) RenderJob(g, w, h, m, top, bottom, t, th);
+        else if (setup) { var sp = pages.Peek(); if (sp.Sel != selIndex) { selIndex = sp.Sel; selAt = t; } selEase = Ease((t - selAt) / 0.12f); RenderSetupFlow(g, sp, w, h, t, th); }
+        else if (pages.Count > 0 && (pages.Peek().Gallery != null || pages.Peek().Picture != null)) {
+            var gp = pages.Peek(); if (gp.Sel != selIndex) { selIndex = gp.Sel; selAt = t; } selEase = Ease((t - selAt) / 0.12f);
+            if (gp.Gallery != null) RenderGallery(g, gp, w, h, m, top, bottom, t, th); else RenderPreview(g, gp, w, h, m, top, bottom, t, th);
+        }
         else if (pages.Count > 0) {
             var p = pages.Peek();
             if (p.Sel != selIndex) { selIndex = p.Sel; selAt = t; }
@@ -9028,6 +10132,7 @@ class LauncherForm : Form {
             if (p.Main) RenderMain(g, p, w, h, m, top, bottom, t, th); else RenderPage(g, p, w, h, m, top, bottom, t, th);
         }
         g.Restore(content);
+        RenderSetupLeaving(g, w, h, t, th);
         RenderEmuInstall(g, w, h, t);
         RenderOpen(g, w, h, t);
         StatusBar(g, w, h, home ? Color.White : PhoneText);
@@ -9330,15 +10435,18 @@ class LauncherForm : Form {
     static void Group(Graphics g, RectangleF r, float rad) {
         using (var path = Round(r, rad)) using (var b = new SolidBrush(PhoneRow)) g.FillPath(b, path);
     }
-    void RenderPage(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
-        var accent = Accent(th);
-        // Back, like a phone's: it does what B does.
+    // Back, like a phone's: it does what B does. Returns where the page continues below it.
+    float BackButton(Graphics g, int w, int h, float m, float top, Color accent) {
         var back = new RectangleF(m * 0.6f, top - h * 0.004f, w * 0.3f, smallBold.Height * 2f);
         promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(back.X + screenX, back.Y + screenY, back.Width, back.Height), "B"));
         float ch = back.Height * 0.2f, cmid = back.Y + back.Height / 2, cx0 = back.X + m * 0.4f;
         using (var pen = new Pen(accent, Math.Max(2f, h * 0.0035f))) { pen.StartCap = pen.EndCap = System.Drawing.Drawing2D.LineCap.Round; g.DrawLines(pen, new[] { new PointF(cx0 + ch * 0.8f, cmid - ch), new PointF(cx0, cmid), new PointF(cx0 + ch * 0.8f, cmid + ch) }); }
         Write(g, "Back", itemFont, accent, new RectangleF(cx0 + ch * 1.4f, back.Y, back.Width, back.Height), StringAlignment.Near, StringAlignment.Center, false);
-        float y = back.Bottom;
+        return back.Bottom;
+    }
+    void RenderPage(Graphics g, Page p, int w, int h, float m, float top, float bottom, float t, Theme th) {
+        var accent = Accent(th);
+        float y = BackButton(g, w, h, m, top, accent);
         // The boxes take the whole screen under Back: their headers already say what they are.
         if (p.Boxes != null) { RenderBoxes(g, p.Boxes, w, h, m, y + h * 0.004f, bottom, t, th); return; }
         var titleArea = new SizeF(w - 2 * m, titleFont.Height * 1.3f);
@@ -9447,7 +10555,7 @@ class LauncherForm : Form {
         else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, ib.X + icon / 2, ib.Y + icon / 2, icon * 0.8f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
         else if (it.Theme != null) Cart(g, ib.X + icon * 0.1f, ib.Y, icon, it.Theme);
         else {
-            Color tint = !it.On ? Text3 : it.Tint != Color.Empty ? it.Tint : RowColors[it.Icon % RowColors.Length];
+            Color tint = !it.On ? Text3 : it.Tint != Color.Empty ? it.Tint : BrowseTints.ContainsKey(it.Icon) ? BrowseTints[it.Icon] : RowColors[it.Icon % RowColors.Length];
             GlossTile(g, ib, icon * 0.24f, tint);
             if (!RowArt(g, it.Icon, ib, tint)) {
             Write(g, it.Icon.ToString(), iconSmall, Color.FromArgb(90, Ink), new RectangleF(ib.X, ib.Y + icon * 0.04f, ib.Width, ib.Height), StringAlignment.Center, StringAlignment.Center, false);

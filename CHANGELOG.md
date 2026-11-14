@@ -10,6 +10,10 @@ Each notable stable release raises the version, and its section here becomes its
 - Closing the launcher also closes the games it started in the background, and nothing new starts while it closes.
 - 3DS games, optional and in progress: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon through AzaharPlus (recommended) or Azahar as a backup, installed from Emu on the home screen with its own install animation. Saves stay with the launcher, backed up before and after each play, with save slots and per-slot save states.
 - A new Collection icon: a phone Pokédex.
+- A guided first-time setup: welcome, your games, 3DS games, wallpapers and done, sliding from step to step.
+- The launcher's own folder and file browser, with its own little icons, in place of Windows' dialogs for ROM folders, ROM files and pictures.
+- Wallpapers: drawn scenes or pictures from your own play, asked once and changeable in Settings, plus a picture of your own for any game, picked from your PC or found online (fan art from wallhaven.cc, free-license art from Openverse). Sun and Moon now differ, and the Ultra versions glow in a complementary color.
+- The mouse only picks a row when it really moves, so a still cursor no longer takes the selection from the keys.
 
 ## 0.0.5
 
