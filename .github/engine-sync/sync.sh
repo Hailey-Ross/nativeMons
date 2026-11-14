@@ -204,6 +204,8 @@ sync_fork gen4recomp "$OWNER/gen4recomp" sohamb117/gen4recomp main 1
 # 3DS emulators: the liaison follows upstream every night; hails-additions only takes upstream's stable releases.
 sync_fork Azahar "$OWNER/azahar" azahar-emu/azahar master release
 sync_fork AzaharPlus "$OWNER/AzaharPlus" AzaharPlus/AzaharPlus AzaharPlus release
+# The Platinum PC port: the fork only follows upstream's pc_port. Packages use upstream's release (check_releases).
+sync_fork PlatinumPort "$OWNER/pokeplatinum" cybervisi0n/pokeplatinum pc_port 0
 
 pin_submodule Gen1Recomp engines/gen1recomp "$(cat "$WORK/Gen1Recomp.head")"
 pin_submodule Fulldex engines/fulldex "$(cat "$WORK/Fulldex.head")"

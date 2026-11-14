@@ -11,6 +11,9 @@ It runs as the sync GitHub App, so its commits show as the App's bot, with the s
 | Hailey-Ross/gen1recomp | `dev` | bryanthaboi/gen1recomp | yes |
 | Hailey-Ross/pokemon-fulldex | `main` | mamesj/pokemon-fulldex | yes (`--rom`) |
 | Hailey-Ross/gen4recomp | `main` | sohamb117/gen4recomp | yes |
+| Hailey-Ross/azahar | `master` | azahar-emu/azahar | upstream's latest release only |
+| Hailey-Ross/AzaharPlus | `AzaharPlus` | AzaharPlus/AzaharPlus | upstream's latest release only |
+| Hailey-Ross/pokeplatinum | `pc_port` | cybervisi0n/pokeplatinum | no: the fork only follows upstream; packages use upstream's release |
 
 1. The liaison branch fast-forwards to upstream. If it can't (it has commits of its own), the run stops for that fork.
 2. The liaison branch is merged into `hails-additions`. A conflict stops the run, with one exception: in Gen1Recomp, upstream changing a file we removed for the licence keeps it removed (the paths in `tools/nativemons/check-removed.sh`).
