@@ -4,7 +4,7 @@
 
 It checks what we built around the engines, not the engines themselves: each game starts from our launcher and draws, saves stay sound, the package and updater work.
 
-By default it's quick: one game per engine, the main screens and one update of each kind. Games and screens run `-Jobs` at a time (default 4), each launcher with its own state folder; one game never runs on two engines at once, since they share its save. Everything but play, window and sync opens no window and took 69 s (5 November). `-Full` tries every game on every engine and every screen. A release decision needs a full run of play, snapshots and updater.
+By default it's quick: one game per engine, the main screens and one update of each kind. Games and screens run `-Jobs` at a time (default 2), each launcher with its own state folder and everything it starts kept at Idle priority (the launcher raises its games to BelowNormal; four at once in a full run overheated the PC, 14 November); one game never runs on two engines at once, since they share its save. Everything but play, window and sync opens no window and took 69 s (5 November). `-Full` tries every game on every engine and every screen. A release decision needs a full run of play, snapshots and updater.
 
 The launcher is told not to take the keyboard, so the PC stays usable, though the games' own windows may take it briefly. Windows appear on screen during play and window: don't play games on the PC or move the mouse over them meanwhile.
 
@@ -44,12 +44,13 @@ Settings are remembered in the report folder, so later runs only need `-Report`.
 | `-SaveFolder` | a folder of Fulldex .sav files. They're copied in; the originals are only read. |
 | `-ArtFolder` | a `state\game-art` folder to copy in, so the run doesn't spend time capturing art |
 | `-Report` | where results and screenshots are kept (they stay after `-Work` is deleted) |
-| `-Jobs` | how many games or screens at once (default 4) |
+| `-Jobs` | how many games or screens at once (default 2) |
+| `-Only` | play only these games (ids, comma-separated), on every engine they have: a quick proof of one fix |
 | `-LauncherOverride` | a locally built launcher to test in place of the package's. The result then doesn't speak for the package: run again without it before releasing. |
 
 ## Keeping it short
 
-A clean quick run takes about 20 minutes, of which play, window and sync are most. Only those three put windows on screen, and nobody can use the PC while they run.
+A clean quick run takes about 20 minutes, of which play, window and sync are most. Only those three put windows on screen, on the test monitor (DISPLAY3) when it is there. Play lanes copy the state without its game art. A keeper runs for the whole check: once a second it holds everything run from the test folder at Idle and moves its windows to the test monitor.
 
 - **Without windows first:** `-Skip play,window,sync` runs everything else in a few minutes while the PC stays usable. Run the three window groups only when the PC can be left alone, and say how long beforehand.
 - **One failure is one retest:** `-Retest` reruns only the failed groups, or `-Groups window` just one. Don't rerun everything.

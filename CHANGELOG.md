@@ -14,6 +14,7 @@ Each notable stable release raises the version, and its section here becomes its
 - The launcher's own folder and file browser, with its own little icons, in place of Windows' dialogs for ROM folders, ROM files and pictures.
 - Wallpapers: drawn scenes or pictures from your own play, asked once and changeable in Settings, plus a picture of your own for any game, picked from your PC or found online (fan art from wallhaven.cc, free-license art from Openverse). Sun and Moon now differ, and the Ultra versions glow in a complementary color.
 - The mouse only picks a row when it really moves, so a still cursor no longer takes the selection from the keys.
+- GBA games whose ROM path has an accent (such as "Pokémon - LeafGreen Version") start again: the player gets a plain path.
 
 ## 0.0.5
 

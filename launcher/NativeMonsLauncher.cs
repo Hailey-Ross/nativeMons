@@ -2399,7 +2399,10 @@ static class GameArt {
     public static void Watch(Process p) { current = p; if (Hold) StopNow(); }
     // Nothing a capture makes is kept unless it finished, so stopping one costs only a retry at the next start.
     public static void StopNow() { Hold = true; try { var p = current; if (p != null) p.Kill(); } catch { } }
+    // NATIVEMONS_TEST_NO_CAPTURE=1: no title or town captures, for test runs that check something else.
+    static readonly bool TestNoCapture = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_NO_CAPTURE") == "1";
     public static void CaptureMissing(Func<bool> busy, Action first) {
+        if (TestNoCapture) { first(); return; }
         Background(delegate { first(); CaptureAll(() => Hold || busy()); });
     }
     public static void Background(Action work) {
@@ -2429,6 +2432,7 @@ static class GameArt {
         } finally { Making = null; }
     }
     public static void CaptureAtStart(GameEntry first, Action<int, int> progress) {
+        if (TestNoCapture) return;
         Background(delegate {
             // Only the game the menu opens on: the rest take minutes, so they're made in the background once the menu is up.
             var jobs = Missing(first).Where(j => j.Game == first).ToList();
@@ -7940,19 +7944,21 @@ class LauncherForm : Form {
     // Our GBA player (the Fulldex fork's gba folder): the ROM where it is, the shared save in Fulldex's saves folder.
     void PlayGba(GameEntry g, string saves) {
         string dir = Path.GetDirectoryName(Config.GbaPlayer);
-        string args = "--rom \"" + g.FulldexRom + "\" --saves \"" + saves + "\" --data \"" + dir + "\"";
+        // The player can't open a path with accents ("Pokémon - LeafGreen Version"): it gets a plain one.
+        var rom = new PlainPath(g.FulldexRom); PlainPath baseRom = null;
+        string args = "--rom \"" + rom.Path_ + "\" --saves \"" + saves + "\" --data \"" + dir + "\"";
         if (!string.IsNullOrEmpty(g.Save)) args += " --save \"" + Path.Combine(saves, g.Save) + "\"";
         // RetroAchievements: the account Fulldex keeps.
         if (Config.FulldexDir != null) args += " --config \"" + Path.Combine(Config.FulldexDir, "settings.cfg") + "\"";
         if (Library.IsUltraVioletPatch(g.FulldexRom)) {
             var b = Library.Games.Find(x => x.Id == g.BaseId);
             var fr = b == null ? null : b.Roms.FirstOrDefault(r => r.Revision == 0 && Path.GetExtension(r.File).ToLowerInvariant() == ".gba");
-            if (fr != null) args += " --base \"" + fr.File + "\"";
+            if (fr != null) { baseRom = new PlainPath(fr.File); args += " --base \"" + baseRom.Path_ + "\""; }
         }
         string full;
         if (!ReadFulldex().TryGetValue("fullscreen", out full) || full == "1") args += " --fullscreen";
         var psi = new ProcessStartInfo(Config.GbaPlayer, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-        RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+        RunJob(g.Title, psi, true, delegate(int code) { rom.Dispose(); if (baseRom != null) baseRom.Dispose(); Finished(g, code); });
     }
     // Fulldex opens its game list after a GBA game. Seeing it means the game has saved, so Fulldex can close.
     bool watchGba, gbaPlaying, gbaClosed, gbaPress;
@@ -8162,11 +8168,14 @@ class LauncherForm : Form {
         p.BeginOutputReadLine(); p.BeginErrorReadLine();
         Invalidate();
     }
-    // Gen1Recomp garbles accented paths from the environment, so such files go in as plain-named copies.
+    // Gen1Recomp and the GBA player garble accented paths (Pokémon), so such files go in by their short 8.3 name, or as
+    // plain-named copies where the drive has no short names.
     internal sealed class PlainPath : IDisposable {
         public readonly string Path_; readonly string temp;
         public PlainPath(string file) {
             if (file.All(c => c < 128)) { Path_ = file; return; }
+            var own = new StringBuilder(600);
+            if (Native.GetShortPathName(file, own, 600) > 0 && own.ToString().All(c => c < 128)) { Path_ = own.ToString(); return; }
             temp = Path.Combine(Path.GetTempPath(), "nativemons-" + Guid.NewGuid().ToString("N") + Path.GetExtension(file));
             File.Copy(file, temp, true);
             var shortName = new StringBuilder(600);

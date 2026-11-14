@@ -11,7 +11,8 @@ param(
   [string]$SaveFolder, [string]$ArtFolder, [string]$LauncherOverride, [string]$Report,
   [Alias('Stages')][string[]]$Groups,
   [string[]]$Skip = @(),
-  [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full, [int]$Jobs = 4
+  [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full, [int]$Jobs = 2,
+  [string[]]$Only = @()   # play only these games (ids), on every engine they have
 )
 $ErrorActionPreference = 'Continue'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -76,6 +77,7 @@ function Sha([string]$f) { (Get-FileHash -LiteralPath $f -Algorithm SHA1).Hash }
 function Launcher([string[]]$a, [int]$seconds = 120) {
   $line = ($a | ForEach-Object { if ($_ -match '[\s]') { '"' + $_ + '"' } else { $_ } }) -join ' '
   $p = Start-Process $exe -ArgumentList $line -PassThru -WindowStyle Hidden
+  try { $p.PriorityClass = 'Idle' } catch { }
   if (-not $p.WaitForExit($seconds * 1000)) { try { $p.Kill() } catch { }; return -999 }
   return $p.ExitCode
 }
@@ -88,7 +90,32 @@ function Spawn([string]$argline, [string]$dir) {
   # No sound at all, whatever an engine does with its volume (SDL, and LOVE's OpenAL): the volume checks are separate.
   foreach ($k in 'SDL_AUDIODRIVER','SDL_AUDIO_DRIVER') { $psi.EnvironmentVariables[$k] = 'dummy' }; $psi.EnvironmentVariables['ALSOFT_DRIVERS'] = 'null'
   $psi.EnvironmentVariables['NATIVEMONS_TEST_PARALLEL'] = '1'
-  [Diagnostics.Process]::Start($psi)
+  # Test windows on the test monitor (the user's monitor 3), not over what the user is doing.
+  if ($script:testArea) { $psi.EnvironmentVariables['NATIVEMONS_TEST_SCREEN'] = $script:testScreen }
+  $sp = [Diagnostics.Process]::Start($psi)
+  try { $sp.PriorityClass = 'Idle' } catch { }
+  $sp
+}
+# The launcher raises its games and Gen1Recomp's preparing to BelowNormal; the check keeps all of them at Idle.
+function Lower([int[]]$ids) { foreach ($i in $ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if ($q.PriorityClass -ne 'Idle') { $q.PriorityClass = 'Idle' } } catch { } } }
+Add-Type -AssemblyName System.Windows.Forms
+$script:testScreen = 'DISPLAY3'
+$script:testArea = @([Windows.Forms.Screen]::AllScreens | Where-Object { $_.DeviceName -like "*$script:testScreen" }) | ForEach-Object { $_.WorkingArea } | Select-Object -First 1
+# Every launcher started from here, by any route, opens on the test monitor.
+if ($script:testArea) { $env:NATIVEMONS_TEST_SCREEN = $script:testScreen }
+# No launcher here captures title screens or towns in the background: no group tests that, and it plays games out of
+# sight (which "nothing was started by accident" can't tell from a stray start) and loads the PC.
+$env:NATIVEMONS_TEST_NO_CAPTURE = '1'
+# Any window of these processes still on another monitor goes to the test monitor's left or right half.
+$script:movedWins = @{}
+function ToTestScreen([int[]]$ids, [int]$half) {
+  if (-not $script:testArea) { return }
+  foreach ($w in @([StableWin]::Windows($ids))) {
+    $key = [string]$w.MainWindowHandle
+    if ($script:movedWins.ContainsKey($key)) { continue }
+    $script:movedWins[$key] = 1
+    [StableWin]::MoveTo($w.MainWindowHandle, $script:testArea.X + 40 + ($half % 2) * [int]($script:testArea.Width / 2), $script:testArea.Y + 40)
+  }
 }
 function Bridge { $b = Join-Path $app 'tools\mon-bridge\mon-bridge.exe'; $o = & $b @args 2>&1; [pscustomobject]@{ Code = $LASTEXITCODE; Out = ($o | ForEach-Object { "$_" }) } }
 # Everything run from the test's app folder but the launcher: gbawide, node and anything new count too.
@@ -108,6 +135,9 @@ public static class StableWin {
   public struct POINT { public int X, Y; }
   public static string ScreenShot(IntPtr h, string f) { RECT r; if (!GetClientRect(h, out r) || r.R < 1 || r.B < 1) return ""; var o = new POINT(); ClientToScreen(h, ref o); using (var b = new Bitmap(r.R, r.B)) { using (var g = Graphics.FromImage(b)) g.CopyFromScreen(o.X, o.Y, 0, 0, new Size(r.R, r.B)); b.Save(f); } return r.R + "x" + r.B; }
   public static string Shot(IntPtr h, string f) { RECT r; if (!GetClientRect(h, out r) || r.R < 1 || r.B < 1) return ""; using (var b = new Bitmap(r.R, r.B)) { using (var g = Graphics.FromImage(b)) { var dc = g.GetHdc(); PrintWindow(h, dc, 3); g.ReleaseHdc(dc); } b.Save(f); } return r.R + "x" + r.B; }
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+  // Moves a window to (x, y) without resizing, raising or focusing it.
+  public static void MoveTo(IntPtr h, int x, int y) { SetWindowPos(h, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010); }
   public static void Key(IntPtr h, int k) { PostMessage(h, 0x100, (IntPtr)k, IntPtr.Zero); PostMessage(h, 0x101, (IntPtr)k, IntPtr.Zero); System.Threading.Thread.Sleep(350); }
   // How many colours in a sample of the picture: a blank or failed drawing has one.
   public static int Colours(string f) { using (var b = new Bitmap(f)) { var seen = new System.Collections.Generic.HashSet<int>(); for (int y = 0; y < b.Height; y += Math.Max(1, b.Height / 40)) for (int x = 0; x < b.Width; x += Math.Max(1, b.Width / 40)) seen.Add(b.GetPixel(x, y).ToArgb()); return seen.Count; } }
@@ -131,6 +161,37 @@ function RomList { Get-ChildItem -LiteralPath $RomFolder -Recurse -File -ErrorAc
 
 $script:played = @(); $oldAppData = $env:APPDATA; $romsBefore = RomList; $saveHashes = @{}
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | ForEach-Object { $saveHashes[$_.FullName] = Sha $_.FullName } }
+# The keeper, for the whole run and every group: whatever runs from the test folder is held at Idle (the launcher raises
+# its games), and its windows go to the test monitor, so the PC stays usable.
+$area = $script:testArea
+$keeper = Start-Job -ArgumentList $Work, $(if ($area) { @($area.X, $area.Y, $area.Width) } else { @(-1, 0, 0) }) -ScriptBlock {
+  param($root, $box)
+  Add-Type @'
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public static class Keep {
+  delegate bool Cb(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(Cb cb, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out R r);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
+  struct R { public int L, T, Rt, B; }
+  public static void Move(int[] ids, int ax, int ay, int aw) {
+    var n = 0;
+    EnumWindows((h, l) => { uint p; R r; GetWindowThreadProcessId(h, out p);
+      if (Array.IndexOf(ids, (int)p) >= 0 && IsWindowVisible(h) && GetWindowRect(h, out r) && r.Rt - r.L > 100 && r.L > -10000 && (r.L < ax || r.L >= ax + aw))
+        SetWindowPos(h, IntPtr.Zero, ax + 40 + (n++ % 2) * (aw / 2), ay + 40, 0, 0, 0x0001 | 0x0004 | 0x0010);
+      return true; }, IntPtr.Zero);
+  }
+}
+'@
+  while ($true) {
+    $mine = @(Get-Process | Where-Object { try { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } catch { $false } })
+    foreach ($p in $mine) { try { if ($p.PriorityClass -ne 'Idle') { $p.PriorityClass = 'Idle' } } catch { } }
+    if ($box[0] -ge 0 -and $mine.Count) { [Keep]::Move([int[]]@($mine | ForEach-Object { $_.Id }), $box[0], $box[1], $box[2]) }
+    Start-Sleep -Milliseconds 700
+  }
+}
 try {
 # ---------- repo: what's published is allowed to be ----------
 if (On 'repo') {
@@ -210,6 +271,8 @@ $env:NATIVEMONS_STATE = $st; $env:APPDATA = "$Work\appdata"; $env:NATIVEMONS_TES
 Set-Content "$st\rom-folders.txt" $RomFolder
 Set-Content "$st\game-options.txt" "full=off`nvol=0"
 if ($ArtFolder -and (Test-Path -LiteralPath $ArtFolder)) { Copy-Item -LiteralPath $ArtFolder "$st\game-art" -Recurse }
+# Start as a player who has answered the one-time wallpaper question, so the walks begin on the home screen.
+Set-Content "$st\wallpaper.txt" 'play'
 $saves = Join-Path $app 'engines\fulldex\saves'; New-Item -ItemType Directory -Force $saves | Out-Null
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | Copy-Item -Destination $saves }
 # ---------- scan ----------
@@ -333,7 +396,13 @@ if (On 'play') {
     if ($m.Groups[3].Value) { $matrix += ,@($id, 'nativeplat', $false) }
     if ($id -eq 'platinum' -and $m.Groups[1].Value) { $matrix += ,@($id, 'port', $false) }
   }
-  if (-not $Full) {
+  # From the command line "-Only a,b" arrives as one string.
+  $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  if ($Only.Count) {
+    $matrix = @($matrix | Where-Object { $Only -contains $_[0] })
+    if (-not $matrix.Count) { T play "-Only matched a game" $false "no game found for: $($Only -join ', ')" }
+  }
+  elseif (-not $Full) {
     $ds = @('diamond','pearl','platinum','heartgold','soulsilver','black','white','black2','white2')
     $kinds = @{}; $pickRows = @()
     foreach ($row in $matrix) { $k = $row[1] + $(if ($row[1] -eq 'fulldex') { if ($ds -contains $row[0]) { '-ds' } else { '-gba' } }); if (-not $kinds.ContainsKey($k) -and -not $row[2]) { $kinds[$k] = 1; $pickRows += ,$row } }
@@ -343,7 +412,7 @@ if (On 'play') {
   ClearGames
   $todo = New-Object Collections.ArrayList; foreach ($row in $matrix) { [void]$todo.Add($row) }
   $lanes = New-Object Collections.ArrayList; $n = 0
-  function KillLane([object]$l) { foreach ($i in $l.Ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
+  function KillLane([object]$l) { foreach ($i in @(@($l.Born.Keys) + $l.P.Id | Select-Object -Unique)) { try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
   function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillLane $l; [void]$lanes.Remove($l) }
   while ($todo.Count -or $lanes.Count) {
     while ($lanes.Count -lt $Jobs) {
@@ -351,16 +420,29 @@ if (On 'play') {
       if (-not $row) { break }
       $todo.Remove($row); $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
       if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
-      $n++; $dir = "$Work\play$n"; Copy-Item $st "$dir\state" -Recurse; Set-Content "$dir\state\engine-$id.txt" $en
+      # Play only needs the game to start: the copied art stays behind. Gen1Recomp's prepared games are copied for
+      # every engine, since a launcher without them prepares all of them again at start, which costs far more.
+      $n++; $dir = "$Work\play$n"; robocopy $st "$dir\state" /E /XD (Join-Path $st 'game-art') /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null; Set-Content "$dir\state\engine-$id.txt" $en
       $p = Spawn "--play $id" $dir
       $limit = if ($en -eq 'gen1') { 420 } elseif ($en -eq 'port') { 240 } else { 120 }
-      [void]$lanes.Add([pscustomobject]@{ Id = $id; En = $en; Name = $name; P = $p; Ids = @($p.Id); T = Get-Date; Limit = $limit; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null })
+      [void]$lanes.Add([pscustomobject]@{ Born = @{}; Seen = $false; Half = $n; Id = $id; En = $en; Name = $name; P = $p; Ids = @($p.Id); T = Get-Date; Limit = $limit; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null })
     }
     Start-Sleep -Milliseconds 500
     # Each lane's own processes: everything started from its launcher, even after a parent has gone.
-    $procs = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId)
+    $procs = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate)
+    $born = @{}; foreach ($q in $procs) { $born[[int]$q.ProcessId] = $q.CreationDate }
     foreach ($l in @($lanes)) {
-      do { $more = @($procs | Where-Object { $l.Ids -contains $_.ParentProcessId -and $l.Ids -notcontains $_.ProcessId } | ForEach-Object { [int]$_.ProcessId }); $l.Ids += $more } while ($more.Count)
+      # Windows reuses process numbers: a lane forgets processes that have ended, and only takes in a process
+      # that started after its parent, so it never adopts another lane's game.
+      foreach ($i in @($l.Born.Keys)) { if (-not $born.ContainsKey($i) -or $born[$i] -ne $l.Born[$i]) { $l.Born.Remove($i) } }
+      if ($l.Born.Count -eq 0 -and $born.ContainsKey($l.P.Id) -and -not $l.Seen) { $l.Born[$l.P.Id] = $born[$l.P.Id]; $l.Seen = $true }
+      do {
+        $more = @($procs | Where-Object { $l.Born.ContainsKey([int]$_.ParentProcessId) -and -not $l.Born.ContainsKey([int]$_.ProcessId) -and $_.CreationDate -ge $l.Born[[int]$_.ParentProcessId] })
+        foreach ($q in $more) { $l.Born[[int]$q.ProcessId] = $q.CreationDate; if ($l.Ids -notcontains [int]$q.ProcessId) { $l.Ids += [int]$q.ProcessId } }
+      } while ($more.Count)
+      $live = @($l.Born.Keys | ForEach-Object { [int]$_ })
+      Lower $live
+      ToTestScreen @($live | Where-Object { $_ -ne $l.P.Id }) $l.Half
       $png = "$Report\shots\play-$($l.Id)-$($l.En).png"
       if ($l.Closing) {
         $clean = $l.P.HasExited
@@ -378,14 +460,14 @@ if (On 'play') {
         Done $l $false "launcher exited $($l.P.ExitCode) before the game settled"
       } else {
         # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
-        $game = @([StableWin]::Windows([int[]]@($l.Ids | Where-Object { $_ -ne $l.P.Id })) | Where-Object { $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
+        $game = @([StableWin]::Windows([int[]]@($live | Where-Object { $_ -ne $l.P.Id })) | Where-Object { $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
         if ($game) {
           if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
           elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) { $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle; $l.Shot = Get-Date }
         } else { $l.Steady = $null }
         if (-not $l.Shot -and ((Get-Date) - $l.T).TotalSeconds -gt $l.Limit) {
           $l.P.Refresh(); [void][StableWin]::Shot($l.P.MainWindowHandle, "$Report\shots\failed-$($l.Id)-$($l.En).png")
-          $seen = @($l.Ids | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | ForEach-Object { $t = @([StableWin]::Windows([int[]]@($_.Id)) | ForEach-Object { $_.MainWindowTitle }) -join ' / '; "$($_.ProcessName)='$t'" }) -join ', '
+          $seen = @($live | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | ForEach-Object { $t = @([StableWin]::Windows([int[]]@($_.Id)) | ForEach-Object { $_.MainWindowTitle }) -join ' / '; "$($_.ProcessName)='$t'" }) -join ', '
           Done $l $false "no steady game window in $($l.Limit)s; running: $seen"
         }
       }
@@ -405,10 +487,12 @@ if (On 'sync') {
   $g = @('firered','leafgreen','emerald') | Where-Object { (Test-Path (Join-Path $saves "$_.sav")) -and ($found -contains $_) } | Select-Object -First 1
   if (-not $g) { T sync 'shared save tests' 'skip' 'needs a FireRed, LeafGreen or Emerald save and ROM' } else {
     $o = "$Work\sync.txt"; $m = Join-Path $saves "$g.sav"; $record = "$st\save-sync\$g.txt"
-    if ($script:played -notcontains "$g on gen1") {
+    # Play runs each game in its own state, so only a sync record in the shared state shows the game is shared there.
+    if (-not (Test-Path $record)) {
       Set-Content "$st\engine-$g.txt" 'gen1'
       $q = Start-Process $exe -ArgumentList "--play $g" -PassThru; $w = Get-Date; $shown = $null
-      while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $shown = @([StableWin]::Windows([int[]]@(GameProcs | ForEach-Object { $_.Id }))) | Select-Object -First 1 }
+      try { $q.PriorityClass = 'Idle' } catch { }
+      while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $gp = @(GameProcs | ForEach-Object { $_.Id }); Lower $gp; ToTestScreen $gp 0; $shown = @([StableWin]::Windows([int[]]$gp)) | Select-Object -First 1 }
       T sync "${g}: prepared for Gen1Recomp" ([bool]$shown)
       Start-Sleep 5; if ($shown) { [void]$shown.CloseMainWindow() }; if (-not $q.WaitForExit(40000)) { try { $q.Kill() } catch { } }; ClearGames
     }
@@ -484,12 +568,15 @@ if (On 'window') {
     [StableWin]::Key($h,$R); Visit 'Collection' 'Pokedex$' 2
     [StableWin]::Key($h,$R); Visit 'Mods' 'Mods' 2
     [StableWin]::Key($h,$R); Visit 'ROMs' 'ROM folders$' 2
-    1..3 | ForEach-Object { [StableWin]::Key($h,$L) }; [StableWin]::Key($h,$D); Visit 'Move' 'Move Pokemon' 2
-    [StableWin]::Key($h,$R); [StableWin]::Key($h,$E)
-    T window 'opens Settings' (WaitPage '^2\|Settings$') "$(Now)"
-    # Every row but the ones that download, open a file dialog or flip a setting.
-    $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
-    for ($i = 0; $i -lt $rows.Count; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1) { [StableWin]::Key($h,$D) } }
+    # The home screen's second row: Emu, Move, Settings, Exit.
+    1..3 | ForEach-Object { [StableWin]::Key($h,$L) }; [StableWin]::Key($h,$D); Visit 'Emu' 'Emulators$' 2
+    if (-not $script:lost) { [StableWin]::Key($h,$R); Visit 'Move' 'Move Pokemon' 2 }
+    if (-not $script:lost) { [StableWin]::Key($h,$R); [StableWin]::Key($h,$E); $set = WaitPage '^2\|Settings$'; T window 'opens Settings' $set "$(Now)"; if (-not $set) { $script:lost = $true } }
+    else { T window 'opens Settings' 'skip' 'an earlier step went wrong' }
+    # Every row but the ones that download, open a file dialog or flip a setting (3DS games, Quick start, Discord).
+    $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Wallpapers','Wallpapers$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
+    # Once a step has gone wrong, no more keys: a press on the wrong screen could start a game.
+    for ($i = 0; $i -lt $rows.Count -and -not $script:lost; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1 -and -not $script:lost) { [StableWin]::Key($h,$D) } }
     [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
   }
   # Change a ROM version through its page, if a game has two: opened straight with --game, so no counting down the list.
@@ -583,6 +670,7 @@ $left = @(GameProcs); T integrity 'no game left running' ($left.Count -eq 0) (($
   if ($script:lastGroup -and $script:lastGroup -ne 'suite') { T $script:lastGroup 'stopped before finishing' $false }
   T suite 'ran to the end' $false "$($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"
 } finally {
+  if ($keeper) { Stop-Job $keeper -ErrorAction SilentlyContinue; Remove-Job $keeper -Force -ErrorAction SilentlyContinue }
   $env:APPDATA = $oldAppData; Remove-Item env:NATIVEMONS_STATE, env:NATIVEMONS_UPDATE_URL, env:NATIVEMONS_TEST_LOG, env:NATIVEMONS_TEST_QUIET, env:SDL_AUDIODRIVER, env:SDL_AUDIO_DRIVER, env:ALSOFT_DRIVERS -ErrorAction SilentlyContinue
   try { ClearGames; foreach ($p in Get-Process NativeMonsLauncher -ErrorAction SilentlyContinue) { if ($p.Path -and $p.Path.StartsWith($Work, [StringComparison]::OrdinalIgnoreCase)) { $p.Kill() } } } catch { }
 }
