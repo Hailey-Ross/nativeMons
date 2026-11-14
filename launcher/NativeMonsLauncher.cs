@@ -204,10 +204,10 @@ class Emu3ds {
     // Exe names are upstream's; confirm against our first release of each.
     public static readonly Emu3ds[] All = {
         new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
-            Tag = "windows-4d38fce65", Sha256 = "84bd4eecbf61075ada7997e0b5c71c1439a45c723d9de0e1c3eac40fa0a50ade", Size = "about 44 MB",
+            Tag = "windows-a6aa2ad2e", Sha256 = "f011f57f9c37a1f7abfc6981e8806dd1129321b3875bea71299c2c1e0de19f83", Size = "about 44 MB",
             Notes = "The best pick for Pokemon: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well." },
         new Emu3ds { Id = "panda3ds", Name = "Panda3DS-modified (nativeMons)", Short = "Panda3DS", Repo = "Hailey-Ross/Panda3DS", Upstream = "wheremyfoodat/Panda3DS", Exe = "Alber.exe", Asset = "panda3ds-nativemons-windows-x64.zip",
-            Tag = "windows-8a6864cb7", Sha256 = "b23db2eac9d1d7c8f317b8a64763983f20d2b4d2bd7954ee0a48e5162bfa657b", Size = "about 28 MB",
+            Tag = "windows-f34351958", Sha256 = "b42e7291c10c281e00ccfe9732c4709056df3cb837efb9d29c179412cd0ba672", Size = "about 28 MB",
             Notes = "A newer emulator written from scratch. X and Y run well; Sun, Moon and the Ultra games can be unstable." },
         new Emu3ds { Id = "mandarine", Name = "Mandarine-neo-modified (nativeMons)", Short = "Mandarine-neo", Repo = "Hailey-Ross/mandarine-neo", Upstream = "ptyfyre/mandarine-neo", Exe = "mandarine-qt.exe", Asset = "mandarine-nativemons-windows-x64.zip",
             Tag = "windows-a3bae48ad", Sha256 = "a565516995b1ee266634bb3f446f7db6c79e6df5a9c425481485fee042049723", Size = "about 49 MB",
@@ -6608,6 +6608,8 @@ class LauncherForm : Form {
             if (x != null || problem != null) { ShowText("Could not start " + g.Title, "Its save couldn't be handed to " + e.Short + ", so nothing was started. " + (x ?? problem), null); return; }
             var psi = new ProcessStartInfo(e.ExePath, "\"" + g.CtrRom + "\"") { UseShellExecute = false, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             RunJob(g.Title, psi, true, delegate(int code) {
+                // The emulator's own output, kept for when something didn't work (one file per emulator, last session only).
+                try { File.WriteAllLines(Path.Combine(Ctr3dsSaves.EmuData(e), "nativemons-last-output.txt"), log.ToArray()); } catch { }
                 string kept = null;
                 Busy("Collecting your save", delegate { kept = Ctr3dsSaves.Collect(e, g); return null; }, delegate(string y) {
                     if (kept != null || y != null) noticeAfter = kept ?? y;
