@@ -161,6 +161,7 @@ static class Config {
     // Installed PC games live beside the engines, where a launcher update never looks.
     public static string InfiniteFusion { get { return Get("infinitefusion", @"games\infinitefusion\Game.exe"); } }
     public static string InfiniteFusion2 { get { return Get("infinitefusion2", @"games\infinitefusion2\InfiniteFusion2.exe"); } }
+    public static string Emulators { get { return Get("emulators", "emulators"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string MgbaCore { get { return Get("mgbacore", @"tools\mgba\mgba_libretro.dll"); } }
@@ -189,6 +190,266 @@ static class Config {
     public static void Write(string name, string text) { try { File.WriteAllText(Path.Combine(State, name), text); } catch { } }
 }
 
+// The 3DS emulators a player can add, each built from our own fork. Optional: nothing downloads until they pick one.
+class Emu3ds {
+    public string Id, Name, Short, Repo, Upstream, Exe, Asset, Notes;
+    // The pinned release of our fork: its tag and the zip's sha256 (GitHub's asset digest). Null: not offered yet.
+    public string Tag, Sha256, Size;
+    public string Url { get { return "https://github.com/" + Repo + "/releases/download/" + Tag + "/" + Asset; } }
+    public string InstalledTag { get { try { string f = Path.Combine(Dir, "nativemons-tag.txt"); return File.Exists(f) ? File.ReadAllText(f).Trim() : null; } catch { return null; } } }
+    public bool UpdateReady { get { return Installed && Tag != null && InstalledTag != Tag; } }
+    public string Dir { get { return Path.Combine(Config.Emulators, Id); } }
+    public string ExePath { get { return Path.Combine(Dir, Exe); } }
+    public bool Installed { get { return File.Exists(ExePath); } }
+    // Exe names are upstream's; confirm against our first release of each.
+    public static readonly Emu3ds[] All = {
+        new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
+            Tag = "windows-4d38fce65", Sha256 = "84bd4eecbf61075ada7997e0b5c71c1439a45c723d9de0e1c3eac40fa0a50ade", Size = "about 44 MB",
+            Notes = "The best pick for Pokemon: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well." },
+        new Emu3ds { Id = "panda3ds", Name = "Panda3DS-modified (nativeMons)", Short = "Panda3DS", Repo = "Hailey-Ross/Panda3DS", Upstream = "wheremyfoodat/Panda3DS", Exe = "Alber.exe", Asset = "panda3ds-nativemons-windows-x64.zip",
+            Tag = "windows-8a6864cb7", Sha256 = "b23db2eac9d1d7c8f317b8a64763983f20d2b4d2bd7954ee0a48e5162bfa657b", Size = "about 28 MB",
+            Notes = "A newer emulator written from scratch. X and Y run well; Sun, Moon and the Ultra games can be unstable." },
+        new Emu3ds { Id = "mandarine", Name = "Mandarine-neo-modified (nativeMons)", Short = "Mandarine-neo", Repo = "Hailey-Ross/mandarine-neo", Upstream = "ptyfyre/mandarine-neo", Exe = "mandarine-qt.exe", Asset = "mandarine-nativemons-windows-x64.zip",
+            Tag = "windows-a3bae48ad", Sha256 = "a565516995b1ee266634bb3f446f7db6c79e6df5a9c425481485fee042049723", Size = "about 49 MB",
+            Notes = "Built on Citra like Azahar, with extra speed options. Updated less often." },
+    };
+    public static bool Enabled { get { return Config.Read("3ds-games.txt", "off") == "on"; } set { Config.Write("3ds-games.txt", value ? "on" : "off"); } }
+    // Picked by the player, else the first one installed.
+    public static Emu3ds Default {
+        get { string id = Config.Read("3ds-emulator.txt", ""); return All.FirstOrDefault(e => e.Id == id && e.Installed) ?? All.FirstOrDefault(e => e.Installed); }
+        set { Config.Write("3ds-emulator.txt", value == null ? "" : value.Id); }
+    }
+    public static bool CanDownload(Emu3ds e) { return e.Tag != null && e.Sha256 != null; }
+    // Only this emulator's own program blocks replacing its folder; other games and background jobs don't.
+    public static bool Running(Emu3ds e) {
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(e.Exe))) {
+            bool mine = false;
+            try { mine = p.MainModule.FileName.StartsWith(e.Dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase); } catch { mine = true; }
+            p.Dispose();
+            if (mine) return true;
+        }
+        return false;
+    }
+    // An emulator's own data folder ("user" beside Azahar and Mandarine in portable mode) survives updates and removal.
+    static readonly string[] Kept = { "user", "Emulator Files" };
+    // Download, check, unpack beside, then swap in. Null when done, or why not.
+    public static string Install(Emu3ds e) {
+        string zip = e.Dir + ".download.zip", temp = e.Dir + ".new", old = e.Dir + ".old";
+        try {
+            // The link to its data (state\3ds\emu) goes first, so nothing below can reach the saves through it.
+            Ctr3dsSaves.Unlink(e);
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            Directory.CreateDirectory(Config.Emulators);
+            using (var web = new System.Net.WebClient()) { web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; web.DownloadFile(e.Url, zip); }
+            string hash;
+            using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
+            if (hash != e.Sha256) return "The download wasn't the expected file, so it wasn't used.";
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
+            // The zip holds one folder (azahar\, panda3ds\, mandarine\) with the program inside.
+            string top = Directory.GetDirectories(temp).Length == 1 && Directory.GetFiles(temp).Length == 0 ? Directory.GetDirectories(temp)[0] : temp;
+            if (!File.Exists(Path.Combine(top, e.Exe))) return "The download was missing " + e.Exe + ".";
+            File.WriteAllText(Path.Combine(top, "nativemons-tag.txt"), e.Tag);
+            if (Directory.Exists(old)) Directory.Delete(old, true);
+            if (Directory.Exists(e.Dir)) {
+                Directory.Move(e.Dir, old);
+                foreach (var k in Kept) if (Directory.Exists(Path.Combine(old, k))) Directory.Move(Path.Combine(old, k), Path.Combine(top, k));
+            }
+            Directory.Move(top, e.Dir);
+            if (Directory.Exists(old)) Directory.Delete(old, true);
+            // Data kept from an earlier Remove comes back.
+            foreach (var k in Kept) {
+                string kept = Path.Combine(Config.Emulators, e.Id + "-" + k.Replace(' ', '-').ToLowerInvariant());
+                if (Directory.Exists(kept) && !Directory.Exists(Path.Combine(e.Dir, k))) Directory.Move(kept, Path.Combine(e.Dir, k));
+            }
+            return null;
+        } catch (Exception x) { return e.Short + " couldn't be installed: " + x.Message; }
+        finally { try { File.Delete(zip); } catch { } try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+    }
+    // Deletes the program; its own data folder is kept, beside the others, for a later install.
+    public static string Remove(Emu3ds e) {
+        try {
+            if (!Directory.Exists(e.Dir)) return null;
+            Ctr3dsSaves.Unlink(e);
+            foreach (var k in Kept) {
+                string from = Path.Combine(e.Dir, k), to = Path.Combine(Config.Emulators, e.Id + "-" + k.Replace(' ', '-').ToLowerInvariant());
+                if (Directory.Exists(from) && !Directory.Exists(to)) Directory.Move(from, to);
+            }
+            Directory.Delete(e.Dir, true);
+            // A removed emulator stops being the pick, so the next install becomes it.
+            if (Config.Read("3ds-emulator.txt", "") == e.Id) Config.Write("3ds-emulator.txt", "");
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
+}
+
+// A 3DS game's save belongs to the launcher, not to an emulator (notes in todo 20): state\3ds\saves\<game> holds the
+// save folder (data\, with "main"), Citra's format file (metadata) and the slot's save states (states\). Before play
+// it's copied into the chosen emulator; after play it's copied back, backed up and checked.
+static class Ctr3dsSaves {
+    public static string Root { get { return Path.Combine(Config.State, "3ds"); } }
+    public static string Master(GameEntry g) { return Path.Combine(Root, "saves", g.Id); }
+    public static string Main(GameEntry g) { return Path.Combine(Master(g), "data", "main"); }
+    // Each emulator's own data folder (settings, system files), linked in only while it runs.
+    public static string EmuData(Emu3ds e) { return Path.Combine(Root, "emu", e.Id); }
+    static bool Citra(Emu3ds e) { return e.Id != "panda3ds"; }
+    // Where the emulator looks for its data: "user" beside Azahar and Mandarine, "Emulator Files" beside Panda3DS.
+    static string Link(Emu3ds e) { return Path.Combine(e.Dir, Citra(e) ? "user" : "Emulator Files"); }
+    static string Low(GameEntry g) { return g.Ctr.Substring(8).ToLowerInvariant(); }
+    static string High(GameEntry g) { return g.Ctr.Substring(0, 8).ToLowerInvariant(); }
+    // The emulator's copy of the save folder, and Citra's format file beside it.
+    static string EmuSave(Emu3ds e, GameEntry g) {
+        return Citra(e) ? Path.Combine(EmuData(e), "sdmc", "Nintendo 3DS", new string('0', 32), new string('0', 32), "title", High(g), Low(g), "data", "00000001")
+                        : Path.Combine(EmuData(e), Path.GetFileNameWithoutExtension(g.CtrRom), "SaveData");
+    }
+    static string EmuMeta(Emu3ds e, GameEntry g) { return Citra(e) ? EmuSave(e, g) + ".metadata" : null; }
+    static string EmuStates(Emu3ds e) { return Citra(e) ? Path.Combine(EmuData(e), "states") : null; }
+    static string[] StatesOf(string dir, GameEntry g) { return dir != null && Directory.Exists(dir) ? Directory.GetFiles(dir, g.Ctr.ToUpperInvariant() + ".*.cst") : new string[0]; }
+
+    public static bool IsLink(string dir) { try { return Directory.Exists(dir) && (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0; } catch { return false; } }
+    // A directory junction: no admin rights needed, unlike a symbolic link.
+    static void MakeLink(string link, string target) {
+        Directory.CreateDirectory(target);
+        var psi = new ProcessStartInfo("cmd.exe", "/c mklink /J \"" + link + "\" \"" + target + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        using (var p = Process.Start(psi)) { p.WaitForExit(15000); }
+        if (!IsLink(link)) throw new IOException("Couldn't link the emulator to its data folder.");
+    }
+    // Removes only the link, never what it points to.
+    public static void Unlink(Emu3ds e) { string l = Link(e); if (IsLink(l)) Directory.Delete(l, false); }
+
+    static void CopyDir(string from, string to) {
+        Directory.CreateDirectory(to);
+        foreach (var f in Directory.GetFiles(from)) SaveGuard.WriteInPlace(f, Path.Combine(to, Path.GetFileName(f)));
+        foreach (var d in Directory.GetDirectories(from)) CopyDir(d, Path.Combine(to, Path.GetFileName(d)));
+    }
+    // Replaces a folder's contents with another's, or empties it when there's no source.
+    public static void Mirror(string from, string to) {
+        if (Directory.Exists(to)) Directory.Delete(to, true);
+        if (from != null && Directory.Exists(from)) CopyDir(from, to);
+    }
+
+    // Before play: link the emulator to its data, back up, and hand it this slot's save and states.
+    static string SessionFile(Emu3ds e) { return Path.Combine(EmuData(e), "nativemons-session.txt"); }
+    // A session the launcher never saw end (a crash, a power cut): its save is collected before anything else.
+    public static string CollectLeftover(Emu3ds e) {
+        try {
+            string f = SessionFile(e);
+            if (!File.Exists(f)) return null;
+            var g = Library.Games.Find(x => x.Id == File.ReadAllText(f).Trim() && x.Ctr != null && x.CtrRom != null);
+            string why = g != null ? Collect(e, g) : null;
+            if (why == null) File.Delete(f);
+            return why;
+        } catch (Exception x) { return x.Message; }
+    }
+    public static void Prepare(Emu3ds e, GameEntry g) {
+        string left = CollectLeftover(e);
+        if (left != null) throw new IOException("The last session's save couldn't be collected first: " + left);
+        string link = Link(e);
+        if (IsLink(link)) Directory.Delete(link, false);
+        // A real folder there (the emulator was run by hand) is kept aside, never deleted.
+        else if (Directory.Exists(link)) Directory.Move(link, link + ".kept-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        MakeLink(link, EmuData(e));
+        File.WriteAllText(SessionFile(e), g.Id);
+        if (!Citra(e)) WritePandaConfig(e); else WriteCitraConfig(e);
+        if (File.Exists(Main(g))) SaveGuard.Backup(g, Main(g), "before-play");
+        string save = EmuSave(e, g);
+        if (Directory.Exists(Path.Combine(Master(g), "data"))) {
+            Mirror(Path.Combine(Master(g), "data"), save);
+            string meta = Path.Combine(Master(g), "metadata");
+            if (EmuMeta(e, g) != null && File.Exists(meta)) SaveGuard.WriteInPlace(meta, EmuMeta(e, g));
+        } else if (Directory.Exists(save)) {
+            // No save of the launcher's yet: one the emulator still holds would come back, so it's kept in the backups instead.
+            string aside = Path.Combine(SaveGuard.BackupFolder(g), "emulator-" + e.Id + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            CopyDir(save, aside); Directory.Delete(save, true);
+            if (EmuMeta(e, g) != null && File.Exists(EmuMeta(e, g))) File.Delete(EmuMeta(e, g));
+        }
+        string states = EmuStates(e);
+        if (states != null) {
+            foreach (var f in StatesOf(states, g)) File.Delete(f);
+            foreach (var f in StatesOf(Path.Combine(Master(g), "states"), g)) SaveGuard.WriteInPlace(f, Path.Combine(states, Path.GetFileName(f)));
+        }
+    }
+    // After play: take the save and states back, then unlink. Null when done, or why the save stayed where it was.
+    public static string Collect(Emu3ds e, GameEntry g) {
+        try {
+            string save = EmuSave(e, g);
+            if (Directory.Exists(save) && File.Exists(Path.Combine(save, "main"))) {
+                Mirror(save, Path.Combine(Master(g), "data"));
+                if (EmuMeta(e, g) != null && File.Exists(EmuMeta(e, g))) SaveGuard.WriteInPlace(EmuMeta(e, g), Path.Combine(Master(g), "metadata"));
+            }
+            string states = EmuStates(e);
+            if (states != null) {
+                string kept = Path.Combine(Master(g), "states");
+                Directory.CreateDirectory(kept);
+                foreach (var f in StatesOf(kept, g)) File.Delete(f);
+                foreach (var f in StatesOf(states, g)) SaveGuard.WriteInPlace(f, Path.Combine(kept, Path.GetFileName(f)));
+            }
+            try { File.Delete(SessionFile(e)); } catch { }
+            return null;
+        } catch (Exception x) { return "Your save stayed in the emulator's folder and is collected next time: " + x.Message; }
+        finally { try { Unlink(e); } catch { } }
+    }
+    // One "key=value" in a section of a Qt settings file, with Qt's "\default=false" so the emulator keeps it.
+    static void SetIni(List<string> lines, string section, string key, string value) {
+        int at = lines.FindIndex(l => l.Trim() == "[" + section + "]");
+        if (at < 0) { if (lines.Count > 0 && lines[lines.Count - 1].Trim() != "") lines.Add(""); lines.Add("[" + section + "]"); at = lines.Count - 1; }
+        int end = lines.FindIndex(at + 1, l => l.StartsWith("["));
+        if (end < 0) end = lines.Count;
+        foreach (var pair in new[] { new[] { key + "\\default", "false" }, new[] { key, value } }) {
+            int i = lines.FindIndex(at + 1, end - at - 1, l => l.StartsWith(pair[0] + "="));
+            if (i >= 0) lines[i] = pair[0] + "=" + pair[1]; else { lines.Insert(end, pair[0] + "=" + pair[1]); end++; }
+        }
+    }
+    // Any controller, by position on a 3DS (A right, B bottom): SDL's standard buttons and axes, for every pad connected.
+    static readonly string[][] PadMap = {
+        new[] { "button_a", "button:1" }, new[] { "button_b", "button:0" }, new[] { "button_x", "button:3" }, new[] { "button_y", "button:2" },
+        new[] { "button_up", "button:11" }, new[] { "button_down", "button:12" }, new[] { "button_left", "button:13" }, new[] { "button_right", "button:14" },
+        new[] { "button_l", "button:9" }, new[] { "button_r", "button:10" }, new[] { "button_start", "button:6" }, new[] { "button_select", "button:4" },
+        new[] { "button_zl", "axis:4,direction:+,threshold:0.5" }, new[] { "button_zr", "axis:5,direction:+,threshold:0.5" }, new[] { "button_home", "button:5" },
+        new[] { "circle_pad", "axis_x:0,axis_y:1,deadzone:0.1" }, new[] { "c_stick", "axis_x:2,axis_y:3,deadzone:0.1" },
+    };
+    // Azahar's own settings the launcher keeps: no "are you sure" on close, the launcher's Discord status instead of its
+    // own, and (once, so the player's own mapping stays) every controller mapped.
+    static void WriteCitraConfig(Emu3ds e) {
+        string f = Path.Combine(EmuData(e), "config", "qt-config.ini");
+        Directory.CreateDirectory(Path.GetDirectoryName(f));
+        var lines = File.Exists(f) ? File.ReadAllLines(f).ToList() : new List<string>();
+        SetIni(lines, "UI", "confirmClose", "false");
+        SetIni(lines, "UI", "enable_discord_presence", "false");
+        string marker = Path.Combine(EmuData(e), "nativemons-controls.txt");
+        // Only Azahar understands "any controller" (maptype:all); Mandarine-neo needs each pad's id.
+        if (e.Id == "azahar" && !File.Exists(marker)) {
+            foreach (var m in PadMap) {
+                var parts = ("api:controller,engine:sdl,guid:0,maptype:all,port:0," + m[1]).Split(',').OrderBy(x => x, StringComparer.Ordinal);
+                SetIni(lines, "Controls", "profiles\\1\\" + m[0], "\"" + string.Join(",", parts.ToArray()) + "\"");
+            }
+            if (!lines.Any(l => l.StartsWith("profiles\\size="))) SetIni(lines, "Controls", "profiles\\size", "1");
+            File.WriteAllText(marker, "Controller mapping written by nativeMons. Delete this file to have it written again.");
+        }
+        File.WriteAllLines(f, lines.ToArray());
+    }
+    // Panda3DS reads config.toml from its working folder (its data folder here); portable mode keeps its data beside it.
+    static void WritePandaConfig(Emu3ds e) {
+        string f = Path.Combine(EmuData(e), "config.toml");
+        var lines = File.Exists(f) ? File.ReadAllLines(f).ToList() : new List<string>();
+        lines.RemoveAll(l => l.Trim().StartsWith("UsePortableBuild"));
+        int at = lines.FindIndex(l => l.Trim() == "[General]");
+        if (at < 0) { lines.Insert(0, "[General]"); at = 0; }
+        lines.Insert(at + 1, "UsePortableBuild = true");
+        File.WriteAllLines(f, lines.ToArray());
+    }
+    public static string WorkingDir(Emu3ds e) { return Citra(e) ? e.Dir : EmuData(e); }
+    // When the launcher changes a save (Move Pokemon), the slot's states go to the backups with the old save,
+    // so loading an old state can't undo the change (user, 2026-11-13).
+    public static void StashStates(GameEntry g, string reason) {
+        var states = StatesOf(Path.Combine(Master(g), "states"), g);
+        if (states.Length == 0) return;
+        string to = Path.Combine(SaveGuard.BackupFolder(g), "states-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + reason);
+        Directory.CreateDirectory(to);
+        foreach (var f in states) { SaveGuard.WriteInPlace(f, Path.Combine(to, Path.GetFileName(f))); File.Delete(f); }
+    }
+}
+
 // A version's colours from games.json, and its finish: plain or a scene.
 class Theme {
     public Color Main, Deep, Light, Ink; public string Finish = "plain";
@@ -215,7 +476,11 @@ class GameEntry {
     // A PC program of its own (PcGames), with no ROM. Save tools, Move and Collection leave it out.
     public string Pc;
     public bool OnPc { get { return Pc != null && PcGames.Installed(this); } }
-    public bool SaveTools { get { return Playable && Pc == null; } }
+    // 3DS games stay out of save tools until their saves are backed up and checked (todo 20).
+    public bool SaveTools { get { return Playable && Pc == null && Ctr == null; } }
+    // A 3DS game: its title ID, and the decrypted dump an emulator plays in place.
+    public string Ctr, CtrRom;
+    public bool On3ds { get { return Ctr != null && CtrRom != null && Emu3ds.Enabled && Emu3ds.Default != null; } }
     public int ArtFrame, TownFrame;   // frames from power-on to the title screen
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
     public List<RomFile> Roms = new List<RomFile>();   // every distinct dump found
@@ -240,7 +505,7 @@ class GameEntry {
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
     public bool OnPort { get { return Port != null && FulldexRom != null && File.Exists(Config.PlatinumPort); } }
     public bool OnNativeplat { get { return Nativeplat != null && NativeplatRom != null && File.Exists(Config.Nativeplat); } }
-    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat || OnPc; } }
+    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat || OnPc || On3ds; } }
     public bool IsDs { get { return Console == "Nintendo DS"; } }
     public bool HasBoth { get { return OnGen1 && OnFulldex; } }
     // The player's choice where both engines can run it; Fulldex by default (widescreen).
@@ -251,18 +516,20 @@ class GameEntry {
         if (OnPort) l.Add("port");
         if (OnNativeplat) l.Add("nativeplat");
         if (OnPc) l.Add("pc");
+        if (On3ds) l.Add("3ds");
         // A romhack only runs on Fulldex: the other engines only take clean copies.
         if (Chosen != null && IsModified(Chosen) && l.Contains("fulldex")) return new List<string> { "fulldex" };
         return l;
     }
     public string Engine() {
         var l = Engines();
-        if (l.Count == 0) return "gen1";
+        // A 3DS game never falls back to Gen1Recomp, even with no emulator installed.
+        if (l.Count == 0) return Ctr != null ? "3ds" : "gen1";
         string chosen = Config.Read("engine-" + Id + ".txt", l[0]);
         return l.Contains(chosen) ? chosen : l[0];
     }
-    public static string EngineName(string engine) { return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
-    public static string EngineShort(string engine) { return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
+    public static string EngineName(string engine) { if (engine == "3ds") { var e = Emu3ds.Default; return e != null ? e.Name : "a 3DS emulator"; } return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
+    public static string EngineShort(string engine) { if (engine == "3ds") { var e = Emu3ds.Default; return e != null ? e.Short : "3DS"; } return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
 }
 
 // Games that are PC programs of their own, such as Infinite Fusion (notes/launcher.md, PC games).
@@ -2162,7 +2429,7 @@ static class Library {
         var json = new JavaScriptSerializer().Deserialize<List<Dictionary<string, object>>>(File.ReadAllText(Config.GamesFile));
         Func<Dictionary<string, object>, string, string> str = delegate(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; };
         foreach (var d in json) {
-            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat"), TownCore = str(d, "townCore"), Pc = str(d, "pc") };
+            var e = new GameEntry { Id = str(d, "id"), Title = str(d, "title"), Console = str(d, "console"), Gen1 = str(d, "gen1"), FulldexCode = str(d, "fulldex"), Header = str(d, "header"), Save = str(d, "save"), Port = str(d, "port"), Nativeplat = str(d, "nativeplat"), TownCore = str(d, "townCore"), Pc = str(d, "pc"), Ctr = str(d, "ctr") };
             object c, dx;
             if (d.TryGetValue("dex", out dx)) e.Dex = Convert.ToInt32(dx);
             object af; if (d.TryGetValue("artFrame", out af)) e.ArtFrame = Convert.ToInt32(af);
@@ -2203,6 +2470,7 @@ static class Library {
         var files = Config.RomFiles().Where(File.Exists).ToList();
         foreach (var folder in folders) if (Directory.Exists(folder)) files.AddRange(FilesUnder(folder));
         foreach (var file in files) {
+            if (Is3ds(file)) { try { Sort3ds(list, file); } catch { } continue; }
             if (!IsRom(file)) { if (IsUltraVioletPatch(file)) try { AddPatch(list, file); } catch { } continue; }
             try { Sort(list, file, Path.GetExtension(file).ToLowerInvariant(), accepted); } catch { }
         }
@@ -2290,7 +2558,40 @@ static class Library {
         if (g.Roms.Any(x => x.Sha1 == sha)) return;
         g.Roms.Add(new RomFile { File = file, Sha1 = sha, Added = File.GetCreationTimeUtc(file) });
     }
-    public static bool IsRom(string file) { string ext = Path.GetExtension(file).ToLowerInvariant(); return ext == ".nds" || ext == ".gb" || ext == ".gbc" || ext == ".gba"; }
+    public static bool IsRom(string file) { string ext = Path.GetExtension(file).ToLowerInvariant(); return ext == ".nds" || ext == ".gb" || ext == ".gbc" || ext == ".gba" || ext == ".3ds" || ext == ".cci"; }
+    public static bool Is3ds(string file) { string ext = Path.GetExtension(file).ToLowerInvariant(); return ext == ".3ds" || ext == ".cci"; }
+    // A 3DS cartridge dump (NCSD): its title ID and whether it is decrypted, from the headers alone. These files are
+    // 2-4 GB, so they are never hashed; the title ID, size and date stand in for the hash.
+    public static Ctr3ds ReadCtr(string file) {
+        using (var f = File.OpenRead(file)) {
+            var h = new byte[0x200];
+            if (f.Read(h, 0, h.Length) < h.Length || Encoding.ASCII.GetString(h, 0x100, 4) != "NCSD") return null;
+            var r = new Ctr3ds { TitleId = BitConverter.ToUInt64(h, 0x108).ToString("X16") };
+            long part = (long)BitConverter.ToUInt32(h, 0x120) * 0x200;
+            var n = new byte[0x200];
+            f.Seek(part, SeekOrigin.Begin);
+            if (f.Read(n, 0, n.Length) < n.Length || Encoding.ASCII.GetString(n, 0x100, 4) != "NCCH") return r;
+            r.Decrypted = r.NoCryptoFlag = (n[0x18F] & 0x04) != 0;
+            // Some decrypted dumps leave the flag unset: an ExeFS whose first file reads ".code" is plain text.
+            if (!r.Decrypted) {
+                var e = new byte[8];
+                f.Seek(part + (long)BitConverter.ToUInt32(n, 0x1A0) * 0x200, SeekOrigin.Begin);
+                r.Decrypted = f.Read(e, 0, 8) == 8 && Encoding.ASCII.GetString(e, 0, 5) == ".code";
+            }
+            return r;
+        }
+    }
+    public class Ctr3ds { public string TitleId; public bool Decrypted, NoCryptoFlag; }
+    static void Sort3ds(List<GameEntry> list, string file) {
+        var c = ReadCtr(file);
+        if (c == null) return;
+        var g = list.Find(x => x.Ctr != null && string.Equals(x.Ctr, c.TitleId, StringComparison.OrdinalIgnoreCase));
+        if (g == null) return;
+        var info = new FileInfo(file);
+        string key = "ctr-" + c.TitleId.ToLowerInvariant() + "-" + info.Length.ToString("x") + "-" + info.LastWriteTimeUtc.Ticks.ToString("x");
+        if (g.Roms.Any(x => x.Sha1 == key)) return;
+        g.Roms.Add(new RomFile { File = file, Sha1 = key, Added = info.CreationTimeUtc, Encrypted = !c.Decrypted });
+    }
     // One unreadable or over-long subfolder is skipped alone, instead of losing the whole folder.
     public static List<string> FilesUnder(string root) {
         var found = new List<string>();
@@ -2307,6 +2608,12 @@ static class Library {
     public static string WhyNotPlayable(GameEntry g) {
         if (g.Pc == "custom") return "Its program has moved or been deleted.";
         if (g.Pc != null) return "Not installed yet. Select it to install.";
+        if (g.Ctr != null) {
+            if (g.CtrRom == null && g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is encrypted. Emulators need a decrypted dump of your cartridge, made with GodMode9 on your 3DS.";
+            if (g.CtrRom == null) return "No ROM found. Add the folder with your decrypted .3ds dump under ROM folders.";
+            if (!Emu3ds.Enabled) return "Found " + Path.GetFileName(g.CtrRom) + ". Turn on 3DS games under Emu on the home screen to play it.";
+            return "Found " + Path.GetFileName(g.CtrRom) + ". Install an emulator under Emu on the home screen to play it.";
+        }
         string rom = g.FulldexRom ?? g.FoundUnsupported;
         bool canRun = (g.Gen1 != null && Gen1Found) || (g.FulldexCode != null && File.Exists(Config.Fulldex)) || (g.Nativeplat != null && File.Exists(Config.Nativeplat));
         if (rom != null && !canRun) return "Found " + Path.GetFileName(rom) + ", but this copy of nativeMons doesn't have the engine to run it. Use the full download from the Releases page.";
@@ -2356,6 +2663,7 @@ static class Library {
         // Kept from the first time there's a choice, so moving or adding files can't change it later.
         if (g.Roms.Count > 1 && g.Chosen.Sha1 != saved) Config.Write("rom-" + g.Id + ".txt", g.Chosen.Sha1);
         if (g.FulldexCode != null) g.FulldexRom = g.Chosen.File;
+        if (g.Ctr != null) { var r = g.Chosen.Encrypted ? Ranked(g).FirstOrDefault(x => !x.Encrypted) : g.Chosen; g.CtrRom = r != null ? r.File : null; if (r == null) { g.FoundUnsupported = g.Chosen.File; } }
         // An engine with an exact list uses the chosen dump if it's on the list, or its best one that is.
         if (g.Gen1 != null) { var r = g.Chosen.Gen1Ok ? g.Chosen : Ranked(g).FirstOrDefault(x => x.Gen1Ok); g.Gen1Rom = r != null ? r.File : null; }
         if (g.Nativeplat != null) { var r = g.Chosen.NativeplatOk ? g.Chosen : Ranked(g).FirstOrDefault(x => x.NativeplatOk); g.NativeplatRom = r != null ? r.File : null; }
@@ -3028,6 +3336,13 @@ class LauncherForm : Form {
         if (screen == "folder-added") { firstSetup = true; pages.Push(FoldersPage()); pages.Push(FolderAddedPage(Config.RomFolders().FirstOrDefault() ?? "")); }
         if (screen == "credits") pages.Push(CreditsPage());
         if (screen == "settings") pages.Push(SettingsPage());
+        if (screen == "emu") pages.Push(EmuPage());
+        // emuinstalled-<id>-<seconds>: that emulator's page, its install animation that far in.
+        if (screen.StartsWith("emuinstalled-")) {
+            var f = screen.Split('-'); var e = Emu3ds.All.FirstOrDefault(x => x.Id == f[1]);
+            if (e != null) { pages.Push(EmuPage()); pages.Push(EmuDetailPage(e)); emuInstallName = e.Short; emuInstallAt = (float)clock.Elapsed.TotalSeconds - float.Parse(f[2], System.Globalization.CultureInfo.InvariantCulture); }
+        }
+        if (screen.StartsWith("emu-")) { var e = Emu3ds.All.FirstOrDefault(x => x.Id == screen.Substring(4)); if (e != null) pages.Push(EmuDetailPage(e)); }
         if (screen == "controls") pages.Push(ControlsPage());
         if (screen == "screenshots") pages.Push(ScreenshotsPage());
         if (screen.StartsWith("controls-")) { int n = int.Parse(screen.Substring(9)); pages.Push(ControlsPage()); pages.Push(new Page { Title = ControlSheets[n][0] + " controls", Body = ControlSheets[n][2] }); }
@@ -3109,6 +3424,20 @@ class LauncherForm : Form {
         if (screen == "job") {
             job = new Process(); jobTitle = "Preparing Pokemon LeafGreen"; jobStart = DateTime.Now.AddSeconds(-14); progress = 0.62f;
             foreach (var l in new[] { "Reading the ROM", "Decoding maps", "Decoding Pokemon graphics" }) log.Add(l);
+        }
+        if (screen == "emuinstall") {
+            // The Emu tile's install animation, start to end.
+            int n = 10;
+            using (var bmp = new Bitmap(n * 90, 90)) using (var g = Graphics.FromImage(bmp)) {
+                g.Clear(Color.FromArgb(60, 60, 70));
+                for (int k = 0; k < n; k++) {
+                    var r = new RectangleF(k * 90 + 10, 10, 70, 70);
+                    GlossTile(g, r, 70 * 0.24f, AppColors[App("Emu")]);
+                    emuInstallK = k / (float)(n - 1); AppArt(g, App("Emu"), r, AppColors[App("Emu")]); emuInstallK = -1;
+                }
+                bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+            }
+            return;
         }
         if (screen == "appicons") {
             // Each app's highlighted motion, still first, then moments along it.
@@ -3414,6 +3743,8 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Mods", mods ? "Mods for the Gen1Recomp games." : "Needs a Gen1Recomp game.", mods, delegate { pages.Push(ModGamesPage()); }) { Icon = '' });
         int folders = Config.RomFolders().Count;
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
+        int emus = Emu3ds.All.Count(e => e.Installed);
+        p.Items.Add(new Item("Emulators", !Emu3ds.Enabled ? "3DS games are off. Turn them on here." : emus == 0 ? "Pick an emulator for your 3DS games." : emus + (emus == 1 ? " emulator" : " emulators") + " for your 3DS games.", true, delegate { pages.Push(EmuPage()); }) { Icon = '' });
         p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.SaveTools) > 1, delegate { OpenBoxView(); }) { Icon = '\uE8AB' });
         p.Items.Add(new Item("Settings", "Game options, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
@@ -3425,6 +3756,7 @@ class LauncherForm : Form {
         var p = new Page { Title = "Settings" };
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
+        p.Items.Add(new Item("3DS games: " + (Emu3ds.Enabled ? "On" : "Off"), "", true, delegate { Emu3ds.Enabled = !Emu3ds.Enabled; pages.Pop(); pages.Push(SettingsPage()); ReplaceMain(); }) { Icon = '', Tint = AppColors[App("Emu")], Info = "Play your Nintendo 3DS Pokemon games with an emulator you choose, from Emu on the home screen. Nothing downloads until you pick one. Select to turn it " + (Emu3ds.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.SaveTools), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
@@ -3436,6 +3768,59 @@ class LauncherForm : Form {
         p.Items.Add(new Item(Updater.Ready ? "Updates: " + Updater.Upper(Updater.LatestLabel) + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
         p.Items.Add(new Item("Last session", "", true, delegate { ShowText("Last session", Config.Read("last-session.txt", "No session yet."), null); }) { Icon = '\uE81C', Info = "How the last game ended." });
+        return p;
+    }
+    // ---------- 3DS emulators ----------
+    Page EmuPage() {
+        var p = new Page { Title = "Emulators" };
+        bool on = Emu3ds.Enabled;
+        p.Items.Add(new Item("3DS games: " + (on ? "On" : "Off"), "", true, delegate { Emu3ds.Enabled = !on; pages.Pop(); pages.Push(EmuPage()); ReplaceMain(); }) { Icon = '', Tint = AppColors[App("Emu")], Info = "Play your Nintendo 3DS Pokemon games with an emulator you choose. Nothing downloads until you pick one, and turning this off keeps your saves. Select to turn it " + (on ? "off" : "on") + "." });
+        if (!on) {
+            p.Body = "nativeMons can play X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon through a 3DS emulator, with your saves, collection and Move Pokemon working as they do for the other games.\n\nYou need decrypted dumps of your own cartridges. No games or keys are included.";
+            p.FitBody = true;
+            return p;
+        }
+        var chosen = Emu3ds.Default;
+        foreach (var emu in Emu3ds.All) {
+            var e = emu;
+            string state = e.Installed ? (chosen == e ? "Plays your 3DS games" : "Installed") : "Not installed";
+            p.Items.Add(new Item(e.Short, state + ".", true, delegate { pages.Push(EmuDetailPage(e)); }) { Icon = '', Tint = AppColors[App("Emu")], TileHint = state, Info = e.Notes,
+                Records = new[] { "Name: " + e.Name, "Based on: github.com/" + e.Upstream, "Built at: github.com/" + e.Repo } });
+        }
+        return p;
+    }
+    Page EmuDetailPage(Emu3ds e) {
+        var p = new Page { Title = e.Short };
+        bool have = e.Installed, isDefault = have && Emu3ds.Default == e;
+        p.Body = e.Name + "\n\n" + e.Notes;
+        p.FitBody = true;
+        bool can = Emu3ds.CanDownload(e);
+        string label = !have ? "Install" : e.UpdateReady ? "Update ready" : "Up to date";
+        p.Items.Add(new Item(label, !can ? "Not available yet: its nativeMons build is still being made." : have && !e.UpdateReady ? "You have the newest nativeMons build." : "Downloads " + e.Size + " and checks it before putting it in place.", can && (!have || e.UpdateReady), delegate {
+            if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is open. Close it, then " + (have ? "update" : "install") + " it.", null); return; }
+            string problem = null;
+            Busy((have ? "Updating " : "Installing ") + e.Short, delegate { problem = Emu3ds.Install(e); return null; }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Not installed", x ?? problem, null); return; }
+                if (Emu3ds.Default == null || Config.Read("3ds-emulator.txt", "") == "") Emu3ds.Default = e;
+                // Right here: the animation plays over this page, then its menus show it installed.
+                pages.Pop(); pages.Pop(); pages.Push(EmuPage()); pages.Push(EmuDetailPage(e));
+                ReplaceMain();
+                emuInstallName = e.Short; emuInstallAt = (float)clock.Elapsed.TotalSeconds;
+                dirty = true;
+            });
+        }) { Icon = '',
+            Info = "Gets " + e.Name + " from github.com/" + e.Repo + ", checks the download, and puts it beside the launcher. Your saves stay where they are." });
+        p.Items.Add(new Item("Use for 3DS games: " + (isDefault ? "Yes" : "No"), "", have && !isDefault, delegate { Emu3ds.Default = e; pages.Pop(); pages.Push(EmuDetailPage(e)); }) { Icon = '', Tint = AppColors[App("Emu")],
+            Info = isDefault ? "Your 3DS games play with " + e.Short + "." : have ? "Select to play your 3DS games with " + e.Short + " instead." : "Install it first." });
+        p.Items.Add(new Item("Open its folder", "", have, delegate { try { Process.Start("explorer.exe", "\"" + e.Dir + "\""); } catch { } }) { Icon = '', Info = e.Dir });
+        p.Items.Add(new Item("Remove", "Deletes the emulator. Your saves stay.", have, delegate {
+            if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is open. Close it, then remove it.", null); return; }
+            string problem = null;
+            Busy("Removing " + e.Short, delegate { problem = Emu3ds.Remove(e); return null; }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Not removed", x ?? problem, null); return; }
+                pages.Pop(); pages.Pop(); pages.Push(EmuPage()); ReplaceMain();
+            });
+        }) { Icon = '' });
         return p;
     }
     void OpenUpdates() {
@@ -3609,7 +3994,7 @@ class LauncherForm : Form {
     }
 
     // ---------- one save for both engines ----------
-    static string MasterOf(GameEntry g) { return Path.Combine(Config.FulldexDir, "saves", g.Save ?? ""); }
+    static string MasterOf(GameEntry g) { return g.Ctr != null ? Ctr3dsSaves.Main(g) : Path.Combine(Config.FulldexDir, "saves", g.Save ?? ""); }
     public static bool Shares(GameEntry g) { return g.HasBoth && File.Exists(Config.MonBridge); }
     static string SyncFile(GameEntry g) { return Path.Combine(Config.State, "save-sync", g.Id + ".txt"); }
     static Dictionary<string, string> ReadSync(GameEntry g) {
@@ -3809,6 +4194,8 @@ class LauncherForm : Form {
                 if (problem != null) { problem = "That backup failed its check: " + problem; return null; }
                 string current = CurrentSave(g);
                 SaveGuard.Backup(g, current, "before-restore");
+                // A 3DS slot's newer states go to the backups too, so loading one can't undo the restore.
+                if (g.Ctr != null) Ctr3dsSaves.StashStates(g, "before-restore");
                 if (g.Engine() != "gen1" || Shares(g)) SaveGuard.WriteInPlace(file, MasterOf(g));
                 if (g.Engine() == "gen1") problem = ImportBack(g, file);
                 if (problem == null && Shares(g)) { var r = SyncSave(g, "fulldex"); problem = r.Failed ? r.Note : null; }
@@ -3833,6 +4220,8 @@ class LauncherForm : Form {
     }
     static void Park(GameEntry g, string set) {
         Directory.CreateDirectory(SaveSets.Dir(g, set));
+        // A 3DS game's whole save folder, format file and states go with the slot.
+        if (g.Ctr != null) Ctr3dsSaves.Mirror(Ctr3dsSaves.Master(g), Path.Combine(SaveSets.Dir(g, set), "3ds"));
         if (HasMaster(g)) CopyOrRemove(MasterOf(g), ParkedSave(g, set));
         CopyOrRemove(SyncFile(g), ParkedSync(g, set));
         if (HasGen1Slots(g)) {
@@ -3843,6 +4232,7 @@ class LauncherForm : Form {
     }
     // Puts a parked save in use. A save with nothing in it yet starts a new game in each engine.
     static void BringIn(GameEntry g, string set) {
+        if (g.Ctr != null) Ctr3dsSaves.Mirror(Path.Combine(SaveSets.Dir(g, set), "3ds"), Ctr3dsSaves.Master(g));
         if (HasMaster(g)) CopyOrRemove(ParkedSave(g, set), MasterOf(g));
         Directory.CreateDirectory(Path.GetDirectoryName(SyncFile(g)));
         CopyOrRemove(ParkedSync(g, set), SyncFile(g));
@@ -5396,7 +5786,7 @@ class LauncherForm : Form {
         if (folders.Count + roms.Count + zips.Count == 0) {
             if (saves.Count > 0) { ImportSaveFiles(saves); return; }
             bool packed = other.Any(x => new[] { ".7z", ".rar" }.Contains(Path.GetExtension(x).ToLowerInvariant()));
-            ShowText("Can't use that", string.Join(", ", other.Select(Path.GetFileName).ToArray()) + "\n\nDrop a folder of ROMs, a .gb, .gbc, .gba or .nds ROM, a .zip of ROMs, or a .sav save." + (packed ? "\n\n.7z and .rar can't be opened here: extract it first, then drop the ROM." : ""), null);
+            ShowText("Can't use that", string.Join(", ", other.Select(Path.GetFileName).ToArray()) + "\n\nDrop a folder of ROMs, a .gb, .gbc, .gba, .nds or decrypted .3ds ROM, a .zip of ROMs, or a .sav save." + (packed ? "\n\n.7z and .rar can't be opened here: extract it first, then drop the ROM." : ""), null);
             return;
         }
         var notes = new List<string>();
@@ -5456,6 +5846,10 @@ class LauncherForm : Form {
             if (g.Playable) return g.Title + ", ready to play." + (g.Roms.Count > 1 ? " With more than one copy, its ROM version page picks which." : "");
             return g.Title + ". " + Library.WhyNotPlayable(g);
         }
+        if (Library.Is3ds(file)) {
+            Library.Ctr3ds c = null; try { c = Library.ReadCtr(file); } catch { }
+            return c == null ? "not a 3DS cartridge dump nativeMons can read, so it wasn't added." : "not one of the Pokemon 3DS games nativeMons runs (title ID " + c.TitleId + "), so it wasn't added.";
+        }
         string sha = "";
         try { using (var f = File.OpenRead(file)) using (var h = SHA1.Create()) sha = BitConverter.ToString(h.ComputeHash(f)).Replace("-", "").ToLowerInvariant(); } catch { }
         // The same dump found somewhere else first: the list keeps one file per dump.
@@ -5472,7 +5866,8 @@ class LauncherForm : Form {
             int n = 0;
             using (var archive = System.IO.Compression.ZipFile.OpenRead(zip)) {
                 foreach (var entry in archive.Entries) {
-                    if (entry.Name == "" || !Library.IsRom(entry.Name)) continue;
+                    // 3DS dumps are played in place, never copied out of a zip (they're 2-4 GB).
+                    if (entry.Name == "" || !Library.IsRom(entry.Name) || Library.Is3ds(entry.Name)) continue;
                     Directory.CreateDirectory(to);
                     string target = Path.Combine(to, entry.Name);
                     n++; added.Add(target);
@@ -5526,6 +5921,7 @@ class LauncherForm : Form {
             + "\n\nThe GBA player is ours, in our Fulldex fork, on mGBA by endrift and contributors (MPL-2.0), after Pokemon GBA Widescreen by mamesj. Widescreen for romhacks and the versions our patches don't cover comes from PokeDaisy's EXPAND (GPL-3.0). Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy"
             + "\n\nRomhacks' title screens are captured with mGBA by endrift and contributors (github.com/mgba-emu/mgba, MPL-2.0), as its libretro core."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
+            + "\n\nOptional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons: Azahar by the Azahar team, from Citra (github.com/azahar-emu/azahar, GPL-2.0-or-later; ours: github.com/Hailey-Ross/azahar); Panda3DS by wheremyfoodat and contributors (github.com/wheremyfoodat/Panda3DS, GPL-3.0; ours: github.com/Hailey-Ross/Panda3DS); Mandarine-neo by ptyfyre and contributors, from Citra (github.com/ptyfyre/mandarine-neo, GPL-2.0; ours: github.com/Hailey-Ross/mandarine-neo). Not the official builds, and not affiliated with nativeMons."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
@@ -5634,13 +6030,18 @@ class LauncherForm : Form {
     // Whether a game has a save to show, without running anything.
     static bool HasBoxSave(GameEntry g) {
         try {
-            if (g.Engine() != "gen1") { var f = new FileInfo(Path.Combine(Config.FulldexDir, "saves", g.Save ?? "")); return f.Exists && f.Length > 0; }
+            if (g.Engine() != "gen1") { var f = new FileInfo(MasterOf(g)); return f.Exists && f.Length > 0; }
             string dir = Path.Combine(Gen1Root, "saves", g.Gen1 ?? "");
             return Directory.Exists(dir) && Directory.GetFiles(dir, "*.lua").Any(x => !x.EndsWith(".bak.lua", StringComparison.OrdinalIgnoreCase));
         } catch { return true; }
     }
     static string SaveOf(GameEntry g, out string why) {
         why = null;
+        if (g.Ctr != null) {
+            if (File.Exists(Ctr3dsSaves.Main(g))) return Ctr3dsSaves.Main(g);
+            why = "No save yet for " + g.Title + ". Play and save once first.";
+            return null;
+        }
         if (g.Engine() != "gen1") {
             string f = Path.Combine(Config.FulldexDir, "saves", g.Save ?? "");
             if (File.Exists(f)) return f;
@@ -6098,6 +6499,7 @@ class LauncherForm : Form {
             return;
         }
         current = g; Config.Write("last-game.txt", g.Id);
+        if (g.Engine() == "3ds") { Play3ds(g); return; }
         if (g.Engine() == "pc") { Busy("Backing up your saves", delegate { PcGames.Backup(g); return null; }, delegate(string e) { PlayPc(g); }); return; }
         if (g.Engine() == "fulldex") {
             if (Library.NeedsPatch(g.FulldexRom)) { pages.Push(PatchPage(g, true)); return; }
@@ -6192,6 +6594,27 @@ class LauncherForm : Form {
         if (options != "") psi.EnvironmentVariables["NATIVEMONS_OPTIONS"] = options;
         if (QuickStart) psi.EnvironmentVariables["NATIVEMONS_TO_TITLE"] = "1";
         RunJob(g.Title, psi, true, delegate(int code) { Finished(g, code); });
+    }
+    // A 3DS game: its save goes into the emulator, the ROM is played where it is, and the save comes back after.
+    void Play3ds(GameEntry g) {
+        var e = Emu3ds.Default;
+        if (e == null) return;
+        if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is already open. Close it, then press Play.", null); return; }
+        string problem = null;
+        Busy("Backing up your save", delegate {
+            try { Ctr3dsSaves.Prepare(e, g); } catch (Exception x) { problem = x.Message; try { Ctr3dsSaves.Unlink(e); } catch { } }
+            return null;
+        }, delegate(string x) {
+            if (x != null || problem != null) { ShowText("Could not start " + g.Title, "Its save couldn't be handed to " + e.Short + ", so nothing was started. " + (x ?? problem), null); return; }
+            var psi = new ProcessStartInfo(e.ExePath, "\"" + g.CtrRom + "\"") { UseShellExecute = false, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            RunJob(g.Title, psi, true, delegate(int code) {
+                string kept = null;
+                Busy("Collecting your save", delegate { kept = Ctr3dsSaves.Collect(e, g); return null; }, delegate(string y) {
+                    if (kept != null || y != null) noticeAfter = kept ?? y;
+                    Finished(g, code);
+                });
+            });
+        });
     }
     void PlayPc(GameEntry g) {
         var psi = new ProcessStartInfo(PcGames.Exe(g)) { UseShellExecute = false, WorkingDirectory = PcGames.Dir(g), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
@@ -7170,7 +7593,7 @@ class LauncherForm : Form {
     // An app opening: its icon grows to fill the screen, then the screen it opens has its rows pop in one by one.
     const float OpenTime = 0.3f;
     float openAt = -10, bounceAt = -10; int openApp; RectangleF openFrom; Action openRun; bool bounceArm;
-    readonly RectangleF[] appRects = new RectangleF[8];
+    readonly RectangleF[] appRects = new RectangleF[AppNames.Length];
     static float BackOut(float x) { x = Math.Max(0, Math.Min(1, x)) - 1; return 1 + 2.4f * x * x * x + 1.4f * x * x; }
     void OpenTick() {
         if (openRun == null || (float)clock.Elapsed.TotalSeconds - openAt < OpenTime) return;
@@ -7252,27 +7675,51 @@ class LauncherForm : Form {
                     break;
                 }
                 case "Collection": {
-                    var body = R(0.22f, 0.15f, 0.56f, 0.7f);
-                    using (var path = Round(body, s * 0.07f)) {
-                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(body, Color.FromArgb(240, 70, 64), Color.FromArgb(186, 30, 36), 90f)) g.FillPath(b, path);
-                        using (var b = new SolidBrush(Color.FromArgb(150, 20, 26))) g.FillRectangle(b, R(0.22f, 0.15f, 0.07f, 0.7f));
+                    // A phone Pokedex, like the launcher itself: red, the big blue lens, three lights, the dex on screen.
+                    var phone = R(0.24f, 0.08f, 0.52f, 0.84f);
+                    using (var path = Round(phone, s * 0.1f)) {
+                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(phone, Color.FromArgb(246, 82, 72), Color.FromArgb(184, 28, 36), 90f)) g.FillPath(b, path);
                         g.DrawPath(ink, path);
                     }
-                    g.DrawLine(ink, P(0.29f, 0.17f), P(0.29f, 0.83f));
-                    var lens = R(0.35f, 0.21f, 0.2f, 0.2f);
-                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(lens, Color.FromArgb(120, 200, 255), Color.FromArgb(30, 100, 210), 60f)) g.FillEllipse(b, lens);
-                    g.FillEllipse(Brushes.White, R(0.39f, 0.25f, 0.06f, 0.06f));
-                    if (u >= 0) using (var b = new SolidBrush(Color.FromArgb((int)(70 + 70 * wave), 255, 255, 255))) g.FillEllipse(b, lens);
-                    g.DrawEllipse(ink, lens);
+                    var ring = R(0.28f, 0.12f, 0.19f, 0.19f);
+                    using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, ring);
+                    g.DrawEllipse(ink, ring);
+                    var lens = R(0.31f, 0.15f, 0.13f, 0.13f);
+                    using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(lens, Color.FromArgb(130, 210, 255), Color.FromArgb(24, 96, 206), 60f)) g.FillEllipse(b, lens);
+                    if (u >= 0) using (var b = new SolidBrush(Color.FromArgb((int)(50 + 50 * wave), 255, 255, 255))) g.FillEllipse(b, lens);
+                    g.FillEllipse(Brushes.White, R(0.33f, 0.17f, 0.04f, 0.04f));
                     var lights = new[] { Color.FromArgb(255, 90, 80), Color.FromArgb(255, 214, 64), Color.FromArgb(90, 210, 110) };
-                    int lit = u < 0 ? -1 : (int)(u * 3.5f) % 3;
-                    for (int k = 0; k < 3; k++) { var dot = R(0.59f + k * 0.055f, 0.24f, 0.04f, 0.04f); using (var b = new SolidBrush(u < 0 || k == lit ? lights[k] : Mix(lights[k], Color.Black, 0.45f))) g.FillEllipse(b, dot); }
-                    var screen = R(0.34f, 0.5f, 0.36f, 0.25f);
-                    using (var path = Round(screen, s * 0.03f)) { using (var b = new SolidBrush(Color.FromArgb(206, 240, 228))) g.FillPath(b, path); g.DrawPath(ink, path); }
-                    // Its entry being written out, line by line.
-                    float k1 = 1, k2 = 1;
-                    if (u >= 0) { float c = u % 2.2f / 1.6f; k1 = Math.Min(1, c * 2); k2 = Math.Max(0, Math.Min(1, c * 2 - 1)); }
-                    using (var pen = new Pen(Color.FromArgb(120, 170, 150), lw * 0.6f)) { if (k1 > 0.02f) g.DrawLine(pen, P(0.39f, 0.58f), P(0.39f + 0.21f * k1, 0.58f)); if (k2 > 0.02f) g.DrawLine(pen, P(0.39f, 0.66f), P(0.39f + 0.15f * k2, 0.66f)); }
+                    int lit = u < 0 ? -1 : (int)(u * 3) % 3;
+                    for (int k = 0; k < 3; k++) {
+                        var dot = R(0.51f + k * 0.065f, 0.19f, 0.048f, 0.048f);
+                        using (var b = new SolidBrush(u < 0 || k == lit ? lights[k] : Mix(lights[k], Color.Black, 0.4f))) g.FillEllipse(b, dot);
+                        using (var thin = new Pen(Ink, lw * 0.5f)) g.DrawEllipse(thin, dot);
+                    }
+                    // The screen: the dex list, which scrolls one entry at a time while highlighted.
+                    var screen = R(0.29f, 0.35f, 0.42f, 0.46f);
+                    using (var path = Round(screen, s * 0.035f)) {
+                        using (var b = new SolidBrush(Color.FromArgb(240, 244, 248))) g.FillPath(b, path);
+                        var clip = g.Save();
+                        g.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+                        float row = 0.16f, scroll = 0;
+                        if (u >= 0) { float cyc = u % 2.2f; scroll = row * Smooth((cyc - 1.4f) / 0.6f); }
+                        int first = u < 0 ? 0 : (int)(u / 2.2f);
+                        for (int k = 0; k < 4; k++) {
+                            float y = 0.365f + k * row - scroll;
+                            if (y > 0.81f) break;
+                            var entry = R(0.31f, y, 0.38f, row - 0.025f);
+                            using (var ep = Round(entry, s * 0.02f)) using (var b = new SolidBrush(Color.White)) g.FillPath(b, ep);
+                            using (var thin = new Pen(Ink, lw * 0.6f)) Ball(g, P(0.375f, y + (row - 0.025f) / 2), s * 0.04f, thin);
+                            float w1 = 0.16f + 0.05f * (((first + k) * 7) % 3) / 2f;
+                            using (var pen = new Pen(Color.FromArgb(150, 156, 170), lw * 0.7f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) {
+                                g.DrawLine(pen, P(0.44f, y + 0.045f), P(0.44f + w1, y + 0.045f));
+                                g.DrawLine(pen, P(0.44f, y + 0.09f), P(0.44f + 0.1f, y + 0.09f));
+                            }
+                        }
+                        g.Restore(clip);
+                        g.DrawPath(ink, path);
+                    }
+                    using (var bar = new Pen(Color.FromArgb(150, 255, 255, 255), lw * 0.9f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) g.DrawLine(bar, P(0.44f, 0.86f), P(0.56f, 0.86f));
                     break;
                 }
                 case "Mods": {
@@ -7309,6 +7756,56 @@ class LauncherForm : Form {
                     for (int k = 0; k < 5; k++) g.DrawLine(ink, P(0.33f + k * 0.085f, 0.72f), P(0.33f + k * 0.085f, 0.78f));
                     g.DrawPath(ink, body);
                     body.Dispose();
+                    break;
+                }
+                case "Emu": {
+                    // An open two-screen handheld; highlighted, a ball floats out of the top screen and settles back.
+                    // Just installed (emuInstallK 0 to 1): the lid unfolds from the hinge, the screen powers on, then the ball.
+                    float ik = emuInstallK;
+                    var shell = Color.FromArgb(246, 247, 252);
+                    var lid = R(0.2f, 0.13f, 0.6f, 0.37f); var bodyR = R(0.2f, 0.52f, 0.6f, 0.35f);
+                    using (var path = Round(bodyR, s * 0.06f)) {
+                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(bodyR, shell, Color.FromArgb(178, 184, 198), 90f)) g.FillPath(b, path);
+                        g.DrawPath(ink, path);
+                    }
+                    var screen = R(0.37f, 0.58f, 0.26f, 0.2f);
+                    using (var path = Round(screen, s * 0.02f)) { using (var b = new SolidBrush(Color.FromArgb(206, 240, 228))) g.FillPath(b, path); g.DrawPath(ink, path); }
+                    using (var pad = new Pen(Ink, lw * 1.1f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) {
+                        g.DrawLine(pad, P(0.255f, 0.68f), P(0.325f, 0.68f));
+                        g.DrawLine(pad, P(0.29f, 0.645f), P(0.29f, 0.715f));
+                    }
+                    using (var b = new SolidBrush(Mix(tile, Color.White, 0.15f))) { g.FillEllipse(b, R(0.675f, 0.62f, 0.05f, 0.05f)); g.FillEllipse(b, R(0.715f, 0.67f, 0.05f, 0.05f)); }
+                    g.DrawLine(ink, P(0.24f, 0.51f), P(0.76f, 0.51f));
+                    // The lid swings up from the hinge with a little settle; the screen warms up as it opens.
+                    float open = 1, power = 1, k = u < 0 ? 0 : Soft((u - 0.15f) % 2.6f / 2.0f);
+                    if (ik >= 0) {
+                        open = Smooth(ik / 0.42f) + 0.06f * Soft((ik - 0.36f) / 0.22f);
+                        power = Smooth((ik - 0.3f) / 0.3f);
+                        k = Soft((ik - 0.5f) / 0.5f);
+                    }
+                    var lidSt = g.Save();
+                    var hinge = P(0.5f, 0.51f);
+                    g.TranslateTransform(hinge.X, hinge.Y); g.ScaleTransform(1, Math.Max(0.04f, open)); g.TranslateTransform(-hinge.X, -hinge.Y);
+                    using (var path = Round(lid, s * 0.06f)) {
+                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(lid, shell, Color.FromArgb(178, 184, 198), 90f)) g.FillPath(b, path);
+                        g.DrawPath(ink, path);
+                    }
+                    var top = R(0.27f, 0.19f, 0.46f, 0.25f);
+                    using (var path = Round(top, s * 0.025f)) {
+                        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(top, Mix(Color.FromArgb(40, 44, 56), Color.FromArgb(70, 200, 230), power), Mix(Color.FromArgb(22, 24, 32), Color.FromArgb(24, 70, 130), power), 90f)) g.FillPath(b, path);
+                        float flash = ik >= 0 ? 0.8f * Soft((ik - 0.3f) / 0.35f) : 0;
+                        if (k > 0 || flash > 0) using (var b = new SolidBrush(Color.FromArgb((int)(Math.Min(1, 90 * k / 255f + flash) * 255), 255, 255, 255))) g.FillPath(b, path);
+                        g.DrawPath(ink, path);
+                    }
+                    // Coming out of the screen: it grows and lifts, its shadow staying on the glass.
+                    float br = s * (0.075f + 0.055f * k), lift = s * 0.09f * k;
+                    var c0 = P(0.5f, 0.315f);
+                    if (power > 0.5f) {
+                        if (k > 0.02f) using (var b = new SolidBrush(Color.FromArgb((int)(80 * k), 0, 0, 0))) g.FillEllipse(b, c0.X - br * 0.8f, c0.Y + br * 0.55f, br * 1.6f, br * 0.45f);
+                        using (var thin = new Pen(Ink, lw * (0.7f + 0.25f * k))) Ball(g, new PointF(c0.X, c0.Y - lift), br, thin);
+                    }
+                    g.Restore(lidSt);
+                    if (ik >= 0.55f) { float sp = Soft((ik - 0.55f) / 0.45f); Sparkle(g, P(0.8f, 0.17f), s * 0.11f * sp); Sparkle(g, P(0.17f, 0.36f), s * 0.07f * Soft((ik - 0.65f) / 0.35f)); }
                     break;
                 }
                 case "Move": {
@@ -7356,9 +7853,10 @@ class LauncherForm : Form {
     // The list rows' common icons in the same style: white stickers with a dark outline. False: draw the glyph instead.
     static bool RowArt(Graphics g, char icon, RectangleF r, Color tint) {
         switch (icon) {
-            case '': AppArt(g, 6, r, tint); return true;
-            case '': AppArt(g, 2, r, tint); return true;
-            case '': AppArt(g, 3, r, tint); return true;
+            case '': AppArt(g, App("Settings"), r, tint); return true;
+            case '': AppArt(g, App("Collection"), r, tint); return true;
+            case '': AppArt(g, App("Mods"), r, tint); return true;
+            case '': AppArt(g, App("Emu"), r, tint); return true;
         }
         float s = r.Width;
         Func<float, float, PointF> P = (x, y) => new PointF(r.X + x * s, r.Y + y * s);
@@ -8249,6 +8747,7 @@ class LauncherForm : Form {
             if (p.Main) RenderMain(g, p, w, h, m, top, bottom, t, th); else RenderPage(g, p, w, h, m, top, bottom, t, th);
         }
         g.Restore(content);
+        RenderEmuInstall(g, w, h, t);
         RenderOpen(g, w, h, t);
         StatusBar(g, w, h, home ? Color.White : PhoneText);
         float below = ClashBanner(g, w, h, t);
@@ -8427,9 +8926,32 @@ class LauncherForm : Form {
     static float Hop(float k) { return k <= 0 || k >= 1 ? 0 : (float)Math.Sin(k * Math.PI); }
     static float Soft(float k) { if (k <= 0 || k >= 1) return 0; float v = (float)Math.Sin(k * Math.PI); return v * v; }
     static float Smooth(float k) { k = Math.Max(0, Math.Min(1, k)); return k * k * (3 - 2 * k); }
-    static readonly char[] AppIcons = {' ', '\uE7FC', '\uE8F1', '\uE74C', '\uE8B7', '\uE8AB', '\uE713', '\uE7E8' };
-    static readonly string[] AppNames = { "", "Games", "Collection", "Mods", "ROMs", "Move", "Settings", "Exit" };
-    static readonly Color[] AppColors = { Color.Empty, Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(124, 84, 214), Color.FromArgb(40, 124, 232), Color.FromArgb(24, 164, 150), Color.FromArgb(120, 124, 134), Color.FromArgb(58, 60, 68) };
+    static readonly char[] AppIcons = {' ', '\uE7FC', '\uE8F1', '\uE74C', '\uE8B7', '\uE7F4', '\uE8AB', '\uE713', '\uE7E8' };
+    static readonly string[] AppNames = { "", "Games", "Collection", "Mods", "ROMs", "Emu", "Move", "Settings", "Exit" };
+    static readonly Color[] AppColors = { Color.Empty, Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(124, 84, 214), Color.FromArgb(40, 124, 232), Color.FromArgb(212, 56, 126), Color.FromArgb(24, 164, 150), Color.FromArgb(120, 124, 134), Color.FromArgb(58, 60, 68) };
+    static int App(string name) { return Array.IndexOf(AppNames, name); }
+    // An emulator just installed: the Emu tile's handheld unfolds and lights up (0 to 1 while it plays).
+    float emuInstallAt = -10; const float InstallTime = 2.4f; static float emuInstallK = -1; string emuInstallName;
+    // Over the emulator's page after an install: the tile pops in, plays, then shrinks away to show the menus.
+    void RenderEmuInstall(Graphics g, int w, int h, float t) {
+        float a = t - emuInstallAt, outTime = 0.45f;
+        if (a < 0 || a > InstallTime + outTime || pages.Count == 0 || pages.Peek().Main) return;
+        spinning = true;
+        float come = Smooth(a / 0.3f), go = 1 - Smooth((a - InstallTime) / outTime);
+        using (var b = new SolidBrush(Color.FromArgb((int)(140 * come * go), 0, 0, 0))) g.FillRectangle(b, 0, 0, w, h);
+        float size = w * 0.36f * (0.82f + 0.18f * come) * go;
+        if (size < 2) return;
+        var r = new RectangleF((w - size) / 2, h * 0.42f - size / 2, size, size);
+        var c = AppColors[App("Emu")];
+        using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.008f, r.Width, r.Height), size * 0.24f)) using (var b = new SolidBrush(Color.FromArgb((int)(70 * go), 0, 0, 0))) g.FillPath(b, shadow);
+        GlossTile(g, r, size * 0.24f, c);
+        emuInstallK = Math.Min(1, a / InstallTime);
+        AppArt(g, App("Emu"), r, c);
+        emuInstallK = -1;
+        float words = Smooth((a - 0.9f) / 0.4f) * go;
+        if (words > 0.01f && emuInstallName != null)
+            Write(g, emuInstallName + " installed", itemBold, Color.FromArgb((int)(255 * words), 255, 255, 255), new RectangleF(0, r.Bottom + h * 0.02f, w, itemBold.Height * 1.6f), StringAlignment.Center, StringAlignment.Near, false);
+    }
     // At the bottom, where a thumb would reach, leaving the wallpaper's town in view above them.
     float AppsTop(Page p, int w, int h, float m, float bottom) {
         float cell = (w - 2 * m) / TileCols, icon = cell * 0.68f, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
@@ -8493,7 +9015,9 @@ class LauncherForm : Form {
             if (sel) using (var ring = Round(new RectangleF(r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6), size * 0.27f)) using (var pen = new Pen(Color.White, Math.Max(2.5f, w * 0.007f))) g.DrawPath(pen, ring);
             appRects[i] = r;
             if (openRun != null && i == openApp) continue;
-            AppArt(g, i, r, c, sel && it.On ? t - selAt : -1);
+            if (AppNames[i] == "Emu" && t - emuInstallAt < InstallTime) { emuInstallK = (t - emuInstallAt) / InstallTime; spinning = true; }
+            AppArt(g, i, r, c, sel && it.On && emuInstallK < 0 ? t - selAt : -1);
+            emuInstallK = -1;
             if (!it.On) using (var path = Round(r, size * 0.24f)) using (var b = new SolidBrush(Color.FromArgb(110, c))) g.FillPath(b, path);
             if (AppNames[i] == "Settings" && Updater.Ready) {
                 float dot = size * 0.26f;
@@ -8779,6 +9303,23 @@ static class NativeMonsLauncher {
         Application.EnableVisualStyles();
         Config.Load();
         // Modes that run without the window (notes/launcher.md, Command line).
+        // --3ds-save <result> <game> <emulator> prepare|collect: the save hand-off around a session, with no emulator run.
+        if (argv.Length == 5 && argv[0] == "--3ds-save") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var g = Library.Games.Find(x => x.Id == argv[2]); var e = Emu3ds.All.FirstOrDefault(x => x.Id == argv[3]);
+            string result;
+            if (g == null || g.CtrRom == null || e == null) result = "no such 3DS game with a ROM, or emulator";
+            else if (argv[4] == "prepare") { try { Ctr3dsSaves.Prepare(e, g); result = "ok"; } catch (Exception x) { result = x.Message; } }
+            else result = Ctr3dsSaves.Collect(e, g) ?? "ok";
+            File.WriteAllText(argv[1], result);
+            return;
+        }
+        if (argv.Length == 3 && (argv[0] == "--install-emu" || argv[0] == "--remove-emu")) {
+            var e = Emu3ds.All.FirstOrDefault(x => x.Id == argv[2]);
+            string result = e == null ? "unknown emulator " + argv[2] : argv[0] == "--remove-emu" ? Emu3ds.Remove(e) : !Emu3ds.CanDownload(e) ? "not offered yet" : Emu3ds.Install(e);
+            File.WriteAllText(argv[1], result ?? ("ok " + (e.Installed ? e.InstalledTag : "removed")));
+            return;
+        }
         if (argv.Length >= 3 && argv[0] == "--add-roms") {
             var paths = argv.Skip(2).ToList();
             var added = new List<string>(); var notes = new List<string>();
