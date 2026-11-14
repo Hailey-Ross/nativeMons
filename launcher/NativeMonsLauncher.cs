@@ -490,8 +490,10 @@ class GameEntry {
     // A PC program of its own (PcGames), with no ROM. Save tools, Move and Collection leave it out.
     public string Pc;
     public bool OnPc { get { return Pc != null && PcGames.Installed(this); } }
-    // 3DS games stay out of save tools until their saves are backed up and checked (todo 20).
+    // 3DS games stay out of the other save tools (export, import), which don't know their saves yet.
     public bool SaveTools { get { return Playable && Pc == null && Ctr == null; } }
+    // Move Pokemon also takes 3DS games once they have a save (user, 2026-11-14).
+    public bool MoveTools { get { return SaveTools || (Ctr != null && File.Exists(Ctr3dsSaves.Main(this))); } }
     // A 3DS game: its title ID, and the decrypted dump an emulator plays in place.
     public string Ctr, CtrRom;
     public bool On3ds { get { return Ctr != null && CtrRom != null && Emu3ds.Enabled && Emu3ds.Default != null; } }
@@ -2242,6 +2244,10 @@ class GameOption {
 }
 static class GameOptions {
     public const string Own = "own", Follow = "follow";
+    static string[] Percents() { return Enumerable.Range(0, 21).Select(i => (i * 5).ToString()).ToArray(); }
+    static string[] PercentLabels() { return Enumerable.Range(0, 21).Select(i => i == 0 ? "Off" : i * 5 + "%").ToArray(); }
+    // A percentage on an engine that only takes steps of `step`: the nearest one, halves upward.
+    public static int Nearest(string percent, int step) { int v; int.TryParse(percent, out v); return Math.Max(0, Math.Min(100, (v + step / 2) / step * step)); }
     public static readonly GameOption[] All = {
         new GameOption { Key = "text", Name = "Text speed", Icon = '\uE8D2', Values = new[] { "slow", "mid", "fast" }, Labels = new[] { "Slow", "Medium", "Fast" } },
         new GameOption { Key = "scene", Name = "Battle scene", Icon = '\uE8B2', Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" } },
@@ -2249,9 +2255,10 @@ static class GameOptions {
         new GameOption { Key = "sound", Name = "Sound", Icon = '\uE7F5', Values = new[] { "mono", "stereo" }, Labels = new[] { "Mono", "Stereo" }, FirstGen = 2 },
         new GameOption { Key = "button", Name = "Button mode", Icon = '\uE7FC', Values = new[] { "normal", "alt", "lequalsa" }, Labels = new[] { "Normal", "Alternate (LR or Start = X)", "L = A" }, GameOnly = true, FirstGen = 3 },
         new GameOption { Key = "frame", Name = "Text frame", Icon = '\uE8A9', Values = Enumerable.Range(1, 20).Select(i => i.ToString()).ToArray(), Labels = Enumerable.Range(1, 20).Select(i => "Type " + i).ToArray(), GameOnly = true, FirstGen = 3 },
-        new GameOption { Key = "vol", Name = "Volume", Icon = '\uE767', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "Overall volume, on every engine." },
-        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
-        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = new[] { "0", "20", "40", "60", "80", "100" }, Labels = new[] { "Off", "20%", "40%", "60%", "80%", "100%" }, Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
+        // Volumes in 5% steps; an engine with coarser steps gets the nearest it has (ApplyEngineOptions).
+        new GameOption { Key = "vol", Name = "Volume", Icon = '\uE767', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "Overall volume, on every engine. Fulldex and the GBA player go in steps of 10% and Gen1Recomp has 8 levels, so they use the nearest one." },
+        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
+        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
         new GameOption { Key = "full", Name = "Fullscreen", Icon = '\uE740', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "On every engine." },
         new GameOption { Key = "wide", Name = "Widescreen", Icon = '\uE799', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "The world on Fulldex and nativeplat, and battles on Gen1Recomp. The Platinum PC port doesn't have it." },
         new GameOption { Key = "smooth", Name = "Smooth scaling", Icon = '\uE91B', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "Softens the picture on Fulldex and nativeplat, instead of sharp pixels." },
@@ -3356,6 +3363,8 @@ class LauncherForm : Form {
         if (screen == "folder-added") { firstSetup = true; pages.Push(FoldersPage()); pages.Push(FolderAddedPage(Config.RomFolders().FirstOrDefault() ?? "")); }
         if (screen == "credits") pages.Push(CreditsPage());
         if (screen == "settings") pages.Push(SettingsPage());
+        // optpick-<key>: the value list of one of Game options' long settings.
+        if (screen.StartsWith("optpick-")) { var o = GameOptions.All.FirstOrDefault(x => x.Key == screen.Substring(8)); if (o != null) { pages.Push(GameOptionsPage(null)); pages.Push(OptionPickPage(null, o)); } }
         if (screen == "emu") pages.Push(EmuPage());
         // emuinstalled-<id>-<seconds>: that emulator's page, its install animation that far in.
         if (screen.StartsWith("emuinstalled-")) {
@@ -3437,6 +3446,7 @@ class LauncherForm : Form {
             if (which != null) pages.Push(screen == "roms" ? RomsPage(which) : GamePage(which));
         }
         if (screen == "dexother") { LoadDex(); pages.Push(DexHomePage()); pages.Push(DexOtherPage()); }
+        if (screen == "dexgames") { LoadDex(); pages.Push(DexHomePage()); pages.Push(DexGamesPage()); }
         if (screen == "dexgame") { LoadDex(); var one = Library.Games.Find(g => g.Id == previewId); if (one != null) { pages.Push(DexOtherPage()); pages.Push(DexListPage(one.Title, 1, 151, one)); } }
         if (screen == "dex" || screen == "dexlist" || screen == "dexentry") {
             LoadDex();
@@ -3616,6 +3626,8 @@ class LauncherForm : Form {
         var native = Process.GetProcessesByName("nativeplat");
         if (native.Any(p => p.Id != readyPid && counts(p))) names.Add("nativeplat");
         if (!parallel && PcGames.AnyRunning()) names.Add("a PC game");
+        // A 3DS emulator holds its game's save while it runs.
+        foreach (var e in Emu3ds.All) if (Emu3ds.Running(e)) names.Add(e.Short);
         foreach (var p in native) p.Dispose();
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
@@ -3770,7 +3782,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("ROM folders", folders + (folders == 1 ? " folder" : " folders") + " searched for your ROMs.", true, delegate { pages.Push(FoldersPage()); }) { Icon = '' });
         int emus = Emu3ds.All.Count(e => e.Installed);
         p.Items.Add(new Item("Emulators", !Emu3ds.Enabled ? "3DS games are off. Turn them on here." : emus == 0 ? "Pick an emulator for your 3DS games." : emus + (emus == 1 ? " emulator" : " emulators") + " for your 3DS games.", true, delegate { pages.Push(EmuPage()); }) { Icon = '' });
-        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.SaveTools) > 1, delegate { OpenBoxView(); }) { Icon = '\uE8AB' });
+        p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.MoveTools) > 1, delegate { OpenBoxView(); }) { Icon = '\uE8AB' });
         p.Items.Add(new Item("Settings", "Game options, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
         p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
         return p;
@@ -3895,10 +3907,32 @@ class LauncherForm : Form {
         foreach (var option in GameOptions.All) {
             var o = option;
             if (g == null ? o.GameOnly : !GameOptions.Has(g, o)) continue;
-            p.Items.Add(new Item(o.Name + ": " + GameOptions.Describe(g, o, GameOptions.Stored(g, o)), "Press to change.", true, delegate {
+            bool pick = o.Values.Length > 6;
+            p.Items.Add(new Item(o.Name + ": " + GameOptions.Describe(g, o, GameOptions.Stored(g, o)), pick ? "Press to choose." : "Press to change.", true, delegate {
+                if (pick) { pages.Push(OptionPickPage(g, o)); return; }
                 GameOptions.Store(g, o, GameOptions.Next(g, o));
                 var was = pages.Pop(); var again = GameOptionsPage(g); again.Sel = was.Sel; again.TopRow = was.TopRow; again.ScrollRow = was.ScrollRow; pages.Push(again);
             }) { Icon = o.Icon, Info = (o.Note != null ? o.Note + " " : "") + (g == null ? "Applies to every game when it starts, unless the game's own page says otherwise." + (o.Engine ? "" : " It replaces what's set in the game. Not on Black, White, Black 2 and White 2 yet.") : "Applies when this game starts. Global follows Game options in Settings.") });
+        }
+        return p;
+    }
+    // A long option (volumes, text frame): every value on a list, the current one selected; choosing it goes back.
+    Page OptionPickPage(GameEntry g, GameOption o) {
+        var p = new Page { Title = o.Name, Theme = g != null ? g.Theme : null };
+        string now = GameOptions.Stored(g, o);
+        var choices = new List<string>();
+        if (g != null && !o.GameOnly) choices.Add(GameOptions.Follow);
+        choices.Add(GameOptions.Own); choices.AddRange(o.Values);
+        foreach (var choice in choices) {
+            string c = choice;
+            string info = c == GameOptions.Follow ? "Uses what's set in Game options in Settings: " + GameOptions.Describe(null, o, GameOptions.Stored(null, o)) + "."
+                        : c == GameOptions.Own ? "Leaves it to the engine's own setting." : o.Note ?? "";
+            p.Items.Add(new Item(GameOptions.Describe(g, o, c), c == now ? "Chosen now." : "", true, delegate {
+                GameOptions.Store(g, o, c);
+                pages.Pop();
+                var was = pages.Pop(); var again = GameOptionsPage(g); again.Sel = was.Sel; again.TopRow = was.TopRow; again.ScrollRow = was.ScrollRow; pages.Push(again);
+            }) { Icon = o.Icon, Info = info });
+            if (c == now) p.Sel = p.Items.Count - 1;
         }
         return p;
     }
@@ -3924,12 +3958,13 @@ class LauncherForm : Form {
     static void ApplyEngineOptions(GameEntry g, Dictionary<string, string> w) {
         string v, engine = g.Engine();
         if (engine == "fulldex") {
-            if (w.TryGetValue("vol", out v)) WriteFulldex("volume", v);
+            // Fulldex and the GBA player take tens (Fulldex would cut 55 down to 50; the player has no 55 at all).
+            if (w.TryGetValue("vol", out v)) WriteFulldex("volume", GameOptions.Nearest(v, 10).ToString());
             // GBA games run on our player, which keeps its own volume in gba-settings.ini (key=value lines).
             if (w.TryGetValue("vol", out v) && !g.IsDs && File.Exists(Config.GbaPlayer)) {
                 string ini = Path.Combine(Path.GetDirectoryName(Config.GbaPlayer), "gba-settings.ini");
                 var lines = File.Exists(ini) ? File.ReadAllLines(ini).Where(x => !x.StartsWith("volume=")).ToList() : new List<string>();
-                lines.Add("volume=" + v);
+                lines.Add("volume=" + GameOptions.Nearest(v, 10));
                 File.WriteAllLines(ini, lines);
             }
             if (w.TryGetValue("full", out v)) WriteFulldex("fullscreen", v == "on" ? "1" : "0");
@@ -3937,7 +3972,7 @@ class LauncherForm : Form {
             if (w.TryGetValue("smooth", out v)) WriteFulldex("smooth", v == "on" ? "1" : "0");
         } else if (engine == "port") {
             string ini = Path.Combine(PortDir, "sim_config.ini");
-            if (w.TryGetValue("vol", out v)) GameOptions.SetIni(ini, "General", "MasterVolume", (int.Parse(v) * 127 / 100).ToString());
+            if (w.TryGetValue("vol", out v)) GameOptions.SetIni(ini, "General", "MasterVolume", ((int)Math.Round(int.Parse(v) * 127 / 100.0, MidpointRounding.AwayFromZero)).ToString());
             if (w.TryGetValue("full", out v)) GameOptions.SetIni(ini, "General", "FullScreen", v == "on" ? "true" : "false");
         } else if (engine == "nativeplat") {
             string ini = Path.Combine(NativeplatDir, "userdata", "options.ini");
@@ -4714,7 +4749,13 @@ class LauncherForm : Form {
     }
     class DexGame { public HashSet<int> Caught = new HashSet<int>(), Seen = new HashSet<int>(), Shiny = new HashSet<int>(); public int FusionsCaught = -1, FusionsSeen = -1, LaterCaught, LaterSeen; }
     // Games whose Pokedex is read: those with save tools, and Infinite Fusion, read from its own saves.
-    static bool ReadsDex(GameEntry g) { return g.SaveTools || (PcGames.IsFusion(g) && g.OnPc); }
+    // 3DS games are read too (only read: Move Pokemon stays off for them), once one of their saves exists.
+    static bool ReadsDex(GameEntry g) { return g.SaveTools || (PcGames.IsFusion(g) && g.OnPc) || (g.Ctr != null && Ctr3dsSaveIn(g) != null); }
+    static string ParkedCtrSave(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "3ds", "data", "main"); }
+    static string Ctr3dsSaveIn(GameEntry g) {
+        if (File.Exists(Ctr3dsSaves.Main(g))) return Ctr3dsSaves.Main(g);
+        return SaveSets.All(g).Select(s => ParkedCtrSave(g, s)).FirstOrDefault(File.Exists);
+    }
     static List<string> IfSaves(GameEntry g) {
         string dir = PcGames.SaveDir(g);
         return Directory.Exists(dir) ? Directory.GetFiles(dir, "*.rxdata").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList() : new List<string>();
@@ -4752,6 +4793,7 @@ class LauncherForm : Form {
         foreach (var set in SaveSets.All(g)) {
             if (set == active) { string why; any |= AddDex(all, SaveOf(g, out why)); continue; }
             if (HasMaster(g) && File.Exists(ParkedSave(g, set))) { any |= AddDex(all, ParkedSave(g, set)); continue; }
+            if (g.Ctr != null) { if (File.Exists(ParkedCtrSave(g, set))) any |= AddDex(all, ParkedCtrSave(g, set)); continue; }
             // A Gen1Recomp slot can only be exported while it's in use, so it's briefly made so, unless a game is running.
             string slot = ReadSlot(g, set);
             if (slot == null || !HasGen1Slots(g)) continue;
@@ -4789,7 +4831,7 @@ class LauncherForm : Form {
         Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
         // Read again when the list grows (to 1025 on 2026-11-04), as its later Pokemon move into it.
         if (PcGames.IsFusion(g)) { o.Append("|" + Sprites.MaxDex); foreach (var f in IfSaves(g)) file(f); return o.ToString(); }
-        if (g.Save != null) file(MasterOf(g));
+        if (g.Save != null || g.Ctr != null) file(MasterOf(g));
         folder(Path.Combine(Config.State, "save-sets", g.Id));
         if (g.Gen1 != null) folder(Path.Combine(Gen1Root, "saves", g.Gen1));
         return o.ToString();
@@ -4928,7 +4970,7 @@ class LauncherForm : Form {
     Page DexEntryPage(int id, int[] order) { return DexEntryPage(id, order, null); }
     Page DexEntryPage(int id, int[] order, GameEntry only) { return new Page { Title = "#" + id.ToString("000") + " " + DexName(id), DexId = id, DexOrder = order, DexShiny = DexShiny(id, only), DexOnly = only }; }
     Page DexGamesPage() {
-        var games = Library.Games.Where(x => x.SaveTools && CountsInCollection(x)).ToList();
+        var games = Library.Games.Where(x => (x.SaveTools || (x.Ctr != null && ReadsDex(x))) && CountsInCollection(x)).ToList();
         var p = new Page { Title = "By game" };
         foreach (var g in games) {
             bool has = dexBy.ContainsKey(g);
@@ -6081,6 +6123,8 @@ class LauncherForm : Form {
         return null;
     }
     static string ImportBack(GameEntry g, string file) {
+        // A 3DS save the launcher just changed: its slot's states go to the backups, so an old one can't undo it.
+        if (g.Ctr != null) { try { Ctr3dsSaves.StashStates(g, "after-move"); } catch { } return null; }
         if (g.Engine() != "gen1") return null;
         var psi = Gen1Start("");
         int code; string o;
@@ -6135,7 +6179,7 @@ class LauncherForm : Form {
         });
     }
     void OpenBoxView() {
-        var games = Library.Games.Where(x => x.SaveTools).ToList();
+        var games = Library.Games.Where(x => x.MoveTools).ToList();
         if (games.Count == 0) return;
         var saved = games.Where(HasBoxSave).ToList();
         if (saved.Count == 0) { ShowText("Move Pokemon", "None of your games has a save yet. Play one and save once in the game, then its boxes show here.", null); return; }
@@ -6147,7 +6191,7 @@ class LauncherForm : Form {
     // Another game in one of the two places.
     void ChooseBoxGame(BoxView v, int pane) {
         var p = new Page { Title = (pane == 0 ? "Top" : "Bottom") + ": which game?" };
-        foreach (var game in Library.Games.Where(x => x.SaveTools)) {
+        foreach (var game in Library.Games.Where(x => x.MoveTools)) {
             var g = game;
             bool has = HasBoxSave(g);
             p.Items.Add(new Item(g.Title, g.Id == v.Side[pane].Game.Id ? "Showing now." : has ? "" : "No save yet. Play and save once first.", has || g.Id == v.Side[pane].Game.Id, delegate {
@@ -6318,7 +6362,7 @@ class LauncherForm : Form {
     }
     Page MoveFromPage() {
         var p = new Page { Title = "Move Pokemon: from which game?" };
-        foreach (var game in Library.Games.Where(x => x.SaveTools)) {
+        foreach (var game in Library.Games.Where(x => x.MoveTools)) {
             var g = game;
             p.Items.Add(new Item(g.Title, "", true, delegate { OpenBoxes(g); }) { Icon = '', Theme = g.Theme, Info = "Choose a Pokemon from this game's PC boxes. Saves from " + GameEntry.EngineName(g.Engine()) + " are used.", Records = new[] { "Backups: both saves are copied first" } });
         }
@@ -6348,7 +6392,7 @@ class LauncherForm : Form {
     }
     Page MoveToPage(GameEntry from, string file, string box, string slot, string name) {
         var p = new Page { Title = "Move " + name + " to...", Theme = from.Theme };
-        foreach (var game in Library.Games.Where(x => x.SaveTools && x != from)) {
+        foreach (var game in Library.Games.Where(x => x.MoveTools && x != from)) {
             var g = game;
             p.Items.Add(new Item(g.Title, "", true, delegate { MoveNow(from, file, box, slot, name, g); }) { Icon = '', Theme = g.Theme, Info = "Moves it to the first free PC box slot. If something stands in the way, you'll be asked how to resolve it." });
         }

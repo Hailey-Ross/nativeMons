@@ -122,7 +122,7 @@ Optional, and still being built on Dev. Turn on **3DS games** under **Emu** on t
 - **ROMs:** decrypted `.3ds` or `.cci` dumps of your own cartridges (GodMode9 on your 3DS). They're played where they are, never copied. No games, keys or system files are included.
 - **Saves** belong to the launcher, in `state\3ds\saves`, not to an emulator: each play hands the save to the emulator you chose and takes it back after, with a backup before and after, so you can switch emulators. Save slots and their backups work as for the other games, and each slot keeps its own save states.
 - **Controllers:** Azahar gets every connected controller mapped, laid out as on a 3DS; change it in Azahar's own Controls.
-- Not yet: My Collection and Move Pokemon for 3DS saves.
+- **My Collection** counts their Pokédex, and **Move Pokemon** moves box Pokémon in and out of them (Gen 6 and 7, the same rules as the other games). After a move, that save slot's save states go to its backups, so loading an old one can't undo the move. Export and import of 3DS saves aren't there yet.
 
 ## Other PC games
 
