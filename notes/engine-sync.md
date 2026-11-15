@@ -1,6 +1,6 @@
 # Engine sync
 
-`.github/workflows/engine-sync.yml` runs `.github/engine-sync/sync.sh` twice a day, at about midnight and noon MST (GitHub can start scheduled runs late; runs never overlap), and from the Actions tab). It brings upstream engine updates into the forks, moves nativeMons' pins on `dev`, and that push builds a new bleeding-edge release. Anything that isn't clean stops that engine and opens an issue in nativeMons titled "Engine sync: ...". The same problem never gets a second issue while the first is open.
+`.github/workflows/engine-sync.yml` runs `.github/engine-sync/sync.sh` twice a day, at about midnight and noon MST (GitHub can start scheduled runs late; runs never overlap), and from the Actions tab. It brings upstream engine updates into the forks, moves nativeMons' pins on `dev`, and that push builds a new bleeding-edge release. Anything that isn't clean stops that engine and opens an issue in nativeMons titled "Engine sync: ...". The same problem never gets a second issue while the first is open.
 
 It runs as the sync GitHub App, so its commits show as the App's bot, with the subject "Engine auto-sync with upstream". The bleeding-edge release built from one says so in its title and lists what moved. Its ID is the `ENGINE_SYNC_APP_ID` variable and its private key is the `ENGINE_SYNC_APP_KEY` secret.
 
@@ -15,7 +15,7 @@ It runs as the sync GitHub App, so its commits show as the App's bot, with the s
 | Hailey-Ross/AzaharPlus | `AzaharPlus` | AzaharPlus/AzaharPlus | upstream's latest release only |
 | Hailey-Ross/pokeplatinum | `pc_port` | cybervisi0n/pokeplatinum | no: the fork only follows upstream; packages use upstream's release |
 | Hailey-Ross/3dsrecomp | `main` | fearkov/3dsrecomp | no: watched only, not used yet |
-| Hailey-Ross/zakuro | `main` | fearkov/zakuro | no: watched only, 3dsrecomp's runtime |
+| Hailey-Ross/zakuro | `main` | fearkov/zakuro | yes: adds `crates/nativemons-recomp` and the Windows release; packages use `windows-<sha9>` (`zakuroRelease`, moved by `pin_zakuro`) |
 
 1. The liaison branch fast-forwards to upstream. If it can't (it has commits of its own), the run stops for that fork.
 2. The liaison branch is merged into `hails-additions`. A conflict stops the run, with one exception: in Gen1Recomp, upstream changing a file we removed for the licence keeps it removed (the paths in `tools/nativemons/check-removed.sh`).

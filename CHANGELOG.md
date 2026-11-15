@@ -4,6 +4,7 @@ Each notable stable release raises the version, and its section here becomes its
 
 ## Next
 
+- 3DSrecomp+Zakuro, a native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun and Ultra Moon: each game's code is recompiled once on your PC from your own decrypted dump, then runs in Zakuro. The launcher asks before each build (about 10 to 20 minutes per game, at the lowest priority, Fast or Quiet in Settings), and saves move freely between it and the emulators.
 - Gen1Recomp: the latest upstream updates, with story script, battle and Gen 2 fixes, plus mail and Quest Log fixes for FireRed and LeafGreen. Red, Blue, Yellow, Gold, Silver and Crystal are prepared again from your ROM the next time they start.
 - An encrypted 3DS dump always plays with AzaharPlus, even when Azahar is the emulator picked: Azahar only opens decrypted dumps. A decrypted dump of the same game is still used with Azahar.
 

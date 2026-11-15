@@ -16,22 +16,23 @@ GAME FREAK inc. or The Pokémon Company.
 
 ## Supported games
 
-| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat | 3DS emulator |
-|---|---|:-:|:-:|:-:|:-:|:-:|
-| 1 | Red, Blue, Yellow | ✓ | | | | |
-| 2 | Gold, Silver, Crystal | ✓ | | | | |
-| 3 | Ruby, Sapphire | ✓ | | | | |
-| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | | | |
-| 4 | Diamond, Pearl | | | | ✓ | |
-| 4 | HeartGold, SoulSilver | | ✓ | | | |
-| 4 | Platinum | | ✓ | ✓ | ✓ | |
-| 5 | Black, White, Black 2, White 2 | | ✓ | | | |
-| 6 | X, Y, Omega Ruby, Alpha Sapphire | | | | | ✓ |
-| 7 | Sun, Moon, Ultra Sun, Ultra Moon | | | | | ✓ |
+| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat | 3DSrecomp+Zakuro | 3DS emulator |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| 1 | Red, Blue, Yellow | ✓ | | | | | |
+| 2 | Gold, Silver, Crystal | ✓ | | | | | |
+| 3 | Ruby, Sapphire | ✓ | | | | | |
+| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | | | | |
+| 4 | Diamond, Pearl | | | | ✓ | | |
+| 4 | HeartGold, SoulSilver | | ✓ | | | | |
+| 4 | Platinum | | ✓ | ✓ | ✓ | | |
+| 5 | Black, White, Black 2, White 2 | | ✓ | | | | |
+| 6 | X, Y, Omega Ruby, Alpha Sapphire | | | | | ✓ | ✓ |
+| 7 | Sun, Ultra Sun, Ultra Moon | | | | | ✓ | ✓ |
+| 7 | Moon | | | | | | ✓ |
 
 Plus **[Pokémon Infinite Fusion](#pokémon-infinite-fusion)**, a PC fan game with no ROM, which the launcher installs and runs as its own program.
 
-**3DS games** play through an optional [3DS emulator](#3ds-games): AzaharPlus (recommended) or Azahar, installed from the launcher only if you want them. Switch games aren't supported.
+**3DS games** play natively with [3DSrecomp+Zakuro](#3dsrecompzakuro), built once on your PC from your own dump, or through an optional [3DS emulator](#3ds-games): AzaharPlus (recommended) or Azahar, installed from the launcher only if you want them. Switch games aren't supported.
 
 **Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them.
 
@@ -129,6 +130,14 @@ X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon play throu
 - **Saves** belong to the launcher, in `state\3ds\saves`, not to an emulator: each play hands the save to the emulator you chose and takes it back after, with a backup before and after, so you can switch emulators. A save that fails its check after a session is never kept as the one in use: it goes to the backups, and your last good save stays. Save slots work as for the other games, and each slot keeps its own save states.
 - **Controls, as on Fulldex:** every connected controller is mapped by the letters on its buttons, and a second profile, "Keyboard (Fulldex keys)", has Fulldex's keys (the emulator binds each button to one device, so pick that profile in its Controls to play on the keyboard). Change either there. The launcher also sets Vulkan with background shader building (the first minutes of a game are smoother each time you play), your **Game options** volume, and no "are you sure" on close.
 - **My Collection** counts their Pokédex, and **Move Pokemon** moves box Pokémon in and out of them (Gen 6 and 7, the same rules as the other games). After a move, that save slot's save states go to its backups, so loading an old one can't undo the move. Export and import of 3DS saves aren't there yet.
+### 3DSrecomp+Zakuro
+
+A native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun and Ultra Moon: the ones Zakuro lists as playable with recompiled code (Moon joins when it does). [3dsrecomp](https://github.com/fearkov/3dsrecomp) turns your game's code into C and compiles it into a library that [Zakuro](https://github.com/fearkov/zakuro) runs, in place of emulating the CPU. It comes with nativeMons, in `engines\zakuro`, and needs a decrypted dump.
+
+- **Built on your PC, once per game.** No game code is in nativeMons or its downloads: the launcher asks once when it finds a supported dump, or when you press Play, and builds it from your own dump into `state\3ds\recomp`, where it stays. About 10 to 20 minutes per game on a typical PC, at the lowest priority; **Settings > 3DS build speed** picks Fast (all but one processor thread) or Quiet (half). Esc or B stops a build. A sister game (X after Y, and so on) builds faster, from the parts they share. The first build downloads Zig, the C compiler it uses (about 100 MB, checked against a pinned checksum).
+- **Saves** are the same as with the emulators, so a game can switch between 3DSrecomp+Zakuro and AzaharPlus or Azahar and keep its save (tested both ways on Pokémon Y).
+- **Known issues:** some cutscenes miss textures or draw the sky wrong. Zakuro's mail and similar extra data aren't carried between engines, as with the emulators.
+
 - **Looks:** each game has a drawn theme of its region (Kalos, Hoenn or Alola) in its own colors. Its wallpapers can come from your own play: while a 3DS game runs with its window in front, the launcher keeps a few pictures of the top screen, leaving out menus and dark or repeated ones, and shows one of them at random. They stay on your PC. Settings > Wallpapers switches to the drawn scenes instead, or gives any game a picture of your own.
 
 ## Other PC games
@@ -234,6 +243,7 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 | GBA player (`engines/fulldex/gba-wide`) | GBA games and hacks: FireRed, LeafGreen and Emerald in widescreen by our patches; Ruby, Sapphire, other languages and the romhacks PokeDaisy's EXPAND knows (Unbound, Radical Red, Rocket Edition, ..., plus BugLime and Adventure Red, which we added) widened by EXPAND; everything else at 3:2. Ours, in our Fulldex fork; packages build it | [Hailey-Ross/pokemon-fulldex](https://github.com/Hailey-Ross/pokemon-fulldex/tree/hails-additions/gba-wide), after Pokemon GBA Widescreen by mamesj |
 | Platinum PC port | A native Platinum. Packages carry its published Windows release, program only | [cybervisi0n/pokeplatinum](https://github.com/cybervisi0n/pokeplatinum) |
 | nativeplat | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
+| 3DSrecomp+Zakuro | Native X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun and Ultra Moon. Packages carry Zakuro and our build tool from our fork; each game's code is built on the player's PC | [fearkov/zakuro](https://github.com/fearkov/zakuro) ([ours](https://github.com/Hailey-Ross/zakuro)) and [fearkov/3dsrecomp](https://github.com/fearkov/3dsrecomp) |
 | 3DS emulators | X to Ultra Moon. Optional: installed from the launcher, from the Windows releases of our forks (not in the package) | [AzaharPlus/AzaharPlus](https://github.com/AzaharPlus/AzaharPlus) ([ours](https://github.com/Hailey-Ross/AzaharPlus)) and [azahar-emu/azahar](https://github.com/azahar-emu/azahar) ([ours](https://github.com/Hailey-Ross/azahar)) |
 | `tools/nds-patcher` | Decrypts `.nds` secure areas | [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) |
 | `tools/mon-bridge` | Reads saves and moves Pokémon | [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors |
@@ -264,6 +274,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [rcheevos](https://github.com/RetroAchievements/rcheevos) by the RetroAchievements team (MIT), for RetroAchievements in the GBA player, through Pokémon Fulldex's achievements code.
 - [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington (GPL-3.0), running on [Node.js](https://nodejs.org).
 - [LÖVE](https://github.com/love2d/love), which runs Gen1Recomp.
+- [Zakuro](https://github.com/fearkov/zakuro) and [3dsrecomp](https://github.com/fearkov/3dsrecomp) by fearkov (both MIT), for 3DSrecomp+Zakuro, built from our fork ([Hailey-Ross/zakuro](https://github.com/Hailey-Ross/zakuro)) with a small tool of ours that builds a game's code without a window. [Zig](https://ziglang.org) (MIT), the C compiler, is fetched from ziglang.org for the first build. They aren't affiliated with nativeMons.
 - Optional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons (the source of each build is on its release): [Azahar](https://github.com/azahar-emu/azahar) by the Azahar team, from Citra (GPL-2.0-or-later; our fork: [Hailey-Ross/azahar](https://github.com/Hailey-Ross/azahar)); [AzaharPlus](https://github.com/AzaharPlus/AzaharPlus) by its contributors, from Azahar (GPL-3.0; ours, without its system-file downloader: [Hailey-Ross/AzaharPlus](https://github.com/Hailey-Ross/AzaharPlus)). Shown as "Azahar-modified (nativeMons)" and so on; they aren't the official builds, and their authors aren't affiliated with nativeMons.
 - The [Gen1Recomp community mod index](https://github.com/bryanthaboi/gen1recomp-mod-index), read for **Find mods**. Its listings are by the mods' authors; the mods are theirs.
 - [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) by Hails.

@@ -167,6 +167,7 @@ static class Config {
     public static string InfiniteFusion { get { return Get("infinitefusion", @"games\infinitefusion\Game.exe"); } }
     public static string InfiniteFusion2 { get { return Get("infinitefusion2", @"games\infinitefusion2\InfiniteFusion2.exe"); } }
     public static string Emulators { get { return Get("emulators", "emulators"); } }
+    public static string Zakuro { get { return Get("zakuro", @"engines\zakuro\zakuro.exe"); } }
     public static string Patcher { get { return Get("patcher", @"tools\nds-patcher\hails_patcher.py"); } }
     public static string MonBridge { get { return Get("monbridge", @"tools\mon-bridge\mon-bridge.exe"); } }
     public static string MgbaCore { get { return Get("mgbacore", @"tools\mgba\mgba_libretro.dll"); } }
@@ -195,6 +196,104 @@ static class Config {
     public static void Write(string name, string text) { try { File.WriteAllText(Path.Combine(State, name), text); } catch { } }
 }
 
+// 3DSrecomp+Zakuro (todo 22): each game's code is recompiled on the player's PC from their own dump into
+// state\3ds\recomp\<title id>.dll, which never leaves it. Zakuro runs that library; saves go through Ctr3dsSaves.
+static class Recomp {
+    // Only what Zakuro's COMPATIBILITY.md lists as playable recompiled (user, 2026-11-15). Not Moon yet.
+    static readonly string[] Titles = { "0004000000055D00", "0004000000055E00", "000400000011C400", "000400000011C500", "0004000000164800", "00040000001B5000", "00040000001B5100" };
+    public const string ZigVersion = "0.17.0";
+    const string ZigUrl = "https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip", ZigSha256 = "b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428";
+    public static string Tool { get { return Path.Combine(Path.GetDirectoryName(Config.Zakuro), "nativemons-recomp.exe"); } }
+    public static bool Installed { get { return File.Exists(Config.Zakuro) && File.Exists(Tool); } }
+    public static bool Supports(GameEntry g) { return g.Ctr != null && Titles.Contains(g.Ctr.ToUpperInvariant()); }
+    public static string Dir { get { return Path.Combine(Ctr3dsSaves.Root, "recomp"); } }
+    public static string LibraryOf(GameEntry g) { return Path.Combine(Dir, g.Ctr.ToUpperInvariant() + ".dll"); }
+    static string StampOf(GameEntry g) { return Path.Combine(Dir, g.Ctr.ToUpperInvariant() + ".txt"); }
+    static string Work { get { return Path.Combine(Dir, "work"); } }
+    static string Cache { get { return Path.Combine(Dir, "cache"); } }
+    static string ZigHome { get { return Path.Combine(Ctr3dsSaves.Root, "zig-" + ZigVersion); } }
+    public static string ZigExe { get { return Path.Combine(ZigHome, "zig-x86_64-windows-" + ZigVersion, "zig.exe"); } }
+    public static bool Fast { get { return Config.Read("3ds-build-speed.txt", "fast") != "quiet"; } set { Config.Write("3ds-build-speed.txt", value ? "fast" : "quiet"); } }
+    public static int Cores() { int n = Environment.ProcessorCount; return Math.Max(1, Math.Min(64, Fast ? n - 1 : n / 2)); }
+    public static IntPtr Mask() { int c = Cores(); return (IntPtr)(c >= 64 ? -1L : (1L << c) - 1); }
+    // Measured on Pokemon Y: 17.5 minutes on 4 threads, 8.9 on 8, 5.2 on 16 (threads past 8 share cores).
+    public static int Minutes(int cores) { double work = cores <= 8 ? cores : 8 + (cores - 8) * 0.5; return Math.Max(3, (int)Math.Ceiling(72.0 / work)); }
+    // Another dump of the game needs a build of its own.
+    static string RomKey(GameEntry g) { var r = g.Roms.FirstOrDefault(x => x.File == g.CtrPlainRom); return r != null ? r.Sha1 : ""; }
+    static readonly Dictionary<string, string> states = new Dictionary<string, string>();
+    // "ready", "old" (runs, a rebuild makes it better), "outdated" (this Zakuro can't run it) or "missing".
+    public static string State(GameEntry g) {
+        string lib = LibraryOf(g);
+        try {
+            if (!File.Exists(lib) || !File.Exists(StampOf(g)) || File.ReadAllText(StampOf(g)).Trim() != RomKey(g)) return "missing";
+            string key = lib + "|" + File.GetLastWriteTimeUtc(lib).Ticks + "|" + File.GetLastWriteTimeUtc(Tool).Ticks;
+            string known;
+            if (states.TryGetValue(key, out known)) return known;
+            var psi = new ProcessStartInfo(Tool, "check \"" + lib + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            using (var p = Process.Start(psi)) {
+                p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd();
+                if (!p.WaitForExit(20000)) { try { p.Kill(); } catch { } return "outdated"; }
+                known = p.ExitCode == 0 ? "ready" : p.ExitCode == 4 ? "old" : "outdated";
+            }
+            states[key] = known;
+            return known;
+        } catch { return "missing"; }
+    }
+    // Zig, the C compiler, downloaded once and checked against its pinned checksum (the one Zakuro pins).
+    public static string EnsureZig() {
+        string zip = ZigHome + ".download.zip", temp = ZigHome + ".new";
+        try {
+            if (File.Exists(ZigExe)) return null;
+            Directory.CreateDirectory(Ctr3dsSaves.Root);
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            using (var web = new System.Net.WebClient()) { web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; web.DownloadFile(ZigUrl, zip); }
+            string hash;
+            using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
+            if (hash != ZigSha256) return "The download wasn't the expected file, so it wasn't used.";
+            if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
+            if (Directory.Exists(ZigHome)) Directory.Delete(ZigHome, true);
+            Directory.Move(temp, ZigHome);
+            return File.Exists(ZigExe) ? null : "The download was missing zig.exe.";
+        } catch (Exception x) { return x.Message; }
+        finally { try { File.Delete(zip); } catch { } try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
+    }
+    public static ProcessStartInfo BuildStart(GameEntry g) {
+        Directory.CreateDirectory(Dir);
+        if (Directory.Exists(Work)) Directory.Delete(Work, true);
+        try { File.Delete(StampOf(g)); } catch { }
+        var psi = new ProcessStartInfo(Tool, "build \"" + g.CtrPlainRom + "\" \"" + Work + "\" \"" + LibraryOf(g) + "\" --cache \"" + Cache + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Dir, RedirectStandardOutput = true, RedirectStandardError = true };
+        psi.EnvironmentVariables["PATH"] = Path.GetDirectoryName(ZigExe) + ";" + Environment.GetEnvironmentVariable("PATH");
+        psi.EnvironmentVariables["CC"] = "zig cc";
+        psi.EnvironmentVariables["NATIVEMONS_RECOMP_COMPILER"] = "zig " + ZigVersion;
+        psi.EnvironmentVariables["ZIG_GLOBAL_CACHE_DIR"] = Path.Combine(Dir, "zig-cache");
+        psi.EnvironmentVariables["ZIG_LOCAL_CACHE_DIR"] = Path.Combine(Dir, "zig-cache");
+        return psi;
+    }
+    // The generated C and objects are deleted either way: only the library and the cache stay.
+    public static bool Finish(GameEntry g, int code) {
+        bool ok = code == 0 && File.Exists(LibraryOf(g));
+        try { if (Directory.Exists(Work)) Directory.Delete(Work, true); } catch { }
+        // The linker's debug file (about 750 MB) and import library aren't needed to play.
+        foreach (var pattern in new[] { "*.pdb", "*.lib", "*.part" }) foreach (var f in Directory.GetFiles(Dir, pattern)) try { File.Delete(f); } catch { }
+        try { if (ok) File.WriteAllText(StampOf(g), RomKey(g)); else if (File.Exists(LibraryOf(g)) && code != 0) File.Delete(LibraryOf(g)); } catch { }
+        PruneCache(3L << 30);
+        return ok;
+    }
+    public static void Stop(Process p) {
+        try { using (var k = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + p.Id) { UseShellExecute = false, CreateNoWindow = true })) k.WaitForExit(15000); } catch { }
+    }
+    // The newest pieces stay; past the cap the oldest go.
+    static void PruneCache(long cap) {
+        try {
+            if (!Directory.Exists(Cache)) return;
+            var files = new DirectoryInfo(Cache).GetFiles().OrderByDescending(f => f.LastWriteTimeUtc).ToList();
+            long total = 0;
+            foreach (var f in files) { total += f.Length; if (total > cap || f.Name.EndsWith(".part")) f.Delete(); }
+        } catch { }
+    }
+}
+
 // The 3DS emulators a player can add, each built from our own fork. Optional: nothing downloads until they pick one.
 class Emu3ds {
     public string Id, Name, Short, Repo, Upstream, Exe, Asset, Notes;
@@ -203,10 +302,12 @@ class Emu3ds {
     public string Url { get { return "https://github.com/" + Repo + "/releases/download/" + Tag + "/" + Asset; } }
     public string InstalledTag { get { try { string f = Path.Combine(Dir, "nativemons-tag.txt"); return File.Exists(f) ? File.ReadAllText(f).Trim() : null; } catch { return null; } } }
     public bool UpdateReady { get { return Installed && Tag != null && InstalledTag != Tag; } }
-    public string Dir { get { return Path.Combine(Config.Emulators, Id); } }
+    public string Dir { get { return Native ? Path.GetDirectoryName(Config.Zakuro) : Path.Combine(Config.Emulators, Id); } }
     public string ExePath { get { return Path.Combine(Dir, Exe); } }
     public bool Installed { get { return File.Exists(ExePath); } }
-    public bool Recommended;
+    public bool Recommended, Native;
+    // 3DSrecomp+Zakuro: a native engine shipped in engines\zakuro, not one of the emulators below (todo 22).
+    public static readonly Emu3ds Zakuro = new Emu3ds { Id = "zakuro", Name = "3DSrecomp+Zakuro (native, built on your PC)", Short = "3DSrecomp+Zakuro", Exe = "zakuro.exe", Native = true };
     // In order of preference: the first one installed plays 3DS games unless the player picks another.
     // AzaharPlus is the recommended one, Azahar the backup when it misbehaves (user, 2026-11-14).
     public static readonly Emu3ds[] All = {
@@ -310,11 +411,12 @@ static class Ctr3dsSaves {
     static string High(GameEntry g) { return g.Ctr.Substring(0, 8).ToLowerInvariant(); }
     // The emulator's copy of the save folder, and Citra's format file beside it.
     static string EmuSave(Emu3ds e, GameEntry g) {
+        if (e.Native) return Path.Combine(EmuData(e), "user", "savedata", g.Ctr.ToUpperInvariant());
         return Path.Combine(EmuData(e), "sdmc", "Nintendo 3DS", new string('0', 32), new string('0', 32), "title", High(g), Low(g), "data", "00000001");
     }
     // The save's 16-byte format record. Without it a game sees an unformatted save and sets up a new one over the old.
-    static string EmuMeta(Emu3ds e, GameEntry g) { return EmuSave(e, g) + ".metadata"; }
-    static string EmuStates(Emu3ds e) { return Path.Combine(EmuData(e), "states"); }
+    static string EmuMeta(Emu3ds e, GameEntry g) { return EmuSave(e, g) + (e.Native ? ".format" : ".metadata"); }
+    static string EmuStates(Emu3ds e) { return e.Native ? null : Path.Combine(EmuData(e), "states"); }
     static string[] StatesOf(string dir, GameEntry g) { return dir != null && Directory.Exists(dir) ? Directory.GetFiles(dir, g.Ctr.ToUpperInvariant() + ".*.cst") : new string[0]; }
 
     public static bool IsLink(string dir) { try { return Directory.Exists(dir) && (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0; } catch { return false; } }
@@ -356,19 +458,24 @@ static class Ctr3dsSaves {
     public static void Prepare(Emu3ds e, GameEntry g) {
         string left = CollectLeftover(e);
         if (left != null) throw new IOException("The last session's save couldn't be collected first: " + left);
-        string link = Link(e);
-        if (IsLink(link)) Directory.Delete(link, false);
-        // A real folder there (the emulator was run by hand) is kept aside, never deleted.
-        else if (Directory.Exists(link)) Directory.Move(link, link + ".kept-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
-        MakeLink(link, EmuData(e));
+        if (e.Native) Directory.CreateDirectory(EmuData(e));
+        else {
+            string link = Link(e);
+            if (IsLink(link)) Directory.Delete(link, false);
+            // A real folder there (the emulator was run by hand) is kept aside, never deleted.
+            else if (Directory.Exists(link)) Directory.Move(link, link + ".kept-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            MakeLink(link, EmuData(e));
+        }
         File.WriteAllText(SessionFile(e), g.Id);
-        WriteCitraConfig(e, g);
+        if (!e.Native) WriteCitraConfig(e, g);
         if (File.Exists(Main(g))) SaveGuard.Backup(g, Main(g), "before-play");
         string save = EmuSave(e, g);
         if (Directory.Exists(Path.Combine(Master(g), "data"))) {
             Mirror(Path.Combine(Master(g), "data"), save);
             string meta = Path.Combine(Master(g), "metadata");
             if (EmuMeta(e, g) != null && File.Exists(meta)) SaveGuard.WriteInPlace(meta, EmuMeta(e, g));
+            // Without its format record a game sets up a new save over the old one.
+            else if (e.Native && File.Exists(Path.Combine(save, "main"))) File.WriteAllBytes(EmuMeta(e, g), new byte[] { 0, 0, 4, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 });
         } else if (Directory.Exists(save)) {
             // No save of the launcher's yet: one the emulator still holds would come back, so it's kept in the backups instead.
             string aside = Path.Combine(SaveGuard.BackupFolder(g), "emulator-" + e.Id + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
@@ -478,7 +585,7 @@ static class Ctr3dsSaves {
         }
         File.WriteAllLines(f, lines.ToArray());
     }
-    public static string WorkingDir(Emu3ds e) { return e.Dir; }
+    public static string WorkingDir(Emu3ds e) { return e.Native ? EmuData(e) : e.Dir; }
     // When the launcher changes a save (Move Pokemon), the slot's states go to the backups with the old save,
     // so loading an old state can't undo the change (user, 2026-11-13).
     public static void StashStates(GameEntry g, string reason) {
@@ -819,7 +926,8 @@ class GameEntry {
     // Move Pokemon also takes 3DS games once they have a save (user, 2026-11-14).
     public bool MoveTools { get { return SaveTools || (Ctr != null && File.Exists(Ctr3dsSaves.Main(this))); } }
     // A 3DS game: its title ID, and the dump an emulator plays in place.
-    public string Ctr, CtrRom; public bool CtrEncrypted;
+    public string Ctr, CtrRom, CtrPlainRom; public bool CtrEncrypted;
+    public bool OnRecomp { get { return CtrPlainRom != null && Recomp.Installed && Recomp.Supports(this); } }
     public bool On3ds { get { return Ctr != null && CtrRom != null && Emu3ds.Enabled && Emu3ds.ForGame(this) != null; } }
     public int ArtFrame, TownFrame;   // frames from power-on to the title screen
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
@@ -845,7 +953,7 @@ class GameEntry {
     public bool OnFulldex { get { return FulldexCode != null && FulldexRom != null && File.Exists(Config.Fulldex); } }
     public bool OnPort { get { return Port != null && FulldexRom != null && File.Exists(Config.PlatinumPort); } }
     public bool OnNativeplat { get { return Nativeplat != null && NativeplatRom != null && File.Exists(Config.Nativeplat); } }
-    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat || OnPc || On3ds; } }
+    public bool Playable { get { return OnGen1 || OnFulldex || OnPort || OnNativeplat || OnPc || OnRecomp || On3ds; } }
     public bool IsDs { get { return Console == "Nintendo DS"; } }
     public bool HasBoth { get { return OnGen1 && OnFulldex; } }
     // The player's choice where both engines can run it; Fulldex by default (widescreen).
@@ -856,6 +964,7 @@ class GameEntry {
         if (OnPort) l.Add("port");
         if (OnNativeplat) l.Add("nativeplat");
         if (OnPc) l.Add("pc");
+        if (OnRecomp) l.Add("recomp");
         if (On3ds) l.Add("3ds");
         // A romhack only runs on Fulldex: the other engines only take clean copies.
         if (Chosen != null && IsModified(Chosen) && l.Contains("fulldex")) return new List<string> { "fulldex" };
@@ -868,8 +977,8 @@ class GameEntry {
         string chosen = Config.Read("engine-" + Id + ".txt", l[0]);
         return l.Contains(chosen) ? chosen : l[0];
     }
-    public static string EngineName(string engine, GameEntry g = null) { if (engine == "3ds") { var e = g != null ? Emu3ds.ForGame(g) : Emu3ds.Default; return e != null ? e.Name : "a 3DS emulator"; } return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
-    public static string EngineShort(string engine, GameEntry g = null) { if (engine == "3ds") { var e = g != null ? Emu3ds.ForGame(g) : Emu3ds.Default; return e != null ? e.Short : "3DS"; } return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
+    public static string EngineName(string engine, GameEntry g = null) { if (engine == "recomp") return Emu3ds.Zakuro.Name; if (engine == "3ds") { var e = g != null ? Emu3ds.ForGame(g) : Emu3ds.Default; return e != null ? e.Name : "a 3DS emulator"; } return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
+    public static string EngineShort(string engine, GameEntry g = null) { if (engine == "recomp") return Emu3ds.Zakuro.Short; if (engine == "3ds") { var e = g != null ? Emu3ds.ForGame(g) : Emu3ds.Default; return e != null ? e.Short : "3DS"; } return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
 }
 
 // Games that are PC programs of their own, such as Infinite Fusion (notes/launcher.md, PC games).
@@ -3023,6 +3132,8 @@ static class Library {
             if (r.Encrypted && Emu3ds.Default != Emu3ds.Plus) r = Ranked(g).FirstOrDefault(x => !x.Encrypted) ?? r;
             g.CtrRom = r.File;
             g.CtrEncrypted = r.Encrypted;
+            var plain = g.Chosen.Encrypted ? Ranked(g).FirstOrDefault(x => !x.Encrypted) : g.Chosen;
+            g.CtrPlainRom = plain != null ? plain.File : null;
         }
         // An engine with an exact list uses the chosen dump if it's on the list, or its best one that is.
         if (g.Gen1 != null) { var r = g.Chosen.Gen1Ok ? g.Chosen : Ranked(g).FirstOrDefault(x => x.Gen1Ok); g.Gen1Rom = r != null ? r.File : null; }
@@ -3837,6 +3948,7 @@ class LauncherForm : Form {
         }
         // gameoptions[:<game>]: Game options, from Settings or for one game.
         if (screen == "gameoptions") pages.Push(GameOptionsPage(previewId != null ? Library.Games.Find(g => g.Id == previewId) : null));
+        if (screen == "recompask") { var rg = Library.Games.Find(g => g.Id == previewId); if (rg != null) pages.Push(RecompAskPage(new List<GameEntry> { rg }, rg)); }
         if (screen == "engines") { var eg = Library.Games.Find(g => g.Id == previewId); if (eg != null) { pages.Push(GamePage(eg)); pages.Push(EnginePage(eg)); } }
         if (screen == "roms" || screen == "gamepage") {
             var which = Library.Games.Find(g => g.Id == previewId);
@@ -4024,7 +4136,7 @@ class LauncherForm : Form {
         if (native.Any(p => p.Id != readyPid && counts(p))) names.Add("nativeplat");
         if (!parallel && PcGames.AnyRunning()) names.Add("a PC game");
         // A 3DS emulator holds its game's save while it runs.
-        foreach (var e in Emu3ds.All) if (Emu3ds.Running(e)) names.Add(e.Short);
+        foreach (var e in Emu3ds.All.Concat(new[] { Emu3ds.Zakuro })) if (Emu3ds.Running(e)) names.Add(e.Short);
         foreach (var p in native) p.Dispose();
         foreach (var n in new[] { Path.GetFileNameWithoutExtension(Config.Fulldex), "lovec", "love" }) {
             var found = Process.GetProcessesByName(n);
@@ -4081,7 +4193,7 @@ class LauncherForm : Form {
         if (err != null) ShowText("Something went wrong", err, null);
         // NATIVEMONS_TEST_SETUP=1: the guided setup even where games are already found, to try it out.
         else if ((Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) || Environment.GetEnvironmentVariable("NATIVEMONS_TEST_SETUP") == "1") StartSetup();
-        else AskAboutEncrypted();
+        else { AskAboutEncrypted(); AskAboutRecomp(); }
         // Asked once, also on the first start of the version that brought the choice.
         if (err == null && !firstSetup && !Wallpaper.Chosen) { setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds; pages.Push(SetupPage(3, true)); }
         Invalidate();
@@ -4140,6 +4252,7 @@ class LauncherForm : Form {
             ReplaceMain();
             if (then != null) then();
             AskAboutEncrypted();
+            AskAboutRecomp();
         });
     }
     // Encrypted ROMs are raised once, when found. After that they stay flagged on their game's page.
@@ -4195,6 +4308,8 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
         p.Items.Add(new Item("3DS games: " + (Emu3ds.Enabled ? "On" : "Off"), "", true, delegate { Emu3ds.Enabled = !Emu3ds.Enabled; pages.Pop(); pages.Push(SettingsPage()); ReplaceMain(); }) { Icon = '', Tint = AppColors[App("Emu")], Info = "Play your Nintendo 3DS Pokemon games with an emulator you choose, from Emu on the home screen. Nothing downloads until you pick one. Select to turn it " + (Emu3ds.Enabled ? "off" : "on") + "." });
+        if (Recomp.Installed) p.Items.Add(new Item("3DS build speed: " + (Recomp.Fast ? "Fast" : "Quiet"), "", true, delegate { Recomp.Fast = !Recomp.Fast; int sel = pages.Peek().Sel; pages.Pop(); var again = SettingsPage(); again.Sel = sel; pages.Push(again); }) { Icon = '\uE7FC',
+            Info = "How 3DSrecomp+Zakuro builds a game: Fast uses all but one of your " + Environment.ProcessorCount + " processor threads, Quiet half of them, both at the lowest priority. About " + Recomp.Minutes(Recomp.Cores()) + " minutes per game now. Select to switch." });
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
         p.Items.Add(new Item("Export saves", "", Library.Games.Exists(g => g.SaveTools), delegate { pages.Push(ExportGamesPage()); }) { Icon = '\uE898', Info = "Send a save back to your 3DS, a flash cart or another emulator." });
         p.Items.Add(new Item("Download Pokedex", "", true, delegate { GetAllSprites(); }) { Icon = '\uE896', Info = "Gets every Pokemon picture and Pokedex entry for offline play. Run it again at any time: it only fetches what's missing." });
@@ -5768,6 +5883,11 @@ class LauncherForm : Form {
         var engines = g.Engines();
         if (engines.Count > 1) p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine, g), "", true, delegate { pages.Push(EnginePage(g)); }) { Icon = '',
             Info = g.Title + " plays with " + GameEntry.EngineName(engine, g) + ". Select to choose from its " + engines.Count + " engines." });
+        if (g.OnRecomp) {
+            string st = Recomp.State(g);
+            p.Items.Add(new Item("3DSrecomp+Zakuro build: " + (st == "ready" ? "Ready" : st == "old" ? "Can be improved" : st == "outdated" ? "Needs a rebuild" : "Not built yet"), "", true, delegate { pages.Push(RecompAskPage(new List<GameEntry> { g }, null)); }) { Icon = '\uE896',
+                Info = "Its code, recompiled on this PC from your own dump so it runs natively. It never leaves this PC. Select to " + (st == "ready" ? "build it again" : "build it") + "." });
+        }
         if (g.Roms.Count > 1) p.Items.Add(new Item("ROM version: " + g.LabelOf(g.Chosen), "", true, delegate { pages.Push(RomsPage(g)); }) { Icon = '\uE8B7', Info = g.Roms.Count + " different dumps of this game were found. " + Path.GetFileName(g.Chosen.File) + " is in use." });
         if (g.IsHack) {
             var baseGame = Library.Games.Find(x => x.Id == g.BaseId);
@@ -6909,6 +7029,7 @@ class LauncherForm : Form {
             + "\n\nThe GBA player is ours, in our Fulldex fork, on mGBA by endrift and contributors (MPL-2.0), after Pokemon GBA Widescreen by mamesj. Widescreen for romhacks and the versions our patches don't cover comes from PokeDaisy's EXPAND (GPL-3.0). Based on PokeDaisy by Lidor Itzhari - https://github.com/lidor30/pokedaisy"
             + "\n\nRomhacks' title screens are captured with mGBA by endrift and contributors (github.com/mgba-emu/mgba, MPL-2.0), as its libretro core."
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
+            + "\n\n3DSrecomp+Zakuro: Zakuro and 3dsrecomp by fearkov (github.com/fearkov/zakuro, github.com/fearkov/3dsrecomp, both MIT), built from our fork (github.com/Hailey-Ross/zakuro) with a small build tool of ours; Zig (ziglang.org, MIT) compiles each game on your PC. Not affiliated with nativeMons."
             + "\n\nOptional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons: Azahar by the Azahar team, from Citra (github.com/azahar-emu/azahar, GPL-2.0-or-later; ours: github.com/Hailey-Ross/azahar); AzaharPlus by its contributors, from Azahar (github.com/AzaharPlus/AzaharPlus, GPL-3.0; ours, without its system-file downloader: github.com/Hailey-Ross/AzaharPlus). Not the official builds, and not affiliated with nativeMons."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
@@ -7490,6 +7611,7 @@ class LauncherForm : Form {
         }
         current = g; Config.Write("last-game.txt", g.Id);
         if (g.Engine() == "3ds") { Play3ds(g); return; }
+        if (g.Engine() == "recomp") { PlayRecomp(g); return; }
         if (g.Engine() == "pc") { Busy("Backing up your saves", delegate { PcGames.Backup(g); return null; }, delegate(string e) { PlayPc(g); }); return; }
         if (g.Engine() == "fulldex") {
             if (Library.NeedsPatch(g.FulldexRom)) { pages.Push(PatchPage(g, true)); return; }
@@ -7594,6 +7716,60 @@ class LauncherForm : Form {
         if (e.UpdateReady && Config.Read(SkipFile(e), "") != e.Tag) { pages.Push(EmuUpdateAskPage(e, g, false)); return; }
         Play3dsNow(g, e);
     }
+    void PlayRecomp(GameEntry g) {
+        var e = Emu3ds.Zakuro;
+        if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is already open. Close it, then press Play.", null); return; }
+        string st = Recomp.State(g);
+        if (st == "missing" || st == "outdated") { pages.Push(RecompAskPage(new List<GameEntry> { g }, g)); return; }
+        Play3dsNow(g, e);
+    }
+    // Asked once per game, at start and after a scan finds one; after that the game page and Play offer it.
+    static string RecompAskedFile { get { return Path.Combine(Config.State, "recomp-asked.txt"); } }
+    void AskAboutRecomp() {
+        if (!Recomp.Installed) return;
+        List<string> asked;
+        try { asked = File.Exists(RecompAskedFile) ? File.ReadAllLines(RecompAskedFile).ToList() : new List<string>(); } catch { asked = new List<string>(); }
+        var found = Library.Games.Where(g => g.OnRecomp && g.Engine() == "recomp" && !asked.Contains(g.Ctr) && Recomp.State(g) != "ready" && Recomp.State(g) != "old").ToList();
+        if (found.Count == 0) return;
+        try { Directory.CreateDirectory(Config.State); File.AppendAllLines(RecompAskedFile, found.Select(g => g.Ctr)); } catch { }
+        pages.Push(RecompAskPage(found, null));
+    }
+    Page RecompAskPage(List<GameEntry> games, GameEntry play) {
+        int cores = Recomp.Cores(), min = Recomp.Minutes(cores);
+        var p = new Page { Title = games.Count == 1 ? "Build " + games[0].Title + "?" : "Build " + games.Count + " games?", Theme = games[0].Theme, FitBody = true };
+        string names = string.Join(", ", games.Select(g => g.Title).ToArray());
+        p.Body = names + (games.Count == 1 ? " plays" : " play") + " natively with 3DSrecomp+Zakuro after a one-time build of " + (games.Count == 1 ? "its" : "their") + " code, made on this PC from your own dump. The build never leaves this PC.\n\n"
+            + "About " + min + " minutes " + (games.Count == 1 ? "" : "per game ") + "here (" + (Recomp.Fast ? "Fast" : "Quiet") + " in Settings), at the lowest priority, so you can keep using your PC."
+            + (File.Exists(Recomp.ZigExe) ? "" : " The first build downloads Zig, the C compiler it uses (about 100 MB).");
+        p.Items.Add(new Item(play != null ? "Build, then play" : "Build now", "", true, delegate { pages.Pop(); BuildRecomp(games, play); }) { Icon = '\uE896', Info = "Esc or B stops a build; it starts over next time." });
+        if (play != null && play.On3ds) p.Items.Add(new Item("Play with " + GameEntry.EngineShort("3ds", play) + " this time", "", true, delegate { pages.Pop(); Play3ds(play); }) { Icon = '', Info = "The emulator plays it now; the build can wait." });
+        p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '', Info = "Build it later from the game's page." });
+        return p;
+    }
+    void BuildRecomp(List<GameEntry> games, GameEntry play) {
+        if (!File.Exists(Recomp.ZigExe)) {
+            string problem = null;
+            Busy("Getting Zig", delegate { problem = Recomp.EnsureZig(); return null; }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Couldn't get Zig", (x ?? problem) + "\n\nNothing was built. Your games still play with an emulator.", null); return; }
+                BuildRecomp(games, play);
+            });
+            return;
+        }
+        if (games.Count == 0) { ReplaceMain(); if (play != null) Play(play); return; }
+        var g = games[0]; var rest = games.Skip(1).ToList();
+        bool stopped = false;
+        RunJob("Building " + g.Title, Recomp.BuildStart(g), false, delegate(int code) {
+            bool ok = Recomp.Finish(g, code);
+            if (stopped) { ShowText("Build stopped", g.Title + " wasn't built. It starts over next time.", null); return; }
+            if (!ok) { ShowLog("Couldn't build " + g.Title, "Your dump wasn't changed, and an emulator can still play it."); return; }
+            BuildRecomp(rest, play);
+        });
+        if (job == null) return;
+        try { job.PriorityClass = ProcessPriorityClass.Idle; job.ProcessorAffinity = Recomp.Mask(); } catch { }
+        var running = job;
+        jobCancel = delegate { stopped = true; jobCancel = null; Recomp.Stop(running); };
+        AddLine("nativemons: 0 Esc or B stops the build");
+    }
     static string SkipFile(Emu3ds e) { return "emu-update-skipped-" + e.Id + ".txt"; }
     Page EmuUpdateAskPage(Emu3ds e, GameEntry g, bool quiet) {
         var p = new Page { Title = "Update " + e.Short + "?", Theme = g.Theme, FitBody = true };
@@ -7624,7 +7800,9 @@ class LauncherForm : Form {
             return null;
         }, delegate(string x) {
             if (x != null || problem != null) { ShowText("Could not start " + g.Title, "Its save couldn't be handed to " + e.Short + ", so nothing was started. " + (x ?? problem), null); return; }
-            var psi = new ProcessStartInfo(e.ExePath, "\"" + g.CtrRom + "\"") { UseShellExecute = false, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            string args = e.Native ? "\"" + g.CtrPlainRom + "\" --recompiled \"" + Recomp.LibraryOf(g) + "\" --data \"" + Ctr3dsSaves.EmuData(e) + "\"" : "\"" + g.CtrRom + "\"";
+            var psi = new ProcessStartInfo(e.ExePath, args) { UseShellExecute = false, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+            if (e.Native) psi.EnvironmentVariables["APPDATA"] = Path.Combine(Ctr3dsSaves.EmuData(e), "appdata");
             RunJob(g.Title, psi, true, delegate(int code) {
                 // The emulator's own output, kept for when something didn't work (one file per emulator, last session only).
                 try { File.WriteAllLines(Path.Combine(Ctr3dsSaves.EmuData(e), "nativemons-last-output.txt"), log.ToArray()); } catch { }
@@ -8302,7 +8480,9 @@ class LauncherForm : Form {
     void RunTool(string title, string exe, string args, string dir, Action<int> done) {
         RunJob(title, new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true }, false, done);
     }
+    Action jobCancel;
     void RunJob(string title, ProcessStartInfo psi, bool isGame, Action<int> done) {
+        jobCancel = null;
         log.Clear(); jobTitle = title; jobIsGame = isGame; jobHid = false; jobStart = DateTime.Now; if (isGame) gameStart = jobStart; progress = -1; jobDone = done;
         // Let the game take the foreground from us.
         if (!Native.Quiet) Native.AllowSetForegroundWindow(-1);
@@ -8349,7 +8529,7 @@ class LauncherForm : Form {
         if (log.Count > 400) log.RemoveAt(0);
     }
     void JobEnded() {
-        var p = job; job = null; int code = 0;
+        var p = job; job = null; jobCancel = null; int code = 0;
         try { p.WaitForExit(); code = p.ExitCode; p.Dispose(); } catch { }
         if (jobIsGame) { DiscordPresence.Stop(); ReadClashes(); }
         if (gbaClosed) code = 0;
@@ -8559,6 +8739,7 @@ class LauncherForm : Form {
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         GuideTick();
+        if (job != null && jobCancel != null && Form.ActiveForm == this) { ushort jb = Pad(); if ((jb & ~prevPad & B) != 0) jobCancel(); prevPad = jb; return; }
         if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
         if ((pressed & A) != 0) Act("ok", true);
@@ -8574,6 +8755,7 @@ class LauncherForm : Form {
         prevPad = b;
     }
     protected override bool ProcessCmdKey(ref Message msg, Keys key) {
+        if (job != null && jobCancel != null && (key == Keys.Escape || key == Keys.Back)) { jobCancel(); return true; }
         if (job == null && !starting) {
             switch (key) {
                 case Keys.Up: case Keys.W: Act("up", false); return true;
@@ -11033,11 +11215,36 @@ static class NativeMonsLauncher {
         // --3ds-save <result> <game> <emulator> prepare|collect: the save hand-off around a session, with no emulator run.
         if (argv.Length == 5 && argv[0] == "--3ds-save") {
             Library.Scan(LauncherForm.Gen1Cli);
-            var g = Library.Games.Find(x => x.Id == argv[2]); var e = Emu3ds.All.FirstOrDefault(x => x.Id == argv[3]);
+            var g = Library.Games.Find(x => x.Id == argv[2]); var e = argv[3] == "zakuro" ? Emu3ds.Zakuro : Emu3ds.All.FirstOrDefault(x => x.Id == argv[3]);
             string result;
             if (g == null || g.CtrRom == null || e == null) result = "no such 3DS game with a ROM, or emulator";
             else if (argv[4] == "prepare") { try { Ctr3dsSaves.Prepare(e, g); result = "ok"; } catch (Exception x) { result = x.Message; } }
             else result = Ctr3dsSaves.Collect(e, g) ?? "ok";
+            File.WriteAllText(argv[1], result);
+            return;
+        }
+        // --recomp <result> <game> state|build: 3DSrecomp+Zakuro with no window (build: Idle, the Settings cores).
+        if (argv.Length == 4 && argv[0] == "--recomp") {
+            Library.Scan(LauncherForm.Gen1Cli);
+            var g = Library.Games.Find(x => x.Id == argv[2]);
+            string result;
+            if (g == null || !g.OnRecomp) result = "not available: " + (g == null ? "no such game" : !Recomp.Installed ? "engine missing" : !Recomp.Supports(g) ? "not supported" : "no decrypted dump");
+            else if (argv[3] == "state") result = Recomp.State(g) + " " + g.CtrPlainRom;
+            else {
+                result = Recomp.EnsureZig();
+                if (result == null) {
+                    var psi = Recomp.BuildStart(g);
+                    var lines = new List<string>();
+                    using (var p = Process.Start(psi)) {
+                        try { p.PriorityClass = ProcessPriorityClass.Idle; p.ProcessorAffinity = Recomp.Mask(); } catch { }
+                        var err = p.StandardError.ReadToEndAsync();
+                        string l; while ((l = p.StandardOutput.ReadLine()) != null) if (!l.Contains(" Compiled ")) lines.Add(l);
+                        p.WaitForExit();
+                        bool ok = Recomp.Finish(g, p.ExitCode);
+                        result = (ok ? "built " : "failed ") + p.ExitCode + " " + Recomp.State(g) + "\n" + string.Join("\n", lines.ToArray()) + err.Result;
+                    }
+                }
+            }
             File.WriteAllText(argv[1], result);
             return;
         }

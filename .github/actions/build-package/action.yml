@@ -25,6 +25,7 @@ runs:
         FULLDEX_RELEASE: "fulldex-2026-11-12"
         PLATINUM_RELEASE: "v0.2.2"
         NATIVEPLAT_RELEASE: "windows-22adf5d0d"
+        ZAKURO_RELEASE: "windows-db81d2442"
       run: |
         $dist = "dist\nativeMons"
         Copy-Item LICENSE, README.md $dist
@@ -54,6 +55,10 @@ runs:
         Expand-Archive nativeplat.zip nativeplat-unpacked
         Move-Item nativeplat-unpacked\nativeplat-windows-x64 "$dist\engines\nativeplat"
         Set-Content "$dist\engines\nativeplat\portable.txt" ''
+        # 3DSrecomp+Zakuro: the programs only, from our fork's workflow. Players build each game's code on their own PC.
+        gh release download $env:ZAKURO_RELEASE -R Hailey-Ross/zakuro -p "zakuro-nativemons-windows-x64.zip" -O zakuro.zip
+        Expand-Archive zakuro.zip zakuro-unpacked
+        Move-Item zakuro-unpacked\zakuro "$dist\engines\zakuro"
 
         # mGBA's libretro core, for romhacks' title screens, with its licence.
         New-Item -ItemType Directory -Force "$dist\tools\mgba" | Out-Null
@@ -108,11 +113,14 @@ runs:
     - name: Check the package
       shell: pwsh
       run: |
-        $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Extension -in '.gb', '.gbc', '.gba', '.nds', '.sav' -or $_.Name -eq 'key1.bin' }
+        $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Extension -in '.gb', '.gbc', '.gba', '.nds', '.3ds', '.cci', '.cia', '.cxi', '.sav' -or $_.Name -eq 'key1.bin' }
+        if ($bad) { $bad.FullName; throw "Game data in the package" }
+        # 3DSrecomp+Zakuro builds come from players' games: never a recompiled library, its C or its objects.
+        $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Name -match '^[0-9A-Fa-f]{16}\.(dll|so)$' -or $_.Extension -in '.c', '.o', '.obj' -or $_.Name -match '_functions\.h$' }
         if ($bad) { $bad.FullName; throw "Game data in the package" }
         foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
           if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }
         }
-        foreach ($p in 'tools\mgba\mgba_libretro.dll', 'tools\mgba\LICENSE-mGBA.txt', 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'engines\gbawide\gbawide.exe') {
+        foreach ($p in 'tools\mgba\mgba_libretro.dll', 'tools\mgba\LICENSE-mGBA.txt', 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'engines\gbawide\gbawide.exe', 'engines\zakuro\zakuro.exe', 'engines\zakuro\nativemons-recomp.exe') {
           if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
         }

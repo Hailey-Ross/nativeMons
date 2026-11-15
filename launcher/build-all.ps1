@@ -8,6 +8,7 @@ $loveVersion = '11.5'
 $fulldexRelease = 'fulldex-2026-11-12'
 $platinumRelease = 'v0.2.2'
 $nativeplatRelease = 'windows-22adf5d0d'
+$zakuroRelease = 'windows-db81d2442'
 
 $here = $PSScriptRoot
 $repo = Split-Path $here -Parent
@@ -130,6 +131,19 @@ else {
     Write-Host 'Downloaded.'
 }
 
+# 3DSrecomp+Zakuro: Zakuro and nativemons-recomp from our fork's workflow. No game code: players build their own.
+Step "3DSrecomp+Zakuro $zakuroRelease"
+$zakuro = Join-Path $out 'engines\zakuro'
+$mark = Join-Path $zakuro '.nativemons-version'
+if ((Test-Path -LiteralPath $mark) -and (Get-Content -LiteralPath $mark) -eq $zakuroRelease) { Write-Host 'Already there.' }
+else {
+    $unpacked = Fetch "https://github.com/Hailey-Ross/zakuro/releases/download/$zakuroRelease/zakuro-nativemons-windows-x64.zip" 'zakuro'
+    New-Item -ItemType Directory -Force $zakuro | Out-Null
+    Copy-Item -Path (Join-Path $unpacked 'zakuro\*') -Destination $zakuro -Recurse -Force
+    Set-Content -LiteralPath $mark $zakuroRelease
+    Write-Host 'Downloaded.'
+}
+
 Step 'hails.nds-Patcher\'
 $patcher = Join-Path $out 'tools\nds-patcher'
 New-Item -ItemType Directory -Force $patcher | Out-Null
@@ -204,7 +218,7 @@ else {
 
 Step 'Checking the result\'
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
-foreach ($needed in 'NativeMonsLauncher.exe', 'games.json', 'love\lovec.exe', 'engines\gen1recomp\main.lua', 'engines\fulldex\Pokemon Fulldex.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'tools\nds-patcher\hails_patcher.py', 'tools\mon-bridge\mon-bridge.exe') {
+foreach ($needed in 'NativeMonsLauncher.exe', 'games.json', 'love\lovec.exe', 'engines\gen1recomp\main.lua', 'engines\fulldex\Pokemon Fulldex.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'engines\zakuro\zakuro.exe', 'engines\zakuro\nativemons-recomp.exe', 'tools\nds-patcher\hails_patcher.py', 'tools\mon-bridge\mon-bridge.exe') {
     if (-not (Test-Path -LiteralPath (Join-Path $out $needed))) { throw "Missing from the build: $needed" }
 }
 foreach ($removed in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {

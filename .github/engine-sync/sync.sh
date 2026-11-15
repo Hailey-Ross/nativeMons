@@ -152,6 +152,28 @@ pin_gen4recomp() {
   CHANGES+=("gen4recomp pin: $now -> $tag")
 }
 
+# 3DSrecomp+Zakuro: our zakuro fork publishes windows-<sha9> (Zakuro and nativemons-recomp) from each push to
+# hails-additions; packages download the one pinned as zakuroRelease / ZAKURO_RELEASE.
+pin_zakuro() {
+  local head=$1 waited=0 repo=$OWNER/zakuro
+  [ -z "$head" ] && return 0
+  local tag="windows-${head:0:9}" now
+  now=$(grep -oP "zakuroRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
+  [ "$now" = "$tag" ] && return 0
+  if [ "$DRY" != 1 ]; then
+    while ! gh release view "$tag" -R "$repo" >/dev/null 2>&1; do
+      local state; state=$(gh run list -R "$repo" --workflow nativemons-windows-release.yml --commit "$head" --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || true)
+      if [ -z "$state" ] && [ $waited -ge 300 ]; then say "Zakuro: no build for ${head:0:9}, pin stays $now"; return 0; fi
+      case $state in "completed failure"*|"completed cancelled"*) problem "Zakuro build failed" "The Windows release build of \`hails-additions\` ${head:0:9} in \`$repo\` didn't finish. The pin stays \`$now\`."; return 0 ;; esac
+      [ $waited -ge 5400 ] && { problem "Zakuro build took too long" "No release \`$tag\` in \`$repo\` after 1.5 hours. The pin stays \`$now\`."; return 0; }
+      sleep 60; waited=$((waited + 60))
+    done
+  fi
+  sed -i "s/zakuroRelease = '$now'/zakuroRelease = '$tag'/" "$REPO_DIR/launcher/build-all.ps1"
+  sed -i "s/ZAKURO_RELEASE: \"$now\"/ZAKURO_RELEASE: \"$tag\"/" "$REPO_DIR/.github/actions/build-package/action.yml"
+  CHANGES+=("3DSrecomp+Zakuro pin: $now -> $tag")
+}
+
 # Azahar and AzaharPlus publish windows-<sha9> from each push to hails-additions. The launcher downloads it when a
 # player installs the emulator, checked against the sha256 pinned beside its tag in Emu3ds.All.
 pin_emulator() {
@@ -206,13 +228,15 @@ sync_fork Azahar "$OWNER/azahar" azahar-emu/azahar master release
 sync_fork AzaharPlus "$OWNER/AzaharPlus" AzaharPlus/AzaharPlus AzaharPlus release
 # The Platinum PC port: the fork only follows upstream's pc_port. Packages use upstream's release (check_releases).
 sync_fork PlatinumPort "$OWNER/pokeplatinum" cybervisi0n/pokeplatinum pc_port 0
-# Watched only, not used yet: a 3DS static recompiler and the emulator it runs in (todo 22).
+# 3DSrecomp+Zakuro: Zakuro's hails-additions adds nativemons-recomp, built with the 3dsrecomp its Cargo.lock pins.
+# The 3dsrecomp fork is only watched.
 sync_fork 3dsrecomp "$OWNER/3dsrecomp" fearkov/3dsrecomp main 0
-sync_fork Zakuro "$OWNER/zakuro" fearkov/zakuro main 0
+sync_fork Zakuro "$OWNER/zakuro" fearkov/zakuro main 1
 
 pin_submodule Gen1Recomp engines/gen1recomp "$(cat "$WORK/Gen1Recomp.head")"
 pin_submodule Fulldex engines/fulldex "$(cat "$WORK/Fulldex.head")"
 pin_gen4recomp "$(cat "$WORK/gen4recomp.head")"
+pin_zakuro "$(cat "$WORK/Zakuro.head")"
 pin_emulator Azahar "$OWNER/azahar" azahar azahar-nativemons-windows-x64.zip "$(cat "$WORK/Azahar.head")"
 pin_emulator AzaharPlus "$OWNER/AzaharPlus" azaharplus azaharplus-nativemons-windows-x64.zip "$(cat "$WORK/AzaharPlus.head")"
 check_releases
