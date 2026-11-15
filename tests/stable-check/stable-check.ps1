@@ -16,7 +16,7 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$AllGroups = @('repo','package','scan','snapshots','saves','play','sync','window','updater')
+$AllGroups = @('repo','package','scan','snapshots','saves','play','sync','window','updater','recomp')
 if (-not $Report) { $Report = Join-Path $env:TEMP 'nativemons-stable-check' }
 New-Item -ItemType Directory -Force $Report, "$Report\shots" | Out-Null
 $Report = (Resolve-Path $Report).Path
@@ -303,7 +303,7 @@ if ((On 'scan') -or (On 'play') -or (On 'window') -or (On 'snapshots') -or (On '
 # ---------- snapshots: every screen draws ----------
 if (On 'snapshots') {
   $sample = if ($Full) { $found } else { @('red','crystal','firered','platinum','black') | Where-Object { $found -contains $_ } }
-  $screens = @('main','splash','games','folders','credits','sprites','updatebanner') + @($sample | ForEach-Object { "main:$_"; "gamepage:$_"; "saves:$_" })
+  $screens = @('main','splash','games','folders','credits','sprites','updatebanner','controls-4') + @($sample | ForEach-Object { "main:$_"; "gamepage:$_"; "saves:$_" })
   $screens += @($romLines | Where-Object { $_ -match '^\S+ found=([2-9]|\d\d)' } | ForEach-Object { 'roms:' + ($_ -split ' ')[0] } | Select-Object -First $(if ($Full) { 99 } else { 1 }))
   $failed = @(); $todo = New-Object Collections.Queue; $screens | ForEach-Object { $todo.Enqueue($_) }; $busy = @(); $n = 0
   while ($todo.Count -or $busy.Count) {
@@ -320,6 +320,34 @@ if (On 'snapshots') {
     }
   }
   T snapshots "$($screens.Count) screens draw" ($failed.Count -eq 0) ($failed -join ', ')
+}
+# ---------- recomp: 3DSrecomp+Zakuro's tools and the 3DS header fixer, with no window and no dump ----------
+if (On 'recomp') {
+  $zk = Join-Path $app 'engines\zakuro'
+  $help = & "$zk\zakuro.exe" --help 2>&1 | Out-String
+  T recomp 'Zakuro takes --fullscreen' ($help -match '--fullscreen') ''
+  $junk = "$Work\0004000000164800.dll"; Set-Content $junk 'not a library'
+  $o = & "$zk\nativemons-recomp.exe" check $junk 2>&1 | Out-String
+  T recomp 'a library this Zakuro cannot run counts as outdated' ($LASTEXITCODE -eq 3 -and $o -match 'outdated') "exit $LASTEXITCODE $o"
+  # A dump with only its game part, decrypted but still marked encrypted (crypto method 1, no NoCrypto).
+  $b = New-Object byte[] 0x800
+  [Text.Encoding]::ASCII.GetBytes('NCSD').CopyTo($b, 0x100); [BitConverter]::GetBytes([uint32]1).CopyTo($b, 0x120); [BitConverter]::GetBytes([uint32]3).CopyTo($b, 0x124)
+  [Text.Encoding]::ASCII.GetBytes('NCCH').CopyTo($b, 0x300); $b[0x38B] = 1
+  [BitConverter]::GetBytes([uint32]1).CopyTo($b, 0x3A0); [BitConverter]::GetBytes([uint32]1).CopyTo($b, 0x3A4); [Text.Encoding]::ASCII.GetBytes('.code').CopyTo($b, 0x400)
+  [BitConverter]::GetBytes([uint32]2).CopyTo($b, 0x3B0); [BitConverter]::GetBytes([uint32]1).CopyTo($b, 0x3B4); [Text.Encoding]::ASCII.GetBytes('IVFC').CopyTo($b, 0x600)
+  $dump = "$Work\header-test.3ds"; [IO.File]::WriteAllBytes($dump, $b); $h0 = (Get-FileHash $dump).Hash
+  $r = "$Work\header.txt"
+  $null = Launcher @('--3ds-header', $r, $dump, 'check'); $c1 = Get-Content $r -Raw
+  $null = Launcher @('--3ds-header', $r, $dump, 'fix'); $c2 = Get-Content $r -Raw
+  $null = Launcher @('--3ds-header', $r, $dump, 'check'); $c3 = Get-Content $r -Raw
+  $null = Launcher @('--3ds-header', $r, $dump, 'undo'); $c4 = Get-Content $r -Raw
+  T recomp 'header fixer finds the 2 bytes' ($c1 -match '^needs 38B:01>00 38F:00>04') $c1
+  T recomp 'header fixer fixes, then has nothing to do' ($c2 -eq 'ok' -and $c3 -eq 'fine') "$c2 / $c3"
+  T recomp 'undo puts the dump back byte for byte' ($c4 -eq 'ok' -and (Get-FileHash $dump).Hash -eq $h0) $c4
+  $b[0x600] = 0x5A; [IO.File]::WriteAllBytes($dump, $b)
+  $null = Launcher @('--3ds-header', $r, $dump, 'fix'); $c5 = Get-Content $r -Raw
+  T recomp 'a dump still encrypted is left alone' ($c5 -match 'still encrypted' -and (Get-FileHash $dump).Hash -ne $h0 -and [IO.File]::ReadAllBytes($dump)[0x38B] -eq 1) $c5
+  Remove-Item $junk, $dump, $r -ErrorAction SilentlyContinue
 }
 # ---------- saves ----------
 if (On 'saves') {

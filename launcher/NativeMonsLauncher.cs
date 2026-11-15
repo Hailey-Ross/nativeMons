@@ -306,6 +306,12 @@ static class Recomp {
     public static IntPtr Mask() { int c = Cores(); return (IntPtr)(c >= 64 ? -1L : (1L << c) - 1); }
     // Measured on Pokemon Y: 17.5 minutes on 4 threads, 8.9 on 8, 5.2 on 16 (threads past 8 share cores).
     public static int Minutes(int cores) { double work = cores <= 8 ? cores : 8 + (cores - 8) * 0.5; return Math.Max(3, (int)Math.Ceiling(72.0 / work)); }
+    // Zakuro writes down where it had to interpret (beside the library); a rebuild covers those, so the game runs faster.
+    public const int ImproveAfter = 25;
+    static string HintsOf(GameEntry g) { return Path.ChangeExtension(LibraryOf(g), ".hints"); }
+    public static int HintCount(GameEntry g) {
+        try { return File.Exists(HintsOf(g)) ? File.ReadAllLines(HintsOf(g)).Count(l => l.Trim() != "" && !l.TrimStart().StartsWith("#")) : 0; } catch { return 0; }
+    }
     // Another dump of the game needs a build of its own.
     static string RomKey(GameEntry g) { var r = g.Roms.FirstOrDefault(x => x.File == g.CtrPlainRom); return r != null ? r.Sha1 : ""; }
     static readonly Dictionary<string, string> states = new Dictionary<string, string>();
@@ -313,10 +319,13 @@ static class Recomp {
     public static string State(GameEntry g) {
         string lib = LibraryOf(g);
         try {
-            if (!File.Exists(lib) || !File.Exists(StampOf(g)) || File.ReadAllText(StampOf(g)).Trim() != RomKey(g)) return "missing";
+            var stamp = File.Exists(StampOf(g)) ? File.ReadAllLines(StampOf(g)) : new string[0];
+            if (!File.Exists(lib) || stamp.Length == 0 || stamp[0].Trim() != RomKey(g)) return "missing";
+            int covered;
+            bool better = stamp.Length > 1 && int.TryParse(stamp[1], out covered) && HintCount(g) - covered >= ImproveAfter;
             string key = lib + "|" + File.GetLastWriteTimeUtc(lib).Ticks + "|" + File.GetLastWriteTimeUtc(Tool).Ticks;
             string known;
-            if (states.TryGetValue(key, out known)) return known;
+            if (states.TryGetValue(key, out known)) return known == "ready" && better ? "old" : known;
             var psi = new ProcessStartInfo(Tool, "check \"" + lib + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             using (var p = Process.Start(psi)) {
                 p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd();
@@ -324,8 +333,33 @@ static class Recomp {
                 known = p.ExitCode == 0 ? "ready" : p.ExitCode == 4 ? "old" : "outdated";
             }
             states[key] = known;
-            return known;
+            return known == "ready" && better ? "old" : known;
         } catch { return "missing"; }
+    }
+    // After a session: ask to share once the findings grew by ImproveAfter since the last answer (user, 2026-11-15).
+    public static bool AskToShare { get { return Config.Read("zakuro-share-ask.txt", "on") != "never"; } set { Config.Write("zakuro-share-ask.txt", value ? "on" : "never"); } }
+    public static bool ShouldAskShare(GameEntry g) {
+        int last; int.TryParse(Config.Read("zakuro-share-answered-" + g.Id + ".txt", "0"), out last);
+        return AskToShare && HintCount(g) - last >= ImproveAfter;
+    }
+    public static void Answered(GameEntry g) { Config.Write("zakuro-share-answered-" + g.Id + ".txt", HintCount(g).ToString()); }
+    // "<title id>-<code hash>" of the dump, which names a shared list; null when it can't be read.
+    public static string CodeId(GameEntry g) {
+        try {
+            var psi = new ProcessStartInfo(Tool, "id \"" + g.CtrPlainRom + "\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            using (var p = Process.Start(psi)) {
+                string o = p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd(); p.WaitForExit(60000);
+                var m = System.Text.RegularExpressions.Regex.Match(o, @"nativemons: id ([0-9A-F]{16}) ([0-9A-F]{16})");
+                return m.Success ? m.Groups[1].Value + "-" + m.Groups[2].Value : null;
+            }
+        } catch { return null; }
+    }
+    // The addresses alone, for sharing: one per line.
+    public static string ShareFile(GameEntry g, string codeId) {
+        string to = Path.Combine(Dir, "share", codeId + ".hints");
+        Directory.CreateDirectory(Path.GetDirectoryName(to));
+        File.WriteAllLines(to, File.ReadAllLines(HintsOf(g)).Select(l => l.Trim()).Where(l => System.Text.RegularExpressions.Regex.IsMatch(l, "^(0x)?[0-9A-Fa-f]{1,8}$")).ToArray());
+        return to;
     }
     // Zig, the C compiler, downloaded once and checked against its pinned checksum (the one Zakuro pins).
     public static string EnsureZig() {
@@ -348,11 +382,19 @@ static class Recomp {
         finally { try { File.Delete(zip); } catch { } try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
     }
     public static ProcessStartInfo BuildStart(GameEntry g) {
-        Directory.CreateDirectory(Dir);
-        if (Directory.Exists(Work)) Directory.Delete(Work, true);
         try { File.Delete(StampOf(g)); } catch { }
-        var psi = new ProcessStartInfo(Tool, "build \"" + g.CtrPlainRom + "\" \"" + Work + "\" \"" + LibraryOf(g) + "\" --cache \"" + Cache + "\"") { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Dir, RedirectStandardOutput = true, RedirectStandardError = true };
+        return BuildInto(g, LibraryOf(g), Work);
+    }
+    static ProcessStartInfo BuildInto(GameEntry g, string library, string work) {
+        Directory.CreateDirectory(Dir);
+        if (Directory.Exists(work)) Directory.Delete(work, true);
+        string shared = Path.Combine(Path.GetDirectoryName(Config.Zakuro), "hints");
+        var psi = new ProcessStartInfo(Tool, "build \"" + g.CtrPlainRom + "\" \"" + work + "\" \"" + library + "\" --cache \"" + Cache + "\"" + (Directory.Exists(shared) ? " --shared-hints \"" + shared + "\"" : "")) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Dir, RedirectStandardOutput = true, RedirectStandardError = true };
         psi.EnvironmentVariables["PATH"] = Path.GetDirectoryName(ZigExe) + ";" + Environment.GetEnvironmentVariable("PATH");
+        string appdata = Path.Combine(Dir, "appdata"), hintsFor = Path.Combine(appdata, "3dsrecomp", g.Ctr.ToUpperInvariant() + ".hints");
+        Directory.CreateDirectory(Path.GetDirectoryName(hintsFor));
+        if (File.Exists(HintsOf(g))) File.Copy(HintsOf(g), hintsFor, true); else if (File.Exists(hintsFor)) File.Delete(hintsFor);
+        psi.EnvironmentVariables["APPDATA"] = appdata;
         psi.EnvironmentVariables["CC"] = "zig cc";
         psi.EnvironmentVariables["NATIVEMONS_RECOMP_COMPILER"] = "zig " + ZigVersion;
         psi.EnvironmentVariables["ZIG_GLOBAL_CACHE_DIR"] = Path.Combine(Dir, "zig-cache");
@@ -367,9 +409,68 @@ static class Recomp {
         try { if (Directory.Exists(Path.Combine(Dir, "zig-cache"))) Directory.Delete(Path.Combine(Dir, "zig-cache"), true); } catch { }
         // The linker's debug file (about 750 MB) and import library aren't needed to play.
         foreach (var pattern in new[] { "*.pdb", "*.lib", "*.part" }) foreach (var f in Directory.GetFiles(Dir, pattern)) try { File.Delete(f); } catch { }
-        try { if (ok) File.WriteAllText(StampOf(g), RomKey(g)); else if (File.Exists(LibraryOf(g)) && code != 0) File.Delete(LibraryOf(g)); } catch { }
+        try { if (ok) File.WriteAllLines(StampOf(g), new[] { RomKey(g), HintCount(g).ToString() }); else if (File.Exists(LibraryOf(g)) && code != 0) File.Delete(LibraryOf(g)); } catch { }
         PruneCache(3L << 30);
         return ok;
+    }
+    static Process quiet; static GameEntry quietFor;
+    // For the launcher's banner: what's improving and how far, or what just finished (user, 2026-11-15).
+    public static volatile float QuietProgress;
+    public static string BannerTitle; public static DateTime DoneAt = DateTime.MinValue;
+    public static bool FakeRunning;
+    public static bool BannerShowing { get { return quiet != null || FakeRunning || (DateTime.Now - DoneAt).TotalSeconds < 5; } }
+    static string Next(GameEntry g) { return LibraryOf(g) + ".next"; }
+    static string QuietWork { get { return Path.Combine(Dir, "work-quiet"); } }
+    public static bool Improving(GameEntry g) { return quiet != null && quietFor != null && quietFor.Id == g.Id; }
+    public static void ImproveQuietly(GameEntry g) {
+        if (quiet != null || !File.Exists(ZigExe) || State(g) != "old") return;
+        int covered = HintCount(g);
+        try {
+            var psi = BuildInto(g, Next(g), QuietWork);
+            var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            QuietProgress = 0; BannerTitle = g.Title;
+            p.OutputDataReceived += (o, ev) => {
+                var m = ev.Data == null ? null : System.Text.RegularExpressions.Regex.Match(ev.Data, @"^nativemons: (\d+) ");
+                if (m != null && m.Success) QuietProgress = int.Parse(m.Groups[1].Value) / 100f;
+            };
+            p.Exited += delegate {
+                bool ok = false;
+                try { ok = p.ExitCode == 0 && File.Exists(Next(g)); } catch { }
+                try { if (Directory.Exists(QuietWork)) Directory.Delete(QuietWork, true); } catch { }
+                foreach (var pattern in new[] { "*.pdb", "*.lib", "*.part" }) foreach (var f in Directory.GetFiles(Dir, pattern)) try { File.Delete(f); } catch { }
+                try { if (Directory.Exists(Path.Combine(Dir, "zig-cache"))) Directory.Delete(Path.Combine(Dir, "zig-cache"), true); } catch { }
+                if (ok) { try { File.WriteAllText(Next(g) + ".covers", covered.ToString()); } catch { } SwapIn(g); DoneAt = DateTime.Now; }
+                else try { File.Delete(Next(g)); } catch { }
+                quiet = null; quietFor = null;
+            };
+            p.Start();
+            p.BeginOutputReadLine(); p.StandardError.ReadToEndAsync();
+            int half = Math.Max(1, Math.Min(64, Environment.ProcessorCount / 2));
+            try { p.PriorityClass = ProcessPriorityClass.Idle; p.ProcessorAffinity = (IntPtr)(half >= 64 ? -1L : (1L << half) - 1); } catch { }
+            quiet = p; quietFor = g;
+        } catch { quiet = null; quietFor = null; }
+    }
+    // The improved library takes over unless Zakuro has the old one open; then at the next Play.
+    public static void SwapIn(GameEntry g) {
+        try {
+            if (!File.Exists(Next(g)) || Emu3ds.Running(Emu3ds.Zakuro)) return;
+            string covers = File.Exists(Next(g) + ".covers") ? File.ReadAllText(Next(g) + ".covers").Trim() : HintCount(g).ToString();
+            File.Copy(Next(g), LibraryOf(g), true);
+            File.Delete(Next(g)); File.Delete(Next(g) + ".covers");
+            File.WriteAllLines(StampOf(g), new[] { RomKey(g), covers });
+        } catch { }
+    }
+    // A quiet rebuild cut off by the launcher closing leaves its work folder (compilers still held it): cleared at start.
+    public static void ClearLeftovers() {
+        if (quiet != null) return;
+        try { if (Directory.Exists(QuietWork)) Directory.Delete(QuietWork, true); } catch { }
+        try { if (Directory.Exists(Work)) Directory.Delete(Work, true); } catch { }
+    }
+    public static void StopQuiet() {
+        var p = quiet; if (p == null) return;
+        Stop(p);
+        try { if (Directory.Exists(QuietWork)) Directory.Delete(QuietWork, true); } catch { }
+        try { var g = quietFor; if (g != null) File.Delete(Next(g)); } catch { }
     }
     public static void Stop(Process p) {
         try { using (var k = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + p.Id) { UseShellExecute = false, CreateNoWindow = true })) k.WaitForExit(15000); } catch { }
@@ -507,8 +608,14 @@ static class Ctr3dsSaves {
     }
     // The save's 16-byte format record. Without it a game sees an unformatted save and sets up a new one over the old.
     static string EmuMeta(Emu3ds e, GameEntry g) { return EmuSave(e, g) + (e.Native ? ".format" : ".metadata"); }
-    static string EmuStates(Emu3ds e) { return e.Native ? null : Path.Combine(EmuData(e), "states"); }
-    static string[] StatesOf(string dir, GameEntry g) { return dir != null && Directory.Exists(dir) ? Directory.GetFiles(dir, g.Ctr.ToUpperInvariant() + ".*.cst") : new string[0]; }
+    // Save states: Azahar's are <title id>.<n>.cst in one folder, Zakuro's <title id>\<slot>.state (F5). They can't load
+    // in each other, so the slot keeps both kinds: Azahar's in states\, Zakuro's in states\zakuro\.
+    static string EmuStates(Emu3ds e, GameEntry g) { return e.Native ? Path.Combine(EmuData(e), "states", g.Ctr.ToUpperInvariant()) : Path.Combine(EmuData(e), "states"); }
+    static string KeptStates(Emu3ds e, GameEntry g) { return e.Native ? Path.Combine(Master(g), "states", "zakuro") : Path.Combine(Master(g), "states"); }
+    static string[] StatesOf(string dir, GameEntry g, bool native) {
+        if (dir == null || !Directory.Exists(dir)) return new string[0];
+        return native ? Directory.GetFiles(dir, "*.state") : Directory.GetFiles(dir, g.Ctr.ToUpperInvariant() + ".*.cst");
+    }
 
     public static bool IsLink(string dir) { try { return Directory.Exists(dir) && (File.GetAttributes(dir) & FileAttributes.ReparsePoint) != 0; } catch { return false; } }
     // A directory junction: no admin rights needed, unlike a symbolic link.
@@ -558,7 +665,7 @@ static class Ctr3dsSaves {
             MakeLink(link, EmuData(e));
         }
         File.WriteAllText(SessionFile(e), g.Id);
-        if (!e.Native) WriteCitraConfig(e, g);
+        if (e.Native) WriteZakuroConfig(e, g); else WriteCitraConfig(e, g);
         if (File.Exists(Main(g))) SaveGuard.Backup(g, Main(g), "before-play");
         string save = EmuSave(e, g);
         if (Directory.Exists(Path.Combine(Master(g), "data"))) {
@@ -573,11 +680,10 @@ static class Ctr3dsSaves {
             CopyDir(save, aside); Directory.Delete(save, true);
             if (EmuMeta(e, g) != null && File.Exists(EmuMeta(e, g))) File.Delete(EmuMeta(e, g));
         }
-        string states = EmuStates(e);
-        if (states != null) {
-            foreach (var f in StatesOf(states, g)) File.Delete(f);
-            foreach (var f in StatesOf(Path.Combine(Master(g), "states"), g)) SaveGuard.WriteInPlace(f, Path.Combine(states, Path.GetFileName(f)));
-        }
+        string states = EmuStates(e, g);
+        Directory.CreateDirectory(states);
+        foreach (var f in StatesOf(states, g, e.Native)) File.Delete(f);
+        foreach (var f in StatesOf(KeptStates(e, g), g, e.Native)) SaveGuard.WriteInPlace(f, Path.Combine(states, Path.GetFileName(f)));
     }
     // After play: take the save and states back, then unlink. Null when done, or why the save stayed where it was.
     public static string Collect(Emu3ds e, GameEntry g) {
@@ -596,17 +702,71 @@ static class Ctr3dsSaves {
                 Mirror(save, Path.Combine(Master(g), "data"));
                 if (EmuMeta(e, g) != null && File.Exists(EmuMeta(e, g))) SaveGuard.WriteInPlace(EmuMeta(e, g), Path.Combine(Master(g), "metadata"));
             }
-            string states = EmuStates(e);
-            if (states != null) {
-                string kept = Path.Combine(Master(g), "states");
-                Directory.CreateDirectory(kept);
-                foreach (var f in StatesOf(kept, g)) File.Delete(f);
-                foreach (var f in StatesOf(states, g)) SaveGuard.WriteInPlace(f, Path.Combine(kept, Path.GetFileName(f)));
-            }
+            string states = EmuStates(e, g), kept = KeptStates(e, g);
+            Directory.CreateDirectory(kept);
+            foreach (var f in StatesOf(kept, g, e.Native)) File.Delete(f);
+            foreach (var f in StatesOf(states, g, e.Native)) SaveGuard.WriteInPlace(f, Path.Combine(kept, Path.GetFileName(f)));
             try { File.Delete(SessionFile(e)); } catch { }
             return note;
         } catch (Exception x) { return "Your save stayed in the emulator's folder and is collected next time: " + x.Message; }
         finally { try { Unlink(e); } catch { } }
+    }
+    // Zakuro's settings.toml (APPDATA points inside its data folder): the launcher's volume and scaling every play, and
+    // the controller by the letters on its buttons once, as on Fulldex. Its keyboard defaults already are Fulldex's keys.
+    // A window that fits the screen, so its Esc menu (drawn inside the window) shows whole: the biggest whole scale of
+    // the layout Zakuro is set to (sizes from zakuro-gpu's ScreenLayout::size_f).
+    public static int ZakuroScale(Rectangle area) {
+        string layout = "stacked";
+        try {
+            string file = Path.Combine(EmuData(Emu3ds.Zakuro), "appdata", "zakuro", "settings.toml");
+            var line = File.Exists(file) ? File.ReadAllLines(file).FirstOrDefault(l => l.StartsWith("layout =")) : null;
+            if (line != null) layout = line.Substring(8).Trim().Trim('"');
+        } catch { }
+        int w = layout == "large_top" ? 560 : layout == "side_by_side" ? 720 : layout == "bottom_only" ? 320 : 400;
+        int h = layout == "stacked" ? 480 : 240;
+        return Math.Max(1, Math.Min(6, Math.Min((area.Height - 70) / h, (area.Width - 80) / w)));
+    }
+    static void WriteZakuroConfig(Emu3ds e, GameEntry g) {
+        string file = Path.Combine(EmuData(e), "appdata", "zakuro", "settings.toml"), mark = Path.Combine(EmuData(e), "nativemons-defaults-3.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(file));
+        var lines = File.Exists(file) ? File.ReadAllLines(file).ToList() : new List<string>();
+        var w = GameOptions.ForGame(g);
+        string v;
+        if (w.TryGetValue("vol", out v)) {
+            SetToml(lines, null, "volume", (int.Parse(v) / 100.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+            SetToml(lines, null, "mute", "false");
+        }
+        if (w.TryGetValue("smooth", out v)) SetToml(lines, null, "filter", v == "off" ? "\"pixels\"" : "\"smooth\"");
+        // The 60 fps switch on the game's page: Zakuro's enhancement of that name, for this title.
+        SetToml(lines, "enhancements", g.Ctr.ToUpperInvariant(), Config.Read("zakuro-60fps-" + g.Id + ".txt", "off") == "on" ? "[\"60 FPS\"]" : "[]");
+        // Big top screen, small bottom one by default (user, 2026-11-15); a layout picked in Zakuro (F9 or its menu) stays.
+        string layoutMark = Path.Combine(EmuData(e), "nativemons-layout-1.txt");
+        if (!File.Exists(layoutMark)) { SetToml(lines, null, "layout", "\"large_top\""); File.WriteAllText(layoutMark, "large_top"); }
+        if (!File.Exists(mark)) {
+            // ZR off the right trigger: Zakuro then fast-forwards while it's held, as Fulldex does (user, 2026-11-15). On C,
+            // a button Xbox and PlayStation pads don't have: "Unknown" makes gilrs panic (exit 101).
+            foreach (var b in new[] { new[] { "a", "South" }, new[] { "b", "East" }, new[] { "x", "West" }, new[] { "y", "North" }, new[] { "zr", "C" } }) SetToml(lines, "pad", b[0], "\"" + b[1] + "\"");
+            File.WriteAllText(mark, "Controller by letter, set " + DateTime.Now.ToString("yyyy-MM-dd"));
+        }
+        File.WriteAllLines(file, lines.ToArray());
+    }
+    // One key in a TOML table (null: the top, before any table).
+    static void SetToml(List<string> lines, string table, string key, string value) {
+        int start = 0;
+        if (table != null) {
+            start = lines.FindIndex(l => l.Trim() == "[" + table + "]");
+            if (start < 0) { if (lines.Count > 0 && lines[lines.Count - 1].Trim() != "") lines.Add(""); lines.Add("[" + table + "]"); start = lines.Count - 1; }
+            start++;
+        }
+        int end = lines.FindIndex(start, l => l.TrimStart().StartsWith("["));
+        if (end < 0) end = lines.Count;
+        for (int i = start; i < end; i++) {
+            var t = lines[i].TrimStart();
+            if (t.StartsWith(key + " =") || t.StartsWith(key + "=")) { lines[i] = key + " = " + value; return; }
+        }
+        int at = end;
+        while (at > start && lines[at - 1].Trim() == "") at--;
+        lines.Insert(at, key + " = " + value);
     }
     // One "key=value" in a section of a Qt settings file, with Qt's "\default=false" so the emulator keeps it.
     static void SetIni(List<string> lines, string section, string key, string value) {
@@ -680,11 +840,15 @@ static class Ctr3dsSaves {
     // When the launcher changes a save (Move Pokemon), the slot's states go to the backups with the old save,
     // so loading an old state can't undo the change (user, 2026-11-13).
     public static void StashStates(GameEntry g, string reason) {
-        var states = StatesOf(Path.Combine(Master(g), "states"), g);
+        string zakuro = Path.Combine(Master(g), "states", "zakuro");
+        var states = StatesOf(Path.Combine(Master(g), "states"), g, false).Concat(StatesOf(zakuro, g, true)).ToArray();
         if (states.Length == 0) return;
         string to = Path.Combine(SaveGuard.BackupFolder(g), "states-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-" + reason);
         Directory.CreateDirectory(to);
-        foreach (var f in states) { SaveGuard.WriteInPlace(f, Path.Combine(to, Path.GetFileName(f))); File.Delete(f); }
+        foreach (var f in states) {
+            string name = f.StartsWith(zakuro) ? "zakuro-" + Path.GetFileName(f) : Path.GetFileName(f);
+            SaveGuard.WriteInPlace(f, Path.Combine(to, name)); File.Delete(f);
+        }
     }
 }
 
@@ -2790,11 +2954,11 @@ static class GameOptions {
         new GameOption { Key = "frame", Name = "Text frame", Icon = '\uE8A9', Values = Enumerable.Range(1, 20).Select(i => i.ToString()).ToArray(), Labels = Enumerable.Range(1, 20).Select(i => "Type " + i).ToArray(), GameOnly = true, FirstGen = 3 },
         // Volumes in 5% steps; an engine with coarser steps gets the nearest it has (ApplyEngineOptions).
         new GameOption { Key = "vol", Name = "Volume", Icon = '\uE767', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "Overall volume, on every engine. Fulldex and the GBA player go in steps of 10% and Gen1Recomp has 8 levels, so they use the nearest one." },
-        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
-        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port and the 3DS emulators only have the overall volume." },
+        new GameOption { Key = "music", Name = "Music volume", Icon = '\uE8D6', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port, 3DSrecomp+Zakuro and the 3DS emulators only have the overall volume." },
+        new GameOption { Key = "sfx", Name = "Sound effects", Icon = '\uE7F6', Engine = true, Values = Percents(), Labels = PercentLabels(), Note = "On Gen1Recomp and nativeplat. Fulldex, the Platinum PC port, 3DSrecomp+Zakuro and the 3DS emulators only have the overall volume." },
         new GameOption { Key = "full", Name = "Fullscreen", Icon = '\uE740', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "On every engine." },
         new GameOption { Key = "wide", Name = "Widescreen", Icon = '\uE799', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "The world on Fulldex and nativeplat, and battles on Gen1Recomp. The Platinum PC port doesn't have it." },
-        new GameOption { Key = "smooth", Name = "Smooth scaling", Icon = '\uE91B', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "Softens the picture on Fulldex and nativeplat, instead of sharp pixels." },
+        new GameOption { Key = "smooth", Name = "Smooth scaling", Icon = '\uE91B', Engine = true, Values = new[] { "on", "off" }, Labels = new[] { "On", "Off" }, Note = "Softens the picture on Fulldex, nativeplat and 3DSrecomp+Zakuro, instead of sharp pixels." },
     };
     public static int Generation(GameEntry g) {
         if (g.Console == "Game Boy") return 1;
@@ -3814,12 +3978,12 @@ class LauncherForm : Form {
                 && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None)) {
                 e.Cancel = true; powerOff = (float)clock.Elapsed.TotalSeconds; powerTop = Top;
                 // Background engines (waiting game, snapshot, picture capture) close during the animation, not after it.
-                DropReady(); StopSnapshot(); GameArt.StopNow(); return;
+                DropReady(); StopSnapshot(); GameArt.StopNow(); Recomp.StopQuiet(); return;
             }
             if (e.Cancel) return;
             // The wait below still runs timer ticks: nothing may start a new background engine now.
             closing = true;
-            Hide(); DropReady(); StopSnapshot(); GameArt.StopNow();
+            Hide(); DropReady(); StopSnapshot(); GameArt.StopNow(); Recomp.StopQuiet();
             var d = dropping; if (d != null) d.Wait(18000);
         };
         // A device standing upright: no window frame, the window's own outline is the shell's.
@@ -3887,6 +4051,7 @@ class LauncherForm : Form {
             if (clashGame == null) { clashGame = Library.Games.Find(x => x.OnGen1); clashCount = 1; }
             clashAt = -100;
         }
+        if (screen == "improvebanner") { Recomp.BannerTitle = "Pokemon Y"; Recomp.QuietProgress = 0.45f; Recomp.DoneAt = DateTime.Now.AddSeconds(-30); Recomp.FakeRunning = true; }
         if (screen == "updatebanner") { Updater.Latest = new Updater.Release { build = Updater.Build + 1, sha256 = "preview" }; bannerBuild = Updater.Latest.build; bannerAt = -1; }
         if (screen == "splash") { starting = true; startSince = DateTime.Now.AddSeconds(-4); startStage = "Looking for your games"; }
         else pages.Push(MainPage());
@@ -4403,6 +4568,8 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Fulldex", "", File.Exists(Config.Fulldex), delegate { OpenEngineSettings("fulldex"); }) { Icon = '\uE7FC', Info = "DS and GBA games: widescreen, frame rate and resolution." });
         p.Items.Add(new Item("Gen1Recomp", "", File.Exists(Path.Combine(Config.Gen1, "main.lua")), delegate { OpenEngineSettings("gen1"); }) { Icon = '\uE7FC', Info = "Game Boy, Game Boy Color and GBA games: text speed and battles." });
         p.Items.Add(new Item("3DS games: " + (Emu3ds.Enabled ? "On" : "Off"), "", true, delegate { Emu3ds.Enabled = !Emu3ds.Enabled; pages.Pop(); pages.Push(SettingsPage()); ReplaceMain(); }) { Icon = '', Tint = AppColors[App("Emu")], Info = "Play your Nintendo 3DS Pokemon games with an emulator you choose, from Emu on the home screen. Nothing downloads until you pick one. Select to turn it " + (Emu3ds.Enabled ? "off" : "on") + "." });
+        if (Recomp.Installed) p.Items.Add(new Item("Ask to share Zakuro findings: " + (Recomp.AskToShare ? "On" : "Off"), "", true, delegate { Recomp.AskToShare = !Recomp.AskToShare; int sel = pages.Peek().Sel; pages.Pop(); var again = SettingsPage(); again.Sel = sel; pages.Push(again); }) { Icon = '',
+            Info = "After a 3DSrecomp+Zakuro session that found new code its build missed, ask whether to share that list (addresses only) for everyone's builds. Select to turn it " + (Recomp.AskToShare ? "off" : "on") + "." });
         if (Recomp.Installed) p.Items.Add(new Item("3DS build speed: " + (Recomp.Fast ? "Fast" : "Quiet"), "", true, delegate { Recomp.Fast = !Recomp.Fast; int sel = pages.Peek().Sel; pages.Pop(); var again = SettingsPage(); again.Sel = sel; pages.Push(again); }) { Icon = '\uE7FC',
             Info = "How 3DSrecomp+Zakuro builds a game: Fast uses all but one of your " + Environment.ProcessorCount + " processor threads, Quiet half of them, both at the lowest priority. About " + Recomp.Minutes(Recomp.Cores()) + " minutes per game now. Select to switch." });
         p.Items.Add(new Item("Import saves", "", File.Exists(Config.MonBridge), delegate { OpenImportSaves(); }) { Icon = '\uE896', Info = "Bring in saves from other emulators and folders, such as those beside your ROMs." });
@@ -4815,7 +4982,7 @@ class LauncherForm : Form {
             then();
         });
     }
-    string noticeAfter;
+    string noticeAfter, noticeTitle;
     Page ConflictPage(GameEntry g, Action then) {
         var p = new Page { Title = "Which " + g.Title + " save?", Theme = g.Theme, Body = "Both engines' saves changed since they last matched, so they can't simply be merged. Choose the one to keep playing. The other is kept in your backups." };
         Action<string> use = delegate(string side) {
@@ -5988,8 +6155,21 @@ class LauncherForm : Form {
             }) { Icon = '', Info = "Puts back the bytes the header fix changed." });
         if (g.OnRecomp) {
             string st = Recomp.State(g);
-            p.Items.Add(new Item("3DSrecomp+Zakuro build: " + (st == "ready" ? "Ready" : st == "old" ? "Can be improved" : st == "outdated" ? "Needs a rebuild" : "Not built yet"), "", true, delegate { pages.Push(RecompAskPage(new List<GameEntry> { g }, null)); }) { Icon = '\uE896',
+            p.Items.Add(new Item("3DSrecomp+Zakuro build: " + (Recomp.Improving(g) ? "Improving" : st == "ready" ? "Ready" : st == "old" ? "Can be improved" : st == "outdated" ? "Needs a rebuild" : "Not built yet"), "", true, delegate { pages.Push(RecompAskPage(new List<GameEntry> { g }, null)); }) { Icon = '\uE896',
                 Info = "Its code, recompiled on this PC from your own dump so it runs natively. It never leaves this PC. Select to " + (st == "ready" ? "build it again" : "build it") + "." });
+            bool fps = Config.Read("zakuro-60fps-" + g.Id + ".txt", "off") == "on";
+            p.Items.Add(new Item("60 fps (Zakuro): " + (fps ? "On" : "Off"), "", true, delegate {
+                Config.Write("zakuro-60fps-" + g.Id + ".txt", fps ? "off" : "on");
+                RebuildTop(delegate { return GamePage(g); });
+            }) { Icon = '', Info = "A community code that doubles the frames, and with them the whole game's speed: everything runs twice as fast. It only takes on the game version it was tested on. Select to turn it " + (fps ? "off" : "on") + "." });
+            p.Items.Add(new Item("Zakuro mods folder", "", true, delegate {
+                string dir = Path.Combine(Ctr3dsSaves.EmuData(Emu3ds.Zakuro), "mods", g.Ctr.ToUpperInvariant());
+                Directory.CreateDirectory(dir);
+                try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+            }) { Icon = '', Info = "Mods for this game, laid out as for Luma3DS and Azahar (romfs, exefs, code.ips). Cheats are in the game's menu: Esc, then Cheats." });
+            int found = Recomp.HintCount(g);
+            if (found > 0) p.Items.Add(new Item("Share Zakuro findings", "", true, delegate { pages.Push(ShareHintsPage(g)); }) { Icon = '',
+                Info = "Zakuro found " + found + " places in its code that its build didn't cover. Sharing them helps everyone's builds of this game run faster." });
         }
         if (g.Roms.Count > 1) p.Items.Add(new Item("ROM version: " + g.LabelOf(g.Chosen), "", true, delegate { pages.Push(RomsPage(g)); }) { Icon = '\uE8B7', Info = g.Roms.Count + " different dumps of this game were found. " + Path.GetFileName(g.Chosen.File) + " is in use." });
         if (g.IsHack) {
@@ -7149,6 +7329,8 @@ class LauncherForm : Form {
             "Move: arrow keys or W A S D\nA: Z, Enter or Space\nB: X or Backspace\nX: C    Y: V\nL: Q    R: E\nStart: Esc\nSelect: Tab or Shift\nTouch screen: the mouse on the lower screen\n\nOptions: F10\nFast forward: hold F, or G to turn it on and off\nSpeed 1x to uncapped: 1\nRewind: hold R\nSave in the game: F1\nBack to the last save: F2 twice\nSnapshot: F5 to take, F6 for the next of 4, F7 to go back\nCamera: - and =, tilt 3 and 4, reset 0\nTouch controls: F9\nFullscreen: F11\nScreenshot: F12\n\nChange any key in Options, under Controls." },
         new[] { "Platinum PC port", "Platinum, native.",
             "Settings and debug tools: the ` key (grave, under Esc).\n\nIts other keys are listed in its own settings." },
+        new[] { "3DSrecomp+Zakuro", "X to Ultra Moon, native.",
+            "Move: arrow keys\nCircle Pad: I J K L\nA: X    B: Z\nX: S    Y: A\nL: Q    R: W\nZL: 1    ZR: 2\nStart: Enter\nSelect: Backspace\nTouch screen: the mouse on the lower screen\n\nMenu (controls, cheats, graphics): Esc\nPause: F1\nFast forward: hold Tab\nSave state: F5\nLoad state: F8\nScreen layout: F9\nFullscreen: F11\n\nA controller plays by the letters on its buttons; hold its right trigger to fast forward. Change keys and buttons in its menu (Esc), under Controls." },
         new[] { "Infinite Fusion", "Its own program.",
             "Speed up: the A key\nScreenshot: F8\nKeys and controller: F1\n\nWhether A holds or toggles the speed is set in the game's Options." },
     };
@@ -7822,6 +8004,7 @@ class LauncherForm : Form {
     }
     void PlayRecomp(GameEntry g) {
         var e = Emu3ds.Zakuro;
+        Recomp.SwapIn(g);
         if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is already open. Close it, then press Play.", null); return; }
         string st = Recomp.State(g);
         if (st == "missing" || st == "outdated") { pages.Push(RecompAskPage(new List<GameEntry> { g }, g)); return; }
@@ -7831,6 +8014,10 @@ class LauncherForm : Form {
     static string RecompAskedFile { get { return Path.Combine(Config.State, "recomp-asked.txt"); } }
     void AskAboutRecomp() {
         if (!Recomp.Installed) return;
+        Recomp.ClearLeftovers();
+        // For tests: NATIVEMONS_TEST_IMPROVE=<game> starts its quiet rebuild now, to see the banner.
+        var test = Library.Games.Find(x => x.Id == Environment.GetEnvironmentVariable("NATIVEMONS_TEST_IMPROVE"));
+        if (test != null && test.OnRecomp) Recomp.ImproveQuietly(test);
         List<string> asked;
         try { asked = File.Exists(RecompAskedFile) ? File.ReadAllLines(RecompAskedFile).ToList() : new List<string>(); } catch { asked = new List<string>(); }
         var found = Library.Games.Where(g => g.OnRecomp && g.Engine() == "recomp" && !asked.Contains(g.Ctr) && Recomp.State(g) != "ready" && Recomp.State(g) != "old").ToList();
@@ -7848,6 +8035,33 @@ class LauncherForm : Form {
         p.Items.Add(new Item(play != null ? "Build, then play" : "Build now", "", true, delegate { pages.Pop(); BuildRecomp(games, play); }) { Icon = '\uE896', Info = "Esc or B stops a build; it starts over next time." });
         if (play != null && play.On3ds) p.Items.Add(new Item("Play with " + GameEntry.EngineShort("3ds", play) + " this time", "", true, delegate { pages.Pop(); Play3ds(play); }) { Icon = '', Info = "The emulator plays it now; the build can wait." });
         p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '', Info = "Build it later from the game's page." });
+        return p;
+    }
+    // The player's list of where Zakuro interpreted (addresses only), shared through an issue on nativeMons, always asked.
+    Page ShareHintsPage(GameEntry g) { return ShareHintsPage(g, false); }
+    Page ShareHintsPage(GameEntry g, bool afterPlay) {
+        var p = new Page { Title = "Share Zakuro findings?", Theme = g.Theme, FitBody = true };
+        p.Body = "While you played " + g.Title + ", Zakuro found " + Recomp.HintCount(g) + " places in its code that its build didn't cover, so it ran them the slow way.\n\n"
+            + "Sharing them improves the game for you and every other player: a nativeMons update adds them to the shared lists, and every build of " + g.Title + " from then on covers them, yours on any PC included. That means smoother play, with fewer slowdowns in the places you've been.\n\n"
+            + "What's shared: those addresses only (numbers like 0010022D), named by the game's code version. No game code, save or anything about you.\n\n"
+            + "Share opens a form on the nativeMons GitHub page (you need a GitHub account) and shows the file to attach. Nothing is sent until you submit the form.";
+        p.Items.Add(new Item(afterPlay ? "Yes, share" : "Share", "", true, delegate {
+            pages.Pop();
+            Recomp.Answered(g);
+            string id = null, file = null;
+            Busy("Preparing the list", delegate { id = Recomp.CodeId(g); if (id != null) file = Recomp.ShareFile(g, id); return null; }, delegate(string x) {
+                if (x != null || id == null || file == null) { ShowText("Couldn't prepare it", x ?? "The game's code version couldn't be read.", null); return; }
+                try { Process.Start("explorer.exe", "/select,\"" + file + "\""); } catch { }
+                string url = "https://github.com/Hailey-Ross/nativeMons/issues/new?template=zakuro-hints.yml"
+                    + "&title=" + Uri.EscapeDataString("Zakuro hints: " + g.Title + " " + id)
+                    + "&game=" + Uri.EscapeDataString(g.Title) + "&code=" + Uri.EscapeDataString(id);
+                try { Process.Start(url); } catch { }
+                ShowText("Almost done", "Your browser shows the form, and Explorer the file " + Path.GetFileName(file) + ". Drag the file into the form and submit it. Thank you!", null);
+            });
+        }) { Icon = '', Info = "Opens the form and the file; you submit it yourself." });
+        p.Items.Add(new Item(afterPlay ? "No" : "Not now", "", true, delegate { pages.Pop(); Recomp.Answered(g); }) { Icon = '', Info = "Nothing is shared. You're asked again after more new findings." });
+        if (afterPlay) p.Items.Add(new Item("Never ask again", "", true, delegate { pages.Pop(); Recomp.Answered(g); Recomp.AskToShare = false; }) { Icon = '',
+            Info = "Stops this question for every game. Turn it back on in Settings; a game's page can still share any time." });
         return p;
     }
     Page HeaderFixPage(List<GameEntry> games, Action then) {
@@ -7929,7 +8143,11 @@ class LauncherForm : Form {
             return null;
         }, delegate(string x) {
             if (x != null || problem != null) { ShowText("Could not start " + g.Title, "Its save couldn't be handed to " + e.Short + ", so nothing was started. " + (x ?? problem), null); return; }
-            string args = e.Native ? "\"" + g.CtrPlainRom + "\" --recompiled \"" + Recomp.LibraryOf(g) + "\" --data \"" + Ctr3dsSaves.EmuData(e) + "\"" : "\"" + g.CtrRom + "\"";
+            string full;
+            bool fullscreen = GameOptions.ForGame(g).TryGetValue("full", out full) && full == "on";
+            var area = Screen.FromControl(this).WorkingArea;
+            string place = " --at " + (area.X + 40) + "," + (area.Y + 30) + " --scale " + Ctr3dsSaves.ZakuroScale(area) + " --focus-pad --fast-forward 4";
+            string args = e.Native ? "\"" + g.CtrPlainRom + "\" --recompiled \"" + Recomp.LibraryOf(g) + "\" --data \"" + Ctr3dsSaves.EmuData(e) + "\"" + place + (fullscreen ? " --fullscreen" : "") : "\"" + g.CtrRom + "\"";
             var psi = new ProcessStartInfo(e.ExePath, args) { UseShellExecute = false, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             if (e.Native) psi.EnvironmentVariables["APPDATA"] = Path.Combine(Ctr3dsSaves.EmuData(e), "appdata");
             RunJob(g.Title, psi, true, delegate(int code) {
@@ -7938,7 +8156,16 @@ class LauncherForm : Form {
                 string kept = null;
                 Busy("Collecting your save", delegate { kept = Ctr3dsSaves.Collect(e, g); return null; }, delegate(string y) {
                     if (kept != null || y != null) noticeAfter = kept ?? y;
+                    else if (e.Native && code == 0 && Recomp.State(g) == "old" && !closing) {
+                        Recomp.ImproveQuietly(g);
+                        if (Recomp.Improving(g) && !Config.Read("recomp-improve-told-" + g.Id + ".txt", "").Equals(Recomp.HintCount(g).ToString())) {
+                            Config.Write("recomp-improve-told-" + g.Id + ".txt", Recomp.HintCount(g).ToString());
+                            noticeTitle = "Improving in the background";
+                            noticeAfter = g.Title + " is being improved in the background: this session found code its build didn't cover, and a quiet rebuild covers it. Your next play uses it.";
+                        }
+                    }
                     Finished(g, code);
+                    if (e.Native && code == 0 && Recomp.ShouldAskShare(g)) pages.Push(ShareHintsPage(g, true));
                 });
             });
             // Wallpapers from this session's play, while it runs.
@@ -8600,9 +8827,9 @@ class LauncherForm : Form {
         AfterGame(g, code, delegate {
             log.Clear(); log.AddRange(kept);
             if (code != 0) ShowLog("Finished, check this", text, delegate { if (playDirect != null) Close(); else pages.Pop(); });
-            else if (noticeAfter != null) { ShowText("About your save", noticeAfter, delegate { if (playDirect != null) Close(); else pages.Pop(); }); }
+            else if (noticeAfter != null) { ShowText(noticeTitle ?? "About your save", noticeAfter, delegate { if (playDirect != null) Close(); else pages.Pop(); }); }
             else if (playDirect != null) { Close(); return; }
-            noticeAfter = null;
+            noticeAfter = null; noticeTitle = null;
             ReplaceMain();
         });
     }
@@ -8707,7 +8934,7 @@ class LauncherForm : Form {
         } catch { }
     }
     static string ControlsFor(string engine) {
-        int i = engine == "fulldex" ? 0 : engine == "gen1" ? 1 : engine == "nativeplat" ? 2 : engine == "port" ? 3 : engine == "pc" ? 4 : -1;
+        int i = engine == "fulldex" ? 0 : engine == "gen1" ? 1 : engine == "nativeplat" ? 2 : engine == "port" ? 3 : engine == "recomp" ? 4 : engine == "pc" ? 5 : -1;
         return i >= 0 ? ControlSheets[i][2] : "A controller works as on Fulldex: each button by the letter on it.\n\nFor Fulldex's keys (arrows, X, Z, S, A, Q, W, Enter, Backspace), pick the profile \"Keyboard (Fulldex keys)\" in the emulator's Controls.";
     }
     // Over the game's screen: Resume, Controls and Close game, by controller, keys or mouse. The game keeps running.
@@ -8865,7 +9092,7 @@ class LauncherForm : Form {
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         // A highlighted app moves at the full rate, so its motion stays smooth.
         if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0) Invalidate();
-        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
+        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || Recomp.BannerShowing || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         GuideTick();
         if (job != null && jobCancel != null && Form.ActiveForm == this) { ushort jb = Pad(); if ((jb & ~prevPad & B) != 0) jobCancel(); prevPad = jb; return; }
@@ -10746,6 +10973,7 @@ class LauncherForm : Form {
         StatusBar(g, w, h, home ? Color.White : PhoneText);
         float below = ClashBanner(g, w, h, t);
         UpdateBanner(g, w, h, t, below);
+        ImproveBanner(g, w, h, t, Math.Max(h * 0.052f, below) + (BannerAge(t) >= 0 ? h * 0.068f : 0));
         float barW = w * 0.34f, barH = Math.Max(3f, h * 0.0065f);
         using (var path = Round(new RectangleF((w - barW) / 2, h - barH * 2.4f, barW, barH), barH / 2)) using (var b = new SolidBrush(home ? Color.White : PhoneText)) g.FillPath(b, path);
     }
@@ -10788,6 +11016,70 @@ class LauncherForm : Form {
         // The close button first: the first match wins.
         promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(x1.X + screenX, x1.Y + screenY, x1.Width, x1.Height), "NX"));
         promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(r.X + screenX, r.Y + screenY, r.Width, r.Height), "N"));
+    }
+    // A quiet 3DSrecomp+Zakuro rebuild: a pill like the update notice, with its progress along the bottom; then
+    // "<game> improved" for a few seconds.
+    float improveAt = float.NaN, improveShown, improveLast;
+    void ImproveBanner(Graphics g, int w, int h, float t, float top) {
+        if (!Recomp.BannerShowing || starting || job != null || Recomp.BannerTitle == null) { improveAt = float.NaN; improveShown = 0; return; }
+        if (float.IsNaN(improveAt)) { improveAt = t; improveLast = t; }
+        bool done = (DateTime.Now - Recomp.DoneAt).TotalSeconds < 5;
+        // The bar glides toward the build's progress (cached builds report in big steps), quicker the further it is.
+        float target = done ? 1f : Recomp.QuietProgress, dt = Math.Max(0, Math.Min(0.1f, t - improveLast)); improveLast = t;
+        improveShown += (target - improveShown) * Math.Min(1f, dt * 3.5f);
+        float show = Ease((t - improveAt) / 0.28f);
+        if (done) show = Math.Min(show, Ease((5f - (float)(DateTime.Now - Recomp.DoneAt).TotalSeconds) / 0.28f));
+        int pct = (int)Math.Round(improveShown * 100);
+        string text = done ? Recomp.BannerTitle + " improved" : "Improving " + Recomp.BannerTitle + " · " + pct + "%";
+        float bh = h * 0.056f, y = top - (1 - show) * (bh + h * 0.06f), rad = bh / 2;
+        float pad = bh * 0.16f, size = bh - 2 * pad;
+        float textW = g.MeasureString(text, smallBold).Width + pad;
+        float bw = Math.Min(w * 0.9f, pad + size + pad * 1.4f + textW + pad * 1.6f);
+        var r = new RectangleF((w - bw) / 2, y, bw, bh);
+        using (var shadow = Round(new RectangleF(r.X, r.Y + h * 0.004f, r.Width, r.Height), rad)) using (var b = new SolidBrush(Color.FromArgb((int)(55 * show), 0, 0, 0))) g.FillPath(b, shadow);
+        using (var body = Round(r, rad)) using (var b = new SolidBrush(Color.FromArgb((int)(248 * show), 252, 252, 254))) g.FillPath(b, body);
+        var icon = new RectangleF(r.X + pad, r.Y + pad, size, size);
+        Card(g, icon, size / 2, Color.FromArgb(60, 190, 110), Color.FromArgb(34, 150, 80), Color.Empty, 0);
+        // The arrows turn while it works, around their own drawn center (a glyph sits off its text box's center); a
+        // check when it's done.
+        if (done) Write(g, "", iconSmall, Color.White, icon, StringAlignment.Center, StringAlignment.Center, false);
+        else using (var glyph = new System.Drawing.Drawing2D.GraphicsPath()) {
+            glyph.AddString("", iconSmall.FontFamily, (int)iconSmall.Style, iconSmall.SizeInPoints * g.DpiY / 72f, PointF.Empty, StringFormat.GenericTypographic);
+            var bb = glyph.GetBounds();
+            float cx = icon.X + size / 2, cy = icon.Y + size / 2;
+            using (var m = new System.Drawing.Drawing2D.Matrix()) {
+                m.Translate(cx, cy);
+                m.Rotate((t - improveAt) * 140f % 360f);
+                m.Translate(-(bb.X + bb.Width / 2), -(bb.Y + bb.Height / 2));
+                glyph.Transform(m);
+            }
+            var mode = g.SmoothingMode; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var b = new SolidBrush(Color.FromArgb((int)(255 * show), 255, 255, 255))) g.FillPath(b, glyph);
+            g.SmoothingMode = mode;
+        }
+        float x = icon.Right + pad * 1.4f;
+        Write(g, text, smallBold, PhoneText, new RectangleF(x, r.Y, r.Right - pad - x, bh * 0.92f), StringAlignment.Near, StringAlignment.Center, false);
+        // The bar: along the bottom of the text, inside the pill.
+        float barH = Math.Max(2f, bh * 0.07f), barW = r.Right - pad * 1.6f - x, barY = r.Bottom - pad - barH;
+        using (var track = Round(new RectangleF(x, barY, barW, barH), barH / 2)) using (var b = new SolidBrush(Color.FromArgb((int)(40 * show), 0, 0, 0))) g.FillPath(b, track);
+        float fill = Math.Max(0.03f, Math.Min(1f, improveShown));
+        var filled = new RectangleF(x, barY, barW * fill, barH);
+        using (var bar = Round(filled, barH / 2)) {
+            using (var b = new SolidBrush(Color.FromArgb((int)(255 * show), 52, 168, 90))) g.FillPath(b, bar);
+            // A light sweep along the filled part while it works.
+            if (!done && filled.Width > barH * 2) {
+                float band = Math.Max(barH * 6, barW * 0.22f), sweep = ((t - improveAt) % 1.4f) / 1.4f, bx = filled.X - band + (filled.Width + band) * sweep;
+                var keepClip = g.Clip; g.SetClip(bar, System.Drawing.Drawing2D.CombineMode.Intersect);
+                using (var lg = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(bx, barY, band, barH), Color.FromArgb(0, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 0f)) {
+                    var blend = new System.Drawing.Drawing2D.ColorBlend(3);
+                    blend.Colors = new[] { Color.FromArgb(0, 255, 255, 255), Color.FromArgb((int)(150 * show), 255, 255, 255), Color.FromArgb(0, 255, 255, 255) };
+                    blend.Positions = new[] { 0f, 0.5f, 1f };
+                    lg.InterpolationColors = blend;
+                    g.FillRectangle(lg, bx, barY, band, barH);
+                }
+                g.Clip = keepClip;
+            }
+        }
     }
     // Clashes across the Gen1Recomp games, read in the background, since each read starts the engine.
     GameEntry clashGame; int clashCount; float clashAt = float.NaN; bool clashReading, clashAgain, wasInMods;
