@@ -526,9 +526,14 @@ if (On 'play') {
         if ($game) {
           if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
           elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) {
-            # Fulldex titles every DS window "Pokemon SoulSilver" (2026-11-15): for it, the ROM it was started with decides.
+            # Fulldex titles every DS window "Pokemon SoulSilver" (2026-11-15), and GBA games with an accented path get a
+            # plain-named copy: for it, wrong only when the title names another game AND the ROM it got isn't this one's.
             $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").CommandLine
-            $wrong = if ($l.En -eq 'fulldex') { $want = ($romLines | Where-Object { $_ -match "^$($l.Id) " } | Select-Object -First 1) -replace '^.*\| fulldex=(.*?) \|.*$', '$1'; $want -and $cmd -notlike "*$want*" } else { WrongGame $l.Id $game.MainWindowTitle }
+            $wrong = WrongGame $l.Id $game.MainWindowTitle
+            if ($wrong -and $l.En -eq 'fulldex') {
+              $want = (@(Get-Content "$Report\roms.txt" -Encoding UTF8) | Where-Object { $_ -match "^$($l.Id) " } | Select-Object -First 1) -replace '^.*\| fulldex=(.*?) \|.*$', '$1'
+              $wrong = -not ($want -and $cmd -like "*$want*")
+            }
             if ($wrong) {
               $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").CommandLine -replace '"[^"]*\\([^\\"]+)"', '"$1"'
               $par = (Get-CimInstance Win32_Process -Filter "ProcessId=$((Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").ParentProcessId)").CommandLine -replace '"[^"]*\\([^\\"]+)"', '"$1"'
