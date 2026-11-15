@@ -15,6 +15,8 @@ It runs as the sync GitHub App, so its commits show as the App's bot, with the s
 | Hailey-Ross/AzaharPlus | `AzaharPlus` | AzaharPlus/AzaharPlus | upstream's latest release only |
 | Hailey-Ross/pokeplatinum | `pc_port` | cybervisi0n/pokeplatinum | no: the fork only follows upstream; packages use upstream's release |
 | Hailey-Ross/3dsrecomp | `main` | fearkov/3dsrecomp | no: watched only, not used yet |
+| Hailey-Ross/PKHeX | `master` | kwsch/PKHeX | no: followed only; mon-bridge uses the PKHeX.Core NuGet package (checked by engine-updates) |
+| Hailey-Ross/OpenHome | `main` | andrewbenington/OpenHome | no: the converter builds from the fork at the pinned release's commit; a new release opens an issue |
 | Hailey-Ross/zakuro | `main` | fearkov/zakuro | yes: adds `crates/nativemons-recomp` and the Windows release; packages use `windows-<sha9>` (`zakuroRelease`, moved by `pin_zakuro`) |
 
 1. The liaison branch fast-forwards to upstream. If it can't (it has commits of its own), the run stops for that fork.

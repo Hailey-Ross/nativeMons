@@ -5,7 +5,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$openHome = 'v1.18.1'; $node = '24.16.0'; $wasmPack = '0.13.1'; $esbuild = '0.25.0'
+# OpenHome comes from our fork, at the commit of the release tag (forks don't carry upstream's tags).
+$openHome = 'v1.19.1'; $openHomeCommit = '1b3a868195d673883f89bc389642059c5c3ee8eb'
+$node = '24.16.0'; $wasmPack = '0.13.1'; $esbuild = '0.25.0'
 $here = $PSScriptRoot
 $mark = Join-Path $Out '.nativemons-version'
 $version = "$openHome-$node"
@@ -21,7 +23,9 @@ $Work = (Resolve-Path -LiteralPath $Work).Path
 $Out = (Resolve-Path -LiteralPath $Out).Path
 $src = Join-Path $Work 'src'
 if (-not (Test-Path -LiteralPath (Join-Path $src 'package.json'))) {
-    Run git clone -q --depth 1 --branch $openHome https://github.com/andrewbenington/OpenHome.git $src
+    Run git init -q $src
+    Run git -C $src fetch -q --depth 1 https://github.com/Hailey-Ross/OpenHome.git $openHomeCommit
+    Run git -C $src checkout -q FETCH_HEAD
 }
 $env:CARGO_TARGET_DIR = Join-Path $Work 'target'
 $env:CARGO_BUILD_JOBS = '4'

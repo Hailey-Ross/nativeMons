@@ -217,6 +217,11 @@ check_releases() {
   [ -n "$newest" ] && [ "$newest" != "$platinum_tag" ] && problem "Platinum port $newest released" "We pin \`$platinum_tag\`. A new port needs its save format checked (Continue on a DS save, its own save passes mon-bridge check) before the pin moves (skill upstream-sync)."
   digest=$(gh api "repos/cybervisi0n/pokeplatinum/releases/tags/$platinum_tag" --jq '[.assets[] | select(.name | test("win")) | .digest][0]')
   [ -n "$digest" ] && ! grep -qx "Platinum $digest" "$pins" && problem "Platinum port $platinum_tag re-uploaded" "Its files changed under the same tag. Check the save padding, then update .github/engine-sync/pins.txt."
+
+  # OpenHome's converter is built from our fork at a release's commit (tools/openhome-bridge/build.ps1).
+  local openhome_tag; openhome_tag=$(grep -oP "openHome = '\K[^']+" "$REPO_DIR/tools/openhome-bridge/build.ps1")
+  newest=$(gh api "repos/andrewbenington/OpenHome/releases?per_page=10" --jq '[.[].tag_name | select(test("^v[0-9]"))][0]')
+  [ -n "$newest" ] && [ "$newest" != "$openhome_tag" ] && problem "OpenHome $newest released" "We build the converter from \`$openhome_tag\`. Move \`openHome\` and \`openHomeCommit\` in tools/openhome-bridge/build.ps1 to $newest, rebuild, and rerun the Move Pokemon conversions on save copies."
   return 0
 }
 
@@ -232,6 +237,9 @@ sync_fork PlatinumPort "$OWNER/pokeplatinum" cybervisi0n/pokeplatinum pc_port 0
 # The 3dsrecomp fork is only watched.
 sync_fork 3dsrecomp "$OWNER/3dsrecomp" fearkov/3dsrecomp main 0
 sync_fork Zakuro "$OWNER/zakuro" fearkov/zakuro main 1
+# The save tools' sources: mon-bridge uses PKHeX.Core from NuGet, the OpenHome converter builds from our fork.
+sync_fork PKHeX "$OWNER/PKHeX" kwsch/PKHeX master 0
+sync_fork OpenHome "$OWNER/OpenHome" andrewbenington/OpenHome main 0
 
 pin_submodule Gen1Recomp engines/gen1recomp "$(cat "$WORK/Gen1Recomp.head")"
 pin_submodule Fulldex engines/fulldex "$(cat "$WORK/Fulldex.head")"
