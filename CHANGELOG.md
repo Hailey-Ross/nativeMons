@@ -2,11 +2,12 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
-## Next
+## 0.0.7
 
 - 3DSrecomp+Zakuro, a native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon: each game's code is recompiled once on your PC from your own decrypted dump, then runs in Zakuro. The launcher asks before each build (about 10 to 20 minutes per game, at the lowest priority, Fast or Quiet in Settings), and saves move freely between it and the emulators.
 - 3DSrecomp+Zakuro: Fulldex's controls and a controller by its letters, the launcher's volume, fullscreen and smooth scaling, save states in each save slot, a 60 fps switch and a mods folder on the game's page, and its own Controls sheet. It opens on the launcher's screen with the big top screen, fast-forwards (up to 4x) on the right trigger, and ignores the controller behind the guide overlay. After a session that found code its build missed, the game is rebuilt quietly in the background, with a progress banner, and the launcher asks whether to share those findings for everyone's builds (yes, no, or never ask again).
 - Move Pokemon: OpenHome's converter v1.19.1. A Pokemon moved back to Gen 3 from Gen 4 or 5 now shows as met in a trade, not at an unrelated place.
+- New 3DS games found at start-up are set up together: their headers fixed if needed (asked first) and built one by one in the background, with a progress banner, while you use the launcher.
 - Fix 3DS header: a decrypted 3DS dump whose header still says encrypted can be fixed from its page (2 bytes, with a backup and Undo), so 3DSrecomp+Zakuro takes it.
 - Gen1Recomp: the latest upstream updates, with story script, battle and Gen 2 fixes, plus mail and Quest Log fixes for FireRed and LeafGreen. Red, Blue, Yellow, Gold, Silver and Crystal are prepared again from your ROM the next time they start.
 - An encrypted 3DS dump always plays with AzaharPlus, even when Azahar is the emulator picked: Azahar only opens decrypted dumps. A decrypted dump of the same game is still used with Azahar.
