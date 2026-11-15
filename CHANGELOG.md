@@ -4,7 +4,9 @@ Each notable stable release raises the version, and its section here becomes its
 
 ## Next
 
-- 3DSrecomp+Zakuro, a native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun and Ultra Moon: each game's code is recompiled once on your PC from your own decrypted dump, then runs in Zakuro. The launcher asks before each build (about 10 to 20 minutes per game, at the lowest priority, Fast or Quiet in Settings), and saves move freely between it and the emulators.
+- 3DSrecomp+Zakuro, a native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon: each game's code is recompiled once on your PC from your own decrypted dump, then runs in Zakuro. The launcher asks before each build (about 10 to 20 minutes per game, at the lowest priority, Fast or Quiet in Settings), and saves move freely between it and the emulators.
+- Move Pokemon: OpenHome's converter v1.19.1. A Pokemon moved back to Gen 3 from Gen 4 or 5 now shows as met in a trade, not at an unrelated place.
+- Fix 3DS header: a decrypted 3DS dump whose header still says encrypted can be fixed from its page (2 bytes, with a backup and Undo), so 3DSrecomp+Zakuro takes it.
 - Gen1Recomp: the latest upstream updates, with story script, battle and Gen 2 fixes, plus mail and Quest Log fixes for FireRed and LeafGreen. Red, Blue, Yellow, Gold, Silver and Crystal are prepared again from your ROM the next time they start.
 - An encrypted 3DS dump always plays with AzaharPlus, even when Azahar is the emulator picked: Azahar only opens decrypted dumps. A decrypted dump of the same game is still used with Azahar.
 

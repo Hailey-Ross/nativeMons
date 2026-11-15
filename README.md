@@ -1,12 +1,12 @@
 <p align="center"><img src="assets/banner-title.png" alt="nativeMons" width="100%"></p>
 
-[![Engine sync](https://github.com/Hailey-Ross/nativeMons/actions/workflows/engine-sync.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases)
-[![Bleeding Edge](https://github.com/Hailey-Ross/nativeMons/actions/workflows/bleeding-edge.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge)
-[![Release](https://github.com/Hailey-Ross/nativeMons/actions/workflows/release.yml/badge.svg)](https://github.com/Hailey-Ross/nativeMons/releases/latest)
+[![Engine sync](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/nativeMons/engine-sync.yml?label=Engine%20sync&style=for-the-badge)](https://github.com/Hailey-Ross/nativeMons/actions/workflows/engine-sync.yml)
+[![Bleeding Edge](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/nativeMons/bleeding-edge.yml?branch=dev&label=Bleeding%20Edge&style=for-the-badge)](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge)
+[![Release](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/nativeMons/release.yml?branch=main&label=Release&style=for-the-badge)](https://github.com/Hailey-Ross/nativeMons/releases/latest)
 
 One launcher for native Pokémon ports on Windows, with a menu for controller, keyboard and mouse. It starts each game
-through its own engine, and the engines stay forks that keep pulling their upstream updates. The 3DS games play through
-an optional 3DS emulator built from our own fork. It also installs and runs the fan game Pokémon Infinite Fusion, and
+through its own engine, and the engines stay forks that keep pulling their upstream updates. The 3DS games play natively
+with 3DSrecomp+Zakuro, built once on your PC from your own dump, or through an optional 3DS emulator, each from our own fork. It also installs and runs the fan game Pokémon Infinite Fusion, and
 any other self-contained PC game you add.
 
 No games are included: you need your own ROMs. Not affiliated with or endorsed by Nintendo, Creatures Inc.,
@@ -16,23 +16,31 @@ GAME FREAK inc. or The Pokémon Company.
 
 ## Supported games
 
-| Generation | Game | Gen1Recomp | Fulldex | Platinum PC port | nativeplat | 3DSrecomp+Zakuro | 3DS emulator |
-|---|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| 1 | Red, Blue, Yellow | ✓ | | | | | |
-| 2 | Gold, Silver, Crystal | ✓ | | | | | |
-| 3 | Ruby, Sapphire | ✓ | | | | | |
-| 3 | FireRed, LeafGreen, Emerald | ✓ | ✓ | | | | |
-| 4 | Diamond, Pearl | | | | ✓ | | |
-| 4 | HeartGold, SoulSilver | | ✓ | | | | |
-| 4 | Platinum | | ✓ | ✓ | ✓ | | |
-| 5 | Black, White, Black 2, White 2 | | ✓ | | | | |
-| 6 | X, Y, Omega Ruby, Alpha Sapphire | | | | | ✓ | ✓ |
-| 7 | Sun, Ultra Sun, Ultra Moon | | | | | ✓ | ✓ |
-| 7 | Moon | | | | | | ✓ |
+Each game starts with the first engine listed; its page switches to another.
+
+### Generations 1 to 5
+
+| Gen | Games | Engines |
+|:-:|---|---|
+| 1 | Red, Blue, Yellow | Gen1Recomp |
+| 2 | Gold, Silver, Crystal | Gen1Recomp |
+| 3 | Ruby, Sapphire | Gen1Recomp |
+| 3 | FireRed, LeafGreen, Emerald | Fulldex, Gen1Recomp |
+| 4 | Diamond, Pearl | nativeplat |
+| 4 | HeartGold, SoulSilver | Fulldex |
+| 4 | Platinum | Fulldex, Platinum PC port, nativeplat |
+| 5 | Black, White, Black 2, White 2 | Fulldex |
+
+### Generations 6 and 7 (3DS)
+
+| Gen | Games | Engines |
+|:-:|---|---|
+| 6 | X, Y, Omega Ruby, Alpha Sapphire | **3DSrecomp+Zakuro** (recommended), 3DS emulator |
+| 7 | Sun, Moon, Ultra Sun, Ultra Moon | **3DSrecomp+Zakuro** (recommended), 3DS emulator |
 
 Plus **[Pokémon Infinite Fusion](#pokémon-infinite-fusion)**, a PC fan game with no ROM, which the launcher installs and runs as its own program.
 
-**3DS games** play natively with [3DSrecomp+Zakuro](#3dsrecompzakuro), built once on your PC from your own dump, or through an optional [3DS emulator](#3ds-games): AzaharPlus (recommended) or Azahar, installed from the launcher only if you want them. Switch games aren't supported.
+**3DS games** play best natively with [3DSrecomp+Zakuro](#3dsrecompzakuro), recommended over emulation: it runs more smoothly, and each game is built once on your PC from your own dump. A [3DS emulator](#3ds-games) is the fallback, for encrypted dumps: AzaharPlus (recommended of the two) or Azahar, installed from the launcher only if you want them. Switch games aren't supported.
 
 **Several copies of a game:** if your folders hold more than one version, such as Rev 0 and Rev 1, the game's page gets a **ROM version** row to choose between them.
 
@@ -132,9 +140,10 @@ X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon play throu
 - **My Collection** counts their Pokédex, and **Move Pokemon** moves box Pokémon in and out of them (Gen 6 and 7, the same rules as the other games). After a move, that save slot's save states go to its backups, so loading an old one can't undo the move. Export and import of 3DS saves aren't there yet.
 ### 3DSrecomp+Zakuro
 
-A native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun and Ultra Moon: the ones Zakuro lists as playable with recompiled code (Moon joins when it does). [3dsrecomp](https://github.com/fearkov/3dsrecomp) turns your game's code into C and compiles it into a library that [Zakuro](https://github.com/fearkov/zakuro) runs, in place of emulating the CPU. It comes with nativeMons, in `engines\zakuro`, and needs a decrypted dump.
+Recommended over the emulators for the games it runs: they play more smoothly. A native engine for X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon: the ones Zakuro lists as playable with recompiled code, plus Moon, which Zakuro doesn't list yet but which we tested ourselves (its code is almost all Sun's, and it plays the same). [3dsrecomp](https://github.com/fearkov/3dsrecomp) turns your game's code into C and compiles it into a library that [Zakuro](https://github.com/fearkov/zakuro) runs, in place of emulating the CPU. It comes with nativeMons, in `engines\zakuro`, and needs a decrypted dump.
 
 - **Built on your PC, once per game.** No game code is in nativeMons or its downloads: the launcher asks once when it finds a supported dump, or when you press Play, and builds it from your own dump into `state\3ds\recomp`, where it stays. About 10 to 20 minutes per game on a typical PC, at the lowest priority; **Settings > 3DS build speed** picks Fast (all but one processor thread) or Quiet (half). Esc or B stops a build. A sister game (X after Y, and so on) builds faster, from the parts they share. The first build downloads Zig, the C compiler it uses (about 100 MB, checked against a pinned checksum).
+- **A decrypted dump whose header still says encrypted** (some decrypting tools leave it that way, often for Omega Ruby, Alpha Sapphire and the Sun and Moon games) is refused by Zakuro and 3dsrecomp. The game's page, and the build itself, offer **Fix 3DS header**: it checks the game really is decrypted, then changes 2 bytes of the header as GodMode9 does, keeping the original bytes in `state\3ds\header-backups`. **Undo 3DS header fix** puts them back. Emulators play the dump the same either way.
 - **Saves** are the same as with the emulators, so a game can switch between 3DSrecomp+Zakuro and AzaharPlus or Azahar and keep its save (tested both ways on Pokémon Y).
 - **Known issues:** some cutscenes miss textures or draw the sky wrong. Zakuro's mail and similar extra data aren't carried between engines, as with the emulators.
 
@@ -242,9 +251,9 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 | `engines/fulldex` | DS and GBA games in widescreen at 60 fps. Packages use its published Windows build | [mamesj/pokemon-fulldex](https://github.com/mamesj/pokemon-fulldex), a fork of [ClickingMaster/ssrecomp](https://github.com/ClickingMaster/ssrecomp), using melonDS and mGBA |
 | GBA player (`engines/fulldex/gba-wide`) | GBA games and hacks: FireRed, LeafGreen and Emerald in widescreen by our patches; Ruby, Sapphire, other languages and the romhacks PokeDaisy's EXPAND knows (Unbound, Radical Red, Rocket Edition, ..., plus BugLime and Adventure Red, which we added) widened by EXPAND; everything else at 3:2. Ours, in our Fulldex fork; packages build it | [Hailey-Ross/pokemon-fulldex](https://github.com/Hailey-Ross/pokemon-fulldex/tree/hails-additions/gba-wide), after Pokemon GBA Widescreen by mamesj |
 | Platinum PC port | A native Platinum. Packages carry its published Windows release, program only | [cybervisi0n/pokeplatinum](https://github.com/cybervisi0n/pokeplatinum) |
-| nativeplat | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
-| 3DSrecomp+Zakuro | Native X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun and Ultra Moon. Packages carry Zakuro and our build tool from our fork; each game's code is built on the player's PC | [fearkov/zakuro](https://github.com/fearkov/zakuro) ([ours](https://github.com/Hailey-Ross/zakuro)) and [fearkov/3dsrecomp](https://github.com/fearkov/3dsrecomp) |
-| 3DS emulators | X to Ultra Moon. Optional: installed from the launcher, from the Windows releases of our forks (not in the package) | [AzaharPlus/AzaharPlus](https://github.com/AzaharPlus/AzaharPlus) ([ours](https://github.com/Hailey-Ross/AzaharPlus)) and [azahar-emu/azahar](https://github.com/azahar-emu/azahar) ([ours](https://github.com/Hailey-Ross/azahar)) |
+| nativeplat [![nativeplat build](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/gen4recomp/windows-release.yml?branch=hails-additions&label=build&style=flat-square&labelColor=6A3FC8)](https://github.com/Hailey-Ross/gen4recomp/releases) | Native Diamond, Pearl and Platinum. Packages carry a build from our fork, program only | [sohamb117/gen4recomp](https://github.com/sohamb117/gen4recomp) |
+| 3DSrecomp+Zakuro [![3DSrecomp+Zakuro build](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/zakuro/nativemons-windows-release.yml?branch=hails-additions&label=build&style=flat-square&labelColor=6A3FC8)](https://github.com/Hailey-Ross/zakuro/releases) | Native X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon. Packages carry Zakuro and our build tool from our fork; each game's code is built on the player's PC | [fearkov/zakuro](https://github.com/fearkov/zakuro) ([ours](https://github.com/Hailey-Ross/zakuro)) and [fearkov/3dsrecomp](https://github.com/fearkov/3dsrecomp) |
+| 3DS emulators<br>AzaharPlus [![AzaharPlus build](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/AzaharPlus/nativemons-windows-release.yml?branch=hails-additions&label=build&style=flat-square&labelColor=6A3FC8)](https://github.com/Hailey-Ross/AzaharPlus/releases)<br>Azahar [![Azahar build](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/azahar/nativemons-windows-release.yml?branch=hails-additions&label=build&style=flat-square&labelColor=6A3FC8)](https://github.com/Hailey-Ross/azahar/releases) | X to Ultra Moon. Optional: installed from the launcher, from the Windows releases of our forks (not in the package) | [AzaharPlus/AzaharPlus](https://github.com/AzaharPlus/AzaharPlus) ([ours](https://github.com/Hailey-Ross/AzaharPlus)) and [azahar-emu/azahar](https://github.com/azahar-emu/azahar) ([ours](https://github.com/Hailey-Ross/azahar)) |
 | `tools/nds-patcher` | Decrypts `.nds` secure areas | [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) |
 | `tools/mon-bridge` | Reads saves and moves Pokémon | [PKHeX.Core](https://github.com/kwsch/PKHeX) by Kaphotics and contributors |
 | `tools/openhome-bridge` | Converts Pokémon between games that have no real transfer | [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington, run on Node.js |

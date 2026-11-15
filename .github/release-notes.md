@@ -23,7 +23,7 @@
 | **Fulldex** (widescreen, 60 fps) | FireRed, LeafGreen, Emerald, HeartGold, SoulSilver, Platinum, Black, White, Black 2, White 2 |
 | **Platinum PC port** (native, optional) | Platinum |
 | **nativeplat** (native) | Diamond, Pearl, Platinum (optional) |
-| **3DSrecomp+Zakuro** (native, built on your PC) | X, Y, Omega Ruby, Alpha Sapphire, Sun, Ultra Sun, Ultra Moon: each game's code is recompiled once on your PC from your own decrypted dump (about 10 to 20 minutes per game). No game code is in the download. |
+| **3DSrecomp+Zakuro** (native, recommended over the emulators) | X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun, Ultra Moon: each game's code is recompiled once on your PC from your own decrypted dump (about 10 to 20 minutes per game). No game code is in the download. |
 | **A 3DS emulator you choose** (optional, in progress) | X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun, Ultra Moon: turn on 3DS games under **Emu**, then install AzaharPlus there (recommended; Azahar is the backup). Needs `.3ds` dumps of your own cartridges: encrypted ones play with AzaharPlus. |
 
 Where both engines have a game, it starts in Fulldex. Switch on that game's page. The engines share one save, if your ROM works with both. The Platinum PC port's download has only the program: its game files are unpacked from your own ROM, on your PC.

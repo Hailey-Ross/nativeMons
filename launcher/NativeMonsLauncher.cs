@@ -196,11 +196,99 @@ static class Config {
     public static void Write(string name, string text) { try { File.WriteAllText(Path.Combine(State, name), text); } catch { } }
 }
 
+// 3DS dumps decrypted by a tool that left their NCCH headers saying "encrypted": Zakuro and 3dsrecomp refuse them.
+// The fix sets the game part's crypto method to 0 and its NoCrypto flag, as GodMode9 does: 2 bytes, the originals
+// kept in state\3ds\header-backups so it can be undone (user, 2026-11-15). Only part 0 runs; the manual and update
+// parts are often left encrypted by such tools, and stay untouched.
+static class CtrHeaderFix {
+    public class Spot { public long At; public byte Was, Now; }
+    static string BackupOf(string file) { return Path.Combine(Ctr3dsSaves.Root, "header-backups", Path.GetFileName(file) + ".txt"); }
+    public static bool CanUndo(string file) { return file != null && File.Exists(BackupOf(file)); }
+    public static bool Needs(string file) { try { var n = Needed(file); return n != null && n.Count > 0; } catch { return false; } }
+    // The bytes to change; null when it isn't a cartridge dump or its game part is still encrypted.
+    public static List<Spot> Needed(string file) {
+        var spots = new List<Spot>();
+        using (var f = File.OpenRead(file)) {
+            var h = new byte[0x200];
+            if (f.Read(h, 0, h.Length) < h.Length || Encoding.ASCII.GetString(h, 0x100, 4) != "NCSD") return null;
+            {
+                long off = (long)BitConverter.ToUInt32(h, 0x120) * 0x200;
+                if (BitConverter.ToUInt32(h, 0x124) == 0) return null;
+                var n = new byte[0x200];
+                f.Seek(off, SeekOrigin.Begin);
+                if (f.Read(n, 0, n.Length) < n.Length || Encoding.ASCII.GetString(n, 0x100, 4) != "NCCH") return null;
+                byte method = n[0x18B], flags = n[0x18F];
+                if ((flags & 0x04) != 0) return spots;
+                if (!Readable(f, off, n)) return null;
+                if (method != 0) spots.Add(new Spot { At = off + 0x18B, Was = method, Now = 0 });
+                // NoCrypto on; fixed key and seed off, as they only describe encryption.
+                spots.Add(new Spot { At = off + 0x18F, Was = flags, Now = (byte)((flags | 0x04) & ~0x21) });
+            }
+        }
+        return spots;
+    }
+    // Decrypted: the ExeFS's first file name is plain text and the RomFS starts with "IVFC".
+    static bool Readable(FileStream f, long off, byte[] n) {
+        long exefs = BitConverter.ToUInt32(n, 0x1A0) * 0x200L, romfs = BitConverter.ToUInt32(n, 0x1B0) * 0x200L;
+        if (BitConverter.ToUInt32(n, 0x1A4) > 0) {
+            var e = new byte[8]; f.Seek(off + exefs, SeekOrigin.Begin);
+            if (f.Read(e, 0, 8) < 8 || e[0] < 0x20 || e[0] > 0x7E || e.Any(b => b != 0 && (b < 0x20 || b > 0x7E))) return false;
+        }
+        if (BitConverter.ToUInt32(n, 0x1B4) > 0) {
+            var r = new byte[4]; f.Seek(off + romfs, SeekOrigin.Begin);
+            if (f.Read(r, 0, 4) < 4 || Encoding.ASCII.GetString(r) != "IVFC") return false;
+        }
+        return true;
+    }
+    // Null when done, or why not. The backup is written before any byte changes.
+    public static string Fix(string file) {
+        try {
+            var spots = Needed(file);
+            if (spots == null) return "This dump's game is still encrypted, so its header was left as it is.";
+            if (spots.Count == 0) return null;
+            Directory.CreateDirectory(Path.GetDirectoryName(BackupOf(file)));
+            // A backup left from an earlier file of that name no longer matches: this file still needs the fix.
+            File.WriteAllLines(BackupOf(file), new[] { file }.Concat(spots.Select(x => x.At + " " + x.Was + " " + x.Now)).ToArray());
+            return Write(file, spots, false);
+        } catch (Exception x) { return x.Message; }
+    }
+    public static string Undo(string file) {
+        try {
+            var lines = File.ReadAllLines(BackupOf(file)).Skip(1).Select(l => l.Split(' ')).ToList();
+            var spots = lines.Select(x => new Spot { At = long.Parse(x[0]), Was = byte.Parse(x[1]), Now = byte.Parse(x[2]) }).ToList();
+            string why = Write(file, spots, true);
+            if (why == null) File.Delete(BackupOf(file));
+            return why;
+        } catch (Exception x) { return x.Message; }
+    }
+    // Each byte must hold what it held before; anything else stops and puts back what was written.
+    static string Write(string file, List<Spot> spots, bool back) {
+        var done = new List<Spot>();
+        using (var f = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.Read)) {
+            foreach (var x in spots) {
+                byte from = back ? x.Now : x.Was, to = back ? x.Was : x.Now;
+                f.Seek(x.At, SeekOrigin.Begin);
+                int now = f.ReadByte();
+                if (now != from) {
+                    foreach (var d in done) { f.Seek(d.At, SeekOrigin.Begin); f.WriteByte(back ? d.Now : d.Was); }
+                    f.Flush(true);
+                    return "The header wasn't what was expected, so nothing was changed.";
+                }
+                f.Seek(x.At, SeekOrigin.Begin); f.WriteByte(to); done.Add(x);
+            }
+            f.Flush(true);
+            foreach (var x in spots) { f.Seek(x.At, SeekOrigin.Begin); if (f.ReadByte() != (back ? x.Was : x.Now)) return "The header couldn't be checked after writing."; }
+        }
+        return null;
+    }
+}
+
 // 3DSrecomp+Zakuro (todo 22): each game's code is recompiled on the player's PC from their own dump into
 // state\3ds\recomp\<title id>.dll, which never leaves it. Zakuro runs that library; saves go through Ctr3dsSaves.
 static class Recomp {
-    // Only what Zakuro's COMPATIBILITY.md lists as playable recompiled (user, 2026-11-15). Not Moon yet.
-    static readonly string[] Titles = { "0004000000055D00", "0004000000055E00", "000400000011C400", "000400000011C500", "0004000000164800", "00040000001B5000", "00040000001B5100" };
+    // What Zakuro's COMPATIBILITY.md lists as playable recompiled (user, 2026-11-15), plus Moon: not listed upstream,
+    // but 495 of its 526 parts match Sun's and our window test played it like Sun (2026-11-15).
+    static readonly string[] Titles = { "0004000000055D00", "0004000000055E00", "000400000011C400", "000400000011C500", "0004000000164800", "0004000000175E00", "00040000001B5000", "00040000001B5100" };
     public const string ZigVersion = "0.17.0";
     const string ZigUrl = "https://ziglang.org/download/0.17.0/zig-x86_64-windows-0.17.0.zip", ZigSha256 = "b5663f69581dcf391293fbf16c06cb80d81d806545ce618b4d0bab7f0eb8c428";
     public static string Tool { get { return Path.Combine(Path.GetDirectoryName(Config.Zakuro), "nativemons-recomp.exe"); } }
@@ -250,11 +338,12 @@ static class Recomp {
             string hash;
             using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
             if (hash != ZigSha256) return "The download wasn't the expected file, so it wasn't used.";
-            if (Directory.Exists(temp)) Directory.Delete(temp, true);
-            System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
+            // Unpacked in place: a virus scanner still reading the new files blocks moving their folder.
             if (Directory.Exists(ZigHome)) Directory.Delete(ZigHome, true);
-            Directory.Move(temp, ZigHome);
-            return File.Exists(ZigExe) ? null : "The download was missing zig.exe.";
+            System.IO.Compression.ZipFile.ExtractToDirectory(zip, ZigHome);
+            if (File.Exists(ZigExe)) return null;
+            try { Directory.Delete(ZigHome, true); } catch { }
+            return "The download was missing zig.exe.";
         } catch (Exception x) { return x.Message; }
         finally { try { File.Delete(zip); } catch { } try { if (Directory.Exists(temp)) Directory.Delete(temp, true); } catch { } }
     }
@@ -274,6 +363,8 @@ static class Recomp {
     public static bool Finish(GameEntry g, int code) {
         bool ok = code == 0 && File.Exists(LibraryOf(g));
         try { if (Directory.Exists(Work)) Directory.Delete(Work, true); } catch { }
+        // Zig's own cache repeats ours and grew to 7 GB over six games: it goes after every build.
+        try { if (Directory.Exists(Path.Combine(Dir, "zig-cache"))) Directory.Delete(Path.Combine(Dir, "zig-cache"), true); } catch { }
         // The linker's debug file (about 750 MB) and import library aren't needed to play.
         foreach (var pattern in new[] { "*.pdb", "*.lib", "*.part" }) foreach (var f in Directory.GetFiles(Dir, pattern)) try { File.Delete(f); } catch { }
         try { if (ok) File.WriteAllText(StampOf(g), RomKey(g)); else if (File.Exists(LibraryOf(g)) && code != 0) File.Delete(LibraryOf(g)); } catch { }
@@ -307,7 +398,7 @@ class Emu3ds {
     public bool Installed { get { return File.Exists(ExePath); } }
     public bool Recommended, Native;
     // 3DSrecomp+Zakuro: a native engine shipped in engines\zakuro, not one of the emulators below (todo 22).
-    public static readonly Emu3ds Zakuro = new Emu3ds { Id = "zakuro", Name = "3DSrecomp+Zakuro (native, built on your PC)", Short = "3DSrecomp+Zakuro", Exe = "zakuro.exe", Native = true };
+    public static readonly Emu3ds Zakuro = new Emu3ds { Id = "zakuro", Name = "3DSrecomp+Zakuro (native, recommended)", Short = "3DSrecomp+Zakuro", Exe = "zakuro.exe", Native = true };
     // In order of preference: the first one installed plays 3DS games unless the player picks another.
     // AzaharPlus is the recommended one, Azahar the backup when it misbehaves (user, 2026-11-14).
     public static readonly Emu3ds[] All = {
@@ -5887,6 +5978,14 @@ class LauncherForm : Form {
         var engines = g.Engines();
         if (engines.Count > 1) p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine, g), "", true, delegate { pages.Push(EnginePage(g)); }) { Icon = '',
             Info = g.Title + " plays with " + GameEntry.EngineName(engine, g) + ". Select to choose from its " + engines.Count + " engines." });
+        if (g.Ctr != null && g.CtrPlainRom != null && CtrHeaderFix.Needs(g.CtrPlainRom))
+            p.Items.Add(new Item("Fix 3DS header", "", true, delegate { pages.Push(HeaderFixPage(new List<GameEntry> { g }, null)); }) { Icon = '',
+                Info = "Your dump is decrypted, but its header still says encrypted, which 3DSrecomp+Zakuro refuses. The fix changes a few bytes, with a backup." });
+        else if (g.Ctr != null && CtrHeaderFix.CanUndo(g.CtrPlainRom))
+            p.Items.Add(new Item("Undo 3DS header fix", "", true, delegate {
+                string why = CtrHeaderFix.Undo(g.CtrPlainRom);
+                if (why != null) ShowText("Not undone", why, null); else Rescan(delegate { pages.Push(GamePage(g)); });
+            }) { Icon = '', Info = "Puts back the bytes the header fix changed." });
         if (g.OnRecomp) {
             string st = Recomp.State(g);
             p.Items.Add(new Item("3DSrecomp+Zakuro build: " + (st == "ready" ? "Ready" : st == "old" ? "Can be improved" : st == "outdated" ? "Needs a rebuild" : "Not built yet"), "", true, delegate { pages.Push(RecompAskPage(new List<GameEntry> { g }, null)); }) { Icon = '\uE896',
@@ -7751,7 +7850,31 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '', Info = "Build it later from the game's page." });
         return p;
     }
+    Page HeaderFixPage(List<GameEntry> games, Action then) {
+        var p = new Page { Title = "Fix 3DS header" + (games.Count == 1 ? "?" : "s?"), Theme = games[0].Theme, FitBody = true };
+        p.Body = string.Join(", ", games.Select(g => Path.GetFileName(g.CtrPlainRom)).ToArray()) + (games.Count == 1 ? " is" : " are") + " decrypted, but the header still says encrypted, so 3DSrecomp+Zakuro refuses it.\n\n"
+            + "The fix changes 2 bytes in the dump's header, as GodMode9 does when it decrypts, and keeps the original bytes so it can be undone from the game's page. Emulators play it the same either way.";
+        p.Items.Add(new Item(then != null ? "Fix, then build" : "Fix now", "", true, delegate {
+            pages.Pop();
+            string problem = null;
+            Busy("Fixing headers", delegate { foreach (var g in games) { string why = CtrHeaderFix.Fix(g.CtrPlainRom); if (why != null) { problem = g.Title + ": " + why; break; } } return null; }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Not fixed", x ?? problem, null); return; }
+                Rescan(then);
+            });
+        }) { Icon = '', Info = "Changes your ROM files: a few bytes each, with a backup." });
+        p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '', Info = "Nothing is changed. The emulators still play it." });
+        return p;
+    }
     void BuildRecomp(List<GameEntry> games, GameEntry play) {
+        var unfixed = games.Where(x => CtrHeaderFix.Needs(x.CtrPlainRom)).ToList();
+        if (unfixed.Count > 0) {
+            var ids = games.Select(x => x.Id).ToList(); string playId = play != null ? play.Id : null;
+            pages.Push(HeaderFixPage(unfixed, delegate {
+                // A scan makes new game entries: the build goes on with those.
+                BuildRecomp(Library.Games.Where(x => ids.Contains(x.Id)).ToList(), playId == null ? null : Library.Games.Find(x => x.Id == playId));
+            }));
+            return;
+        }
         if (!File.Exists(Recomp.ZigExe)) {
             string problem = null;
             Busy("Getting Zig", delegate { problem = Recomp.EnsureZig(); return null; }, delegate(string x) {
@@ -11226,6 +11349,14 @@ static class NativeMonsLauncher {
             if (g == null || g.CtrRom == null || e == null) result = "no such 3DS game with a ROM, or emulator";
             else if (argv[4] == "prepare") { try { Ctr3dsSaves.Prepare(e, g); result = "ok"; } catch (Exception x) { result = x.Message; } }
             else result = Ctr3dsSaves.Collect(e, g) ?? "ok";
+            File.WriteAllText(argv[1], result);
+            return;
+        }
+        // --3ds-header <result> <dump> check|fix|undo: the header fixer, on a copy.
+        if (argv.Length == 4 && argv[0] == "--3ds-header") {
+            string result;
+            if (argv[3] == "check") { var n = CtrHeaderFix.Needed(argv[2]); result = n == null ? "still encrypted" : n.Count == 0 ? "fine" : "needs " + string.Join(" ", n.Select(x => x.At.ToString("X") + ":" + x.Was.ToString("X2") + ">" + x.Now.ToString("X2")).ToArray()); }
+            else result = (argv[3] == "fix" ? CtrHeaderFix.Fix(argv[2]) : CtrHeaderFix.Undo(argv[2])) ?? "ok";
             File.WriteAllText(argv[1], result);
             return;
         }
