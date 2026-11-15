@@ -45,6 +45,7 @@ Settings are remembered in the report folder, so later runs only need `-Report`.
 | `-ArtFolder` | a `state\game-art` folder to copy in, so the run doesn't spend time capturing art |
 | `-Report` | where results and screenshots are kept (they stay after `-Work` is deleted) |
 | `-Jobs` | how many games or screens at once (default 2) |
+| `-Priority` | `Idle` (default), `BelowNormal` or `Normal`: what the launchers and games it starts run at; the user may ask for a faster run |
 | `-Only` | play only these games (ids, comma-separated), on every engine they have: a quick proof of one fix |
 | `-LauncherOverride` | a locally built launcher to test in place of the package's. The result then doesn't speak for the package: run again without it before releasing. |
 

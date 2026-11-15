@@ -419,16 +419,33 @@ static class Recomp {
     public static string BannerTitle; public static DateTime DoneAt = DateTime.MinValue;
     public static bool FakeRunning;
     public static bool BannerShowing { get { return quiet != null || FakeRunning || (DateTime.Now - DoneAt).TotalSeconds < 5; } }
+    public static bool Busy { get { return quiet != null; } }
     static string Next(GameEntry g) { return LibraryOf(g) + ".next"; }
     static string QuietWork { get { return Path.Combine(Dir, "work-quiet"); } }
     public static bool Improving(GameEntry g) { return quiet != null && quietFor != null && quietFor.Id == g.Id; }
-    public static void ImproveQuietly(GameEntry g) {
-        if (quiet != null || !File.Exists(ZigExe) || State(g) != "old") return;
+    static readonly Queue<GameEntry> queued = new Queue<GameEntry>();
+    public static string BannerVerb = "Improving";
+    public static bool Queued(GameEntry g) { lock (queued) return queued.Any(x => x.Id == g.Id); }
+    // New games found at start-up, built one by one in the background (user, 2026-11-15).
+    public static void BuildQuietly(IEnumerable<GameEntry> games) {
+        lock (queued) foreach (var g in games) if (!queued.Any(x => x.Id == g.Id)) queued.Enqueue(g);
+        NextQueued();
+    }
+    static void NextQueued() {
+        if (quiet != null) return;
+        GameEntry g = null;
+        lock (queued) while (queued.Count > 0 && g == null) { var c = queued.Dequeue(); if (State(c) == "missing" || State(c) == "outdated") g = c; }
+        if (g != null) ImproveQuietly(g, true);
+    }
+    public static void ImproveQuietly(GameEntry g) { ImproveQuietly(g, false); }
+    static void ImproveQuietly(GameEntry g, bool first) {
+        if (quiet != null || !File.Exists(ZigExe) || State(g) != (first ? State(g) : "old")) return;
+        if (first && CtrHeaderFix.Needs(g.CtrPlainRom)) return;
         int covered = HintCount(g);
         try {
             var psi = BuildInto(g, Next(g), QuietWork);
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            QuietProgress = 0; BannerTitle = g.Title;
+            QuietProgress = 0; BannerTitle = g.Title; BannerVerb = first ? "Building" : "Improving";
             p.OutputDataReceived += (o, ev) => {
                 var m = ev.Data == null ? null : System.Text.RegularExpressions.Regex.Match(ev.Data, @"^nativemons: (\d+) ");
                 if (m != null && m.Success) QuietProgress = int.Parse(m.Groups[1].Value) / 100f;
@@ -442,6 +459,7 @@ static class Recomp {
                 if (ok) { try { File.WriteAllText(Next(g) + ".covers", covered.ToString()); } catch { } SwapIn(g); DoneAt = DateTime.Now; }
                 else try { File.Delete(Next(g)); } catch { }
                 quiet = null; quietFor = null;
+                NextQueued();
             };
             p.Start();
             p.BeginOutputReadLine(); p.StandardError.ReadToEndAsync();
@@ -455,6 +473,7 @@ static class Recomp {
         try {
             if (!File.Exists(Next(g)) || Emu3ds.Running(Emu3ds.Zakuro)) return;
             string covers = File.Exists(Next(g) + ".covers") ? File.ReadAllText(Next(g) + ".covers").Trim() : HintCount(g).ToString();
+            Directory.CreateDirectory(Dir);
             File.Copy(Next(g), LibraryOf(g), true);
             File.Delete(Next(g)); File.Delete(Next(g) + ".covers");
             File.WriteAllLines(StampOf(g), new[] { RomKey(g), covers });
@@ -467,6 +486,7 @@ static class Recomp {
         try { if (Directory.Exists(Work)) Directory.Delete(Work, true); } catch { }
     }
     public static void StopQuiet() {
+        lock (queued) queued.Clear();
         var p = quiet; if (p == null) return;
         Stop(p);
         try { if (Directory.Exists(QuietWork)) Directory.Delete(QuietWork, true); } catch { }
@@ -7930,8 +7950,22 @@ class LauncherForm : Form {
             if (then != null) then(); else ShowText("Ready", g.Title + " is prepared.", null);
         });
     }
+    // New 3DS games for 3DSrecomp+Zakuro: behind the splash only what's quick (Zig, the checks); their builds run in the
+    // background after one question (user, 2026-11-15).
+    List<GameEntry> new3ds = new List<GameEntry>();
+    void Prepare3ds() {
+        if (!Recomp.Installed) return;
+        var asked = new HashSet<string>(File.Exists(RecompAskedFile) ? File.ReadAllLines(RecompAskedFile) : new string[0]);
+        var found = Library.Games.Where(g => g.OnRecomp && g.Engine() == "recomp" && !asked.Contains(g.Ctr) && Recomp.State(g) != "ready" && Recomp.State(g) != "old").ToList();
+        if (found.Count == 0) return;
+        startStage = "Getting your 3DS games ready";
+        if (!File.Exists(Recomp.ZigExe)) { startStage = "Getting your 3DS games ready (downloading Zig)"; Recomp.EnsureZig(); }
+        foreach (var g in found) CtrHeaderFix.Needs(g.CtrPlainRom);
+        new3ds = found;
+    }
     // Prepares every Gen1Recomp game behind the splash (notes/launcher.md, Gen1Recomp).
     void PrepareAll() {
+        try { Prepare3ds(); } catch { }
         if (RunningGames() != "") return;
         var todo = Library.Games.Where(g => g.Gen1 != null && !g.Imported && g.Gen1Rom != null && !PrepareFailed(g.Gen1Rom)).ToList();
         if (todo.Count == 0) return;
@@ -8007,6 +8041,14 @@ class LauncherForm : Form {
         Recomp.SwapIn(g);
         if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is already open. Close it, then press Play.", null); return; }
         string st = Recomp.State(g);
+        if ((st == "missing" || st == "outdated") && (Recomp.Improving(g) || Recomp.Queued(g))) {
+            var page = new Page { Title = g.Title + " is building", Theme = g.Theme, FitBody = true,
+                Body = Recomp.Improving(g) ? "It's being built in the background: " + (int)Math.Round(Recomp.QuietProgress * 100) + "% so far. It's ready in a few minutes." : "It's waiting its turn to be built in the background, after the game building now." };
+            if (g.On3ds) page.Items.Add(new Item("Play with " + GameEntry.EngineShort("3ds", g) + " this time", "", true, delegate { pages.Pop(); Play3ds(g); }) { Icon = '', Info = "The emulator plays it now; the build carries on." });
+            page.Items.Add(new Item("OK", "", true, delegate { pages.Pop(); }) { Icon = '', Info = "The banner shows when it's ready." });
+            pages.Push(page);
+            return;
+        }
         if (st == "missing" || st == "outdated") { pages.Push(RecompAskPage(new List<GameEntry> { g }, g)); return; }
         Play3dsNow(g, e);
     }
@@ -8014,7 +8056,7 @@ class LauncherForm : Form {
     static string RecompAskedFile { get { return Path.Combine(Config.State, "recomp-asked.txt"); } }
     void AskAboutRecomp() {
         if (!Recomp.Installed) return;
-        Recomp.ClearLeftovers();
+        if (!Recomp.Busy) Recomp.ClearLeftovers();
         // For tests: NATIVEMONS_TEST_IMPROVE=<game> starts its quiet rebuild now, to see the banner.
         var test = Library.Games.Find(x => x.Id == Environment.GetEnvironmentVariable("NATIVEMONS_TEST_IMPROVE"));
         if (test != null && test.OnRecomp) Recomp.ImproveQuietly(test);
@@ -8023,7 +8065,37 @@ class LauncherForm : Form {
         var found = Library.Games.Where(g => g.OnRecomp && g.Engine() == "recomp" && !asked.Contains(g.Ctr) && Recomp.State(g) != "ready" && Recomp.State(g) != "old").ToList();
         if (found.Count == 0) return;
         try { Directory.CreateDirectory(Config.State); File.AppendAllLines(RecompAskedFile, found.Select(g => g.Ctr)); } catch { }
-        pages.Push(RecompAskPage(found, null));
+        pages.Push(Setup3dsPage(found));
+    }
+    Page Setup3dsPage(List<GameEntry> games) {
+        var fix = games.Where(g => CtrHeaderFix.Needs(g.CtrPlainRom)).ToList();
+        int cores = Math.Max(1, Environment.ProcessorCount / 2), min = Recomp.Minutes(cores);
+        var p = new Page { Title = "Set up " + (games.Count == 1 ? games[0].Title : games.Count + " 3DS games") + "?", Theme = games[0].Theme, FitBody = true };
+        p.Body = "Found: " + string.Join(", ", games.Select(g => g.Title).ToArray()) + ". " + (games.Count == 1 ? "It plays" : "They play") + " natively with 3DSrecomp+Zakuro after a one-time build, made on this PC from your own dump; the build never leaves this PC.\n\n"
+            + "They build one by one in the background, about " + min + " minutes each at the lowest priority, with a banner showing how far along. You can keep using the launcher, and play any that's ready."
+            + (fix.Count == 0 ? "" : "\n\n" + string.Join(", ", fix.Select(g => g.Title).ToArray()) + (fix.Count == 1 ? "'s dump is" : "'s dumps are") + " decrypted but still marked encrypted. Setting up fixes that first: 2 bytes in each file, as GodMode9 does, with a backup so it can be undone from the game's page.");
+        p.Items.Add(new Item("Set up in the background", "", true, delegate {
+            pages.Pop();
+            string problem = null;
+            Busy(fix.Count > 0 ? "Fixing headers" : "Starting", delegate {
+                foreach (var g in fix) { string why = CtrHeaderFix.Fix(g.CtrPlainRom); if (why != null) { problem = g.Title + ": " + why; break; } }
+                return null;
+            }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Not set up", (x ?? problem) + "\n\nNothing was built. The emulators can still play them.", null); return; }
+                var ids = games.Select(g => g.Id).ToList();
+                Rescan(delegate {
+                    if (!File.Exists(Recomp.ZigExe)) {
+                        string z = null;
+                        Busy("Getting Zig", delegate { z = Recomp.EnsureZig(); return null; }, delegate(string y) {
+                            if (y != null || z != null) { ShowText("Couldn't get Zig", (y ?? z) + "\n\nNothing was built.", null); return; }
+                            Recomp.BuildQuietly(Library.Games.Where(g => ids.Contains(g.Id)));
+                        });
+                    } else Recomp.BuildQuietly(Library.Games.Where(g => ids.Contains(g.Id)));
+                });
+            });
+        }) { Icon = '', Info = fix.Count > 0 ? "Fixes the headers (with a backup), then builds them in the background." : "Builds them in the background, one at a time." });
+        p.Items.Add(new Item("Not now", "", true, delegate { pages.Pop(); }) { Icon = '', Info = "Build any of them later from its page, or by pressing Play." });
+        return p;
     }
     Page RecompAskPage(List<GameEntry> games, GameEntry play) {
         int cores = Recomp.Cores(), min = Recomp.Minutes(cores);
@@ -11030,7 +11102,7 @@ class LauncherForm : Form {
         float show = Ease((t - improveAt) / 0.28f);
         if (done) show = Math.Min(show, Ease((5f - (float)(DateTime.Now - Recomp.DoneAt).TotalSeconds) / 0.28f));
         int pct = (int)Math.Round(improveShown * 100);
-        string text = done ? Recomp.BannerTitle + " improved" : "Improving " + Recomp.BannerTitle + " · " + pct + "%";
+        string text = done ? Recomp.BannerTitle + (Recomp.BannerVerb == "Building" ? " is ready" : " improved") : Recomp.BannerVerb + " " + Recomp.BannerTitle + " · " + pct + "%";
         float bh = h * 0.056f, y = top - (1 - show) * (bh + h * 0.06f), rad = bh / 2;
         float pad = bh * 0.16f, size = bh - 2 * pad;
         float textW = g.MeasureString(text, smallBold).Width + pad;

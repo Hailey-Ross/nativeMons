@@ -12,6 +12,7 @@ param(
   [Alias('Stages')][string[]]$Groups,
   [string[]]$Skip = @(),
   [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full, [int]$Jobs = 2,
+  [ValidateSet('Idle','BelowNormal','Normal')][string]$Priority = 'Idle',   # what the launchers and games it starts run at
   [string[]]$Only = @()   # play only these games (ids), on every engine they have
 )
 $ErrorActionPreference = 'Continue'
@@ -77,7 +78,7 @@ function Sha([string]$f) { (Get-FileHash -LiteralPath $f -Algorithm SHA1).Hash }
 function Launcher([string[]]$a, [int]$seconds = 120) {
   $line = ($a | ForEach-Object { if ($_ -match '[\s]') { '"' + $_ + '"' } else { $_ } }) -join ' '
   $p = Start-Process $exe -ArgumentList $line -PassThru -WindowStyle Hidden
-  try { $p.PriorityClass = 'Idle' } catch { }
+  try { $p.PriorityClass = $Priority } catch { }
   if (-not $p.WaitForExit($seconds * 1000)) { try { $p.Kill() } catch { }; return -999 }
   return $p.ExitCode
 }
@@ -93,11 +94,11 @@ function Spawn([string]$argline, [string]$dir) {
   # Test windows on the test monitor (the user's monitor 3), not over what the user is doing.
   if ($script:testArea) { $psi.EnvironmentVariables['NATIVEMONS_TEST_SCREEN'] = $script:testScreen }
   $sp = [Diagnostics.Process]::Start($psi)
-  try { $sp.PriorityClass = 'Idle' } catch { }
+  try { $sp.PriorityClass = $Priority } catch { }
   $sp
 }
-# The launcher raises its games and Gen1Recomp's preparing to BelowNormal; the check keeps all of them at Idle.
-function Lower([int[]]$ids) { foreach ($i in $ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if ($q.PriorityClass -ne 'Idle') { $q.PriorityClass = 'Idle' } } catch { } } }
+# The launcher raises its games and Gen1Recomp's preparing to BelowNormal; the check keeps all of them at -Priority.
+function Lower([int[]]$ids) { foreach ($i in $ids) { try { $q = Get-Process -Id $i -ErrorAction Stop; if ($q.PriorityClass -ne $Priority) { $q.PriorityClass = $Priority } } catch { } } }
 Add-Type -AssemblyName System.Windows.Forms
 $script:testScreen = 'DISPLAY3'
 $script:testArea = @([Windows.Forms.Screen]::AllScreens | Where-Object { $_.DeviceName -like "*$script:testScreen" }) | ForEach-Object { $_.WorkingArea } | Select-Object -First 1
@@ -161,11 +162,11 @@ function RomList { Get-ChildItem -LiteralPath $RomFolder -Recurse -File -ErrorAc
 
 $script:played = @(); $oldAppData = $env:APPDATA; $romsBefore = RomList; $saveHashes = @{}
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | ForEach-Object { $saveHashes[$_.FullName] = Sha $_.FullName } }
-# The keeper, for the whole run and every group: whatever runs from the test folder is held at Idle (the launcher raises
+# The keeper, for the whole run and every group: whatever runs from the test folder is held at -Priority (Idle by default; the launcher raises
 # its games), and its windows go to the test monitor, so the PC stays usable.
 $area = $script:testArea
-$keeper = Start-Job -ArgumentList $Work, $(if ($area) { @($area.X, $area.Y, $area.Width) } else { @(-1, 0, 0) }) -ScriptBlock {
-  param($root, $box)
+$keeper = Start-Job -ArgumentList $Work, $(if ($area) { @($area.X, $area.Y, $area.Width) } else { @(-1, 0, 0) }), $Priority -ScriptBlock {
+  param($root, $box, $prio)
   Add-Type @'
 using System; using System.Runtime.InteropServices; using System.Collections.Generic;
 public static class Keep {
@@ -187,7 +188,7 @@ public static class Keep {
 '@
   while ($true) {
     $mine = @(Get-Process | Where-Object { try { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } catch { $false } })
-    foreach ($p in $mine) { try { if ($p.PriorityClass -ne 'Idle') { $p.PriorityClass = 'Idle' } } catch { } }
+    foreach ($p in $mine) { try { if ($p.PriorityClass -ne $prio) { $p.PriorityClass = $prio } } catch { } }
     if ($box[0] -ge 0 -and $mine.Count) { [Keep]::Move([int[]]@($mine | ForEach-Object { $_.Id }), $box[0], $box[1], $box[2]) }
     Start-Sleep -Milliseconds 700
   }
@@ -277,6 +278,8 @@ Set-Content "$st\game-options.txt" "full=off`nvol=0"
 if ($ArtFolder -and (Test-Path -LiteralPath $ArtFolder)) { Copy-Item -LiteralPath $ArtFolder "$st\game-art" -Recurse }
 # Start as a player who has answered the one-time wallpaper question, so the walks begin on the home screen.
 Set-Content "$st\wallpaper.txt" 'play'
+# 3DSrecomp+Zakuro's one-time set-up question would stop the window walk: every 3DS title counts as asked.
+Set-Content "$st\recomp-asked.txt" @('0004000000055D00','0004000000055E00','000400000011C400','000400000011C500','0004000000164800','0004000000175E00','00040000001B5000','00040000001B5100')
 $saves = Join-Path $app 'engines\fulldex\saves'; New-Item -ItemType Directory -Force $saves | Out-Null
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | Copy-Item -Destination $saves }
 # ---------- scan ----------
@@ -523,7 +526,7 @@ if (On 'sync') {
     if (-not (Test-Path $record)) {
       Set-Content "$st\engine-$g.txt" 'gen1'
       $q = Start-Process $exe -ArgumentList "--play $g" -PassThru; $w = Get-Date; $shown = $null
-      try { $q.PriorityClass = 'Idle' } catch { }
+      try { $q.PriorityClass = $Priority } catch { }
       while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $gp = @(GameProcs | ForEach-Object { $_.Id }); Lower $gp; ToTestScreen $gp 0; $shown = @([StableWin]::Windows([int[]]$gp)) | Select-Object -First 1 }
       T sync "${g}: prepared for Gen1Recomp" ([bool]$shown)
       Start-Sleep 5; if ($shown) { [void]$shown.CloseMainWindow() }; if (-not $q.WaitForExit(40000)) { try { $q.Kill() } catch { } }; ClearGames
@@ -605,8 +608,9 @@ if (On 'window') {
     if (-not $script:lost) { [StableWin]::Key($h,$R); Visit 'Move' 'Move Pokemon' 2 }
     if (-not $script:lost) { [StableWin]::Key($h,$R); [StableWin]::Key($h,$E); $set = WaitPage '^2\|Settings$'; T window 'opens Settings' $set "$(Now)"; if (-not $set) { $script:lost = $true } }
     else { T window 'opens Settings' 'skip' 'an earlier step went wrong' }
-    # Every row but the ones that download, open a file dialog or flip a setting (3DS games, Quick start, Discord).
-    $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Wallpapers','Wallpapers$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
+    # Every row but the ones that download, open a file dialog or flip a setting (3DS games, Ask to share Zakuro findings,
+    # 3DS build speed, Quick start, Discord).
+    $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, $null, $null, $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Wallpapers','Wallpapers$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
     # Once a step has gone wrong, no more keys: a press on the wrong screen could start a game.
     for ($i = 0; $i -lt $rows.Count -and -not $script:lost; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1 -and -not $script:lost) { [StableWin]::Key($h,$D) } }
     [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
