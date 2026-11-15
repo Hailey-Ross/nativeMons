@@ -67,3 +67,7 @@ A clean quick run takes about 20 minutes, of which play, window and sync are mos
 - The ROM version picker may open on the dump in use, which changes nothing; try the rows around it.
 - A remembered setting comes back unless it's given: pass `-LauncherOverride ""` to clear one.
 - A window closed by hand during play or window fails that group: `-Retest` it.
+
+## Play: one launcher for the whole list (2026-11-15)
+
+The play group starts one launcher and hands it each game the way a shortcut started while it's open does (`--play` to a second start in its state folder, which passes it on and exits). Quick start is off in it, so no waiting game passes for the one asked for. Each window must be that game: its title names it (or no other game), and for Fulldex, whose windows are all titled "Pokemon SoulSilver", the ROM in its command line must be that game's. A launcher that ends is replaced and the list goes on.

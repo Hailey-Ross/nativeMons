@@ -91,6 +91,7 @@ function Spawn([string]$argline, [string]$dir) {
   # No sound at all, whatever an engine does with its volume (SDL, and LOVE's OpenAL): the volume checks are separate.
   foreach ($k in 'SDL_AUDIODRIVER','SDL_AUDIO_DRIVER') { $psi.EnvironmentVariables[$k] = 'dummy' }; $psi.EnvironmentVariables['ALSOFT_DRIVERS'] = 'null'
   $psi.EnvironmentVariables['NATIVEMONS_TEST_PARALLEL'] = '1'
+  $psi.EnvironmentVariables['NATIVEMONS_TEST_LOG'] = "$dir\test.log"
   # Test windows on the test monitor (the user's monitor 3), not over what the user is doing.
   if ($script:testArea) { $psi.EnvironmentVariables['NATIVEMONS_TEST_SCREEN'] = $script:testScreen }
   $sp = [Diagnostics.Process]::Start($psi)
@@ -443,62 +444,98 @@ if (On 'play') {
     foreach ($row in $matrix) { $k = $row[1] + $(if ($row[1] -eq 'fulldex') { if ($ds -contains $row[0]) { '-ds' } else { '-gba' } }); if (-not $kinds.ContainsKey($k) -and -not $row[2]) { $kinds[$k] = 1; $pickRows += ,$row } }
     $matrix = $pickRows
   }
-  # $Jobs games at once, each through its own launcher; never one game twice at once, since its engines share a save.
+  # ONE launcher kept open for the whole list (user, 2026-11-15: not a launcher per game; a second lane only waited, as a
+  # launcher won't start a game while another of the same app folder runs). The check
+  # hands it each game the way a shortcut started while the launcher is open does: --play to a second start in the same
+  # state folder, which passes it on (request.txt and a message) and exits. Never one game twice at once: its engines
+  # share a save.
   ClearGames
   $todo = New-Object Collections.ArrayList; foreach ($row in $matrix) { [void]$todo.Add($row) }
-  $lanes = New-Object Collections.ArrayList; $n = 0
-  function KillLane([object]$l) { foreach ($i in @(@($l.Born.Keys) + $l.P.Id | Select-Object -Unique)) { try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
-  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillLane $l; [void]$lanes.Remove($l) }
-  while ($todo.Count -or $lanes.Count) {
-    while ($lanes.Count -lt $Jobs) {
-      $row = $todo | Where-Object { $r = $_; -not ($lanes | Where-Object { $_.Id -eq $r[0] }) } | Select-Object -First 1
-      if (-not $row) { break }
+  $lanes = New-Object Collections.ArrayList
+  # Idle: its log's last screen line is a page, not a job (a game or a task running).
+  function LaneIdle([object]$l) { $last = @(Get-Content "$($l.Dir)\test.log" -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(\d+\||job$)' }) | Select-Object -Last 1; return [bool]($last -and $last -ne 'job') }
+  function NewLane([int]$n) {
+    $dir = "$Work\lane$n"; Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+    robocopy $st "$dir\state" /E /XD (Join-Path $st 'game-art') /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
+    # Quick start keeps the last game waiting in the background: in a launcher kept open, that window would pass for
+    # the game asked for (SoulSilver for Platinum, 2026-11-15).
+    Set-Content "$dir\state\quick-start.txt" 'off'
+    $l = [pscustomobject]@{ N = $n; Dir = $dir; P = $null; Born = @{}; Seen = $false; Busy = $false; Id = ''; En = ''; Name = ''; T = $null; Limit = 0; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null }
+    $l.P = Spawn '' $dir
+    $t0 = Get-Date; while (-not (LaneIdle $l) -and -not $l.P.HasExited -and ((Get-Date) - $t0).TotalSeconds -lt 600) { Start-Sleep 1 }
+    $l
+  }
+  function KillGames([object]$l) { foreach ($i in @($l.Born.Keys)) { if ([int]$i -eq $l.P.Id) { continue }; try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
+  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillGames $l; $l.Busy = $false; $l.Shot = $null; $l.Closing = $null; $l.Game = $null }
+  # A window titled with another game's name, and not this one's, is the wrong game.
+  $names = @{}; foreach ($gm in (Get-Content (Join-Path $app 'games.json') -Raw -Encoding UTF8 | ConvertFrom-Json)) { $names[$gm.id] = ($gm.title -replace '^Pokemon ', '') }
+  function WrongGame([string]$id, [string]$title) {
+    $own = $names[$id]; if (-not $own) { return $false }
+    if ($title -match ('(?i)\b' + [regex]::Escape($own) + '\b')) { return $false }
+    return [bool]($names.Values | Where-Object { $_ -ne $own -and $title -match ('(?i)\b' + [regex]::Escape($_) + '\b') })
+  }
+  [void]$lanes.Add((NewLane 1))
+  while ($todo.Count -or @($lanes | Where-Object { $_.Busy }).Count) {
+    foreach ($l in @($lanes | Where-Object { -not $_.Busy })) {
+      if ($l.P.HasExited) { $fresh = NewLane $l.N; $at = $lanes.IndexOf($l); $lanes[$at] = $fresh; $l = $fresh }
+      if (-not (LaneIdle $l)) { continue }
+      $row = $todo | Where-Object { $r = $_; -not ($lanes | Where-Object { $_.Busy -and $_.Id -eq $r[0] }) } | Select-Object -First 1
+      if (-not $row) { continue }
       $todo.Remove($row); $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
       if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
-      # Play only needs the game to start: the copied art stays behind. Gen1Recomp's prepared games are copied for
-      # every engine, since a launcher without them prepares all of them again at start, which costs far more.
-      $n++; $dir = "$Work\play$n"; robocopy $st "$dir\state" /E /XD (Join-Path $st 'game-art') /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null; Set-Content "$dir\state\engine-$id.txt" $en
-      $p = Spawn "--play $id" $dir
-      $limit = if ($en -eq 'gen1') { 420 } elseif ($en -eq 'port') { 240 } else { 120 }
-      [void]$lanes.Add([pscustomobject]@{ Born = @{}; Seen = $false; Half = $n; Id = $id; En = $en; Name = $name; P = $p; Ids = @($p.Id); T = Get-Date; Limit = $limit; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null })
+      Set-Content "$($l.Dir)\state\engine-$id.txt" $en
+      $hand = Spawn "--play $id" $l.Dir; [void]$hand.WaitForExit(20000)
+      $l.Busy = $true; $l.Id = $id; $l.En = $en; $l.Name = $name; $l.T = Get-Date; $l.Took = 0; $l.Title = ''; $l.Picture = 0; $l.Steady = $null; $l.Game = $null; $l.Shot = $null; $l.Closing = $null
+      $l.Limit = if ($en -eq 'gen1') { 420 } elseif ($en -eq 'port') { 240 } else { 120 }
     }
     Start-Sleep -Milliseconds 500
     # Each lane's own processes: everything started from its launcher, even after a parent has gone.
     $procs = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate)
     $born = @{}; foreach ($q in $procs) { $born[[int]$q.ProcessId] = $q.CreationDate }
-    foreach ($l in @($lanes)) {
+    foreach ($l in @($lanes | Where-Object { $_.Busy })) {
       # Windows reuses process numbers: a lane forgets processes that have ended, and only takes in a process
       # that started after its parent, so it never adopts another lane's game.
       foreach ($i in @($l.Born.Keys)) { if (-not $born.ContainsKey($i) -or $born[$i] -ne $l.Born[$i]) { $l.Born.Remove($i) } }
-      if ($l.Born.Count -eq 0 -and $born.ContainsKey($l.P.Id) -and -not $l.Seen) { $l.Born[$l.P.Id] = $born[$l.P.Id]; $l.Seen = $true }
+      if (-not $l.Born.ContainsKey($l.P.Id) -and $born.ContainsKey($l.P.Id)) { $l.Born[$l.P.Id] = $born[$l.P.Id] }
       do {
         $more = @($procs | Where-Object { $l.Born.ContainsKey([int]$_.ParentProcessId) -and -not $l.Born.ContainsKey([int]$_.ProcessId) -and $_.CreationDate -ge $l.Born[[int]$_.ParentProcessId] })
-        foreach ($q in $more) { $l.Born[[int]$q.ProcessId] = $q.CreationDate; if ($l.Ids -notcontains [int]$q.ProcessId) { $l.Ids += [int]$q.ProcessId } }
+        foreach ($q in $more) { $l.Born[[int]$q.ProcessId] = $q.CreationDate }
       } while ($more.Count)
       $live = @($l.Born.Keys | ForEach-Object { [int]$_ })
       Lower $live
-      ToTestScreen @($live | Where-Object { $_ -ne $l.P.Id }) $l.Half
+      ToTestScreen @($live | Where-Object { $_ -ne $l.P.Id }) $l.N
       $png = "$Report\shots\play-$($l.Id)-$($l.En).png"
       if ($l.Closing) {
-        $clean = $l.P.HasExited
+        # Clean: the game is gone and the launcher is back at its menu, still running.
+        $left = @([StableWin]::Windows([int[]]@($live | Where-Object { $_ -ne $l.P.Id })))
+        $clean = -not $l.P.HasExited -and $left.Count -eq 0 -and (LaneIdle $l)
         if ($clean -or ((Get-Date) - $l.Closing).TotalSeconds -gt 40) {
-          # On a hidden desktop (STABLE_HIDDEN=1) OpenGL windows aren't composited, so they capture black: the settled, titled window decides.
           $blind = $env:STABLE_HIDDEN -eq '1' -and $l.Picture -lt 8
           if ($blind) { $l.Title += ' (picture unreadable on the hidden desktop)' }
-          Done $l ($clean -and ($l.Picture -ge 8 -or $blind)) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { '; launcher did not come back after the game closed' } elseif ($l.P.ExitCode -ne 0) { "; exit $($l.P.ExitCode)" })"
+          Done $l ($clean -and ($l.Picture -ge 8 -or $blind)) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { if ($l.P.HasExited) { '; the launcher ended' } else { '; the launcher did not come back to its menu after the game closed' } })"
         }
       } elseif ($l.Shot) {
         try { [void][StableWin]::Shot($l.Game.MainWindowHandle, $png); $l.Picture = [StableWin]::Colours($png) } catch { $l.Picture = 0 }
         $secs = [int]((Get-Date) - $l.Shot).TotalSeconds
         if ($l.Picture -ge 8 -or $secs -ge 45) { $l.Title += ", $($l.Picture) colours after ${secs}s"; [void]$l.Game.CloseMainWindow(); $l.Closing = Get-Date }
       } elseif ($l.P.HasExited) {
-        Done $l $false "launcher exited $($l.P.ExitCode) before the game settled"
+        Done $l $false "the launcher exited $($l.P.ExitCode) before the game settled"
       } else {
         # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
         $game = @([StableWin]::Windows([int[]]@($live | Where-Object { $_ -ne $l.P.Id })) | Where-Object { $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
         if ($game) {
           if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
-          elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) { $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle; $l.Shot = Get-Date }
+          elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) {
+            # Fulldex titles every DS window "Pokemon SoulSilver" (2026-11-15): for it, the ROM it was started with decides.
+            $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").CommandLine
+            $wrong = if ($l.En -eq 'fulldex') { $want = ($romLines | Where-Object { $_ -match "^$($l.Id) " } | Select-Object -First 1) -replace '^.*\| fulldex=(.*?) \|.*$', '$1'; $want -and $cmd -notlike "*$want*" } else { WrongGame $l.Id $game.MainWindowTitle }
+            if ($wrong) {
+              $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").CommandLine -replace '"[^"]*\\([^\\"]+)"', '"$1"'
+              $par = (Get-CimInstance Win32_Process -Filter "ProcessId=$((Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").ParentProcessId)").CommandLine -replace '"[^"]*\\([^\\"]+)"', '"$1"'
+              Done $l $false "the window is another game: '$($game.MainWindowTitle)', started as: $cl; by: $par"; continue
+            }
+            $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle; $l.Shot = Get-Date
+          }
         } else { $l.Steady = $null }
         if (-not $l.Shot -and ((Get-Date) - $l.T).TotalSeconds -gt $l.Limit) {
           $l.P.Refresh(); [void][StableWin]::Shot($l.P.MainWindowHandle, "$Report\shots\failed-$($l.Id)-$($l.En).png")
@@ -508,6 +545,7 @@ if (On 'play') {
       }
     }
   }
+  foreach ($l in $lanes) { KillGames $l; try { if (-not $l.P.HasExited) { [void]$l.P.CloseMainWindow(); if (-not $l.P.WaitForExit(15000)) { $l.P.Kill() } } } catch { } }
   ClearGames
   if ($SaveFolder) {
     $cfg = Join-Path $app 'engines\fulldex\settings.cfg'

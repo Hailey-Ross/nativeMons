@@ -11918,11 +11918,14 @@ static class NativeMonsLauncher {
                 // The one already open does it: it's told through a file in state\ and a message to its window.
                 if (game != null) try { File.WriteAllText(Path.Combine(Config.State, "request.txt"), (menu ? "show" : "play") + "\n" + game + "\n" + (slot ?? "")); } catch { }
                 int me = Process.GetCurrentProcess().Id;
+                // Every launcher of this folder is told: each reads request.txt from its own state folder, so with tests
+                // side by side (NATIVEMONS_STATE) only the one this request is for acts on it.
+                bool fronted = false;
                 foreach (var other in Process.GetProcessesByName("NativeMonsLauncher"))
                     if (other.Id != me && other.MainWindowHandle != IntPtr.Zero && SameFolder(other)) {
                         if (game != null) Native.PostMessage(other.MainWindowHandle, LauncherForm.WM_REQUEST, IntPtr.Zero, IntPtr.Zero);
-                        if (Native.IsWindowVisible(other.MainWindowHandle)) Native.Front(other.MainWindowHandle);
-                        break;
+                        if (!fronted && Native.IsWindowVisible(other.MainWindowHandle) && Environment.GetEnvironmentVariable("NATIVEMONS_STATE") == null) { Native.Front(other.MainWindowHandle); fronted = true; }
+                        if (Environment.GetEnvironmentVariable("NATIVEMONS_STATE") == null) break;
                     }
                 return;
             }
