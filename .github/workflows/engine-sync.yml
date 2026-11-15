@@ -1,9 +1,10 @@
-# Nightly: upstream engine updates into the forks, and their pins onto dev (notes/engine-sync.md).
+# Twice a day: upstream engine updates into the forks, and their pins onto dev (notes/engine-sync.md).
 name: Engine sync
 
 on:
   schedule:
-    - cron: "0 8 * * *"   # 1:00 AM MST
+    - cron: "0 7 * * *"   # midnight MST
+    - cron: "0 19 * * *"  # noon MST (GitHub may start scheduled runs late)
   workflow_dispatch:
 
 permissions:
