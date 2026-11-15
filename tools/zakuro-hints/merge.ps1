@@ -1,8 +1,8 @@
-# Merges a player's shared Zakuro findings (an issue from the launcher's "Share Zakuro findings") into the shared lists
-# of the Zakuro fork (nativemons-hints\<title id>-<code hash>.hints), after checking them. Commit and push the fork
-# yourself afterwards: its release ships the lists to every player.
-#   merge.ps1 -Issue 123 -Fork <zakuro checkout> [-Close]
-param([Parameter(Mandatory)][int]$Issue, [Parameter(Mandatory)][string]$Fork, [switch]$Close)
+# Merges a player's shared Zakuro findings (an issue from the launcher's "Share Zakuro findings") into the definitions
+# branch of the Zakuro fork, nativemons-hints (hints\<title id>-<code hash>.hints and index.txt), after checking them.
+# Launchers download changed lists from that branch, so -Push puts them in front of every player within hours.
+#   merge.ps1 -Issue 123 -Branch <checkout of the nativemons-hints branch> [-Push] [-Close]
+param([Parameter(Mandatory)][int]$Issue, [Parameter(Mandatory)][string]$Branch, [switch]$Push, [switch]$Close)
 $ErrorActionPreference = 'Stop'
 $repo = 'Hailey-Ross/nativeMons'
 # The titles 3DSrecomp+Zakuro builds (Recomp.Titles in the launcher).
@@ -33,7 +33,9 @@ Remove-Item $tmp
 if ($bad -gt 0) { throw "$bad lines aren't addresses in a game's code: nothing merged." }
 if ($got.Count -eq 0) { throw 'The file has no addresses.' }
 
-$dir = Join-Path $Fork 'nativemons-hints'
+if ((git -C $Branch rev-parse --abbrev-ref HEAD) -ne 'nativemons-hints') { throw "$Branch isn't on the nativemons-hints branch." }
+git -C $Branch pull -q --ff-only
+$dir = Join-Path $Branch 'hints'
 New-Item -ItemType Directory -Force $dir | Out-Null
 $file = Join-Path $dir "$code.hints"
 $have = New-Object System.Collections.Generic.SortedSet[uint32]
@@ -41,9 +43,18 @@ if (Test-Path $file) { foreach ($l in Get-Content $file) { if ($l -match '^[0-9A
 $before = $have.Count
 foreach ($a in $got) { [void]$have.Add($a) }
 $added = $have.Count - $before
-Set-Content -LiteralPath $file -Value ($have | ForEach-Object { $_.ToString('X8') }) -Encoding ascii
+# LF only: index.txt checksums the exact bytes the launcher downloads.
+[IO.File]::WriteAllText($file, (($have | ForEach-Object { $_.ToString('X8') + "`n" }) -join ''))
+$index = Get-ChildItem $dir -Filter *.hints | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())`n" }
+[IO.File]::WriteAllText((Join-Path $Branch 'index.txt'), ($index -join ''))
 "Issue ${Issue}: $($got.Count) addresses for $code, $added new; $file now holds $($have.Count)."
+if ($Push -and $added -gt 0) {
+    git -C $Branch add hints index.txt
+    git -C $Branch commit -q -m "Findings from nativeMons issue $Issue for $code"
+    git -C $Branch push -q origin nativemons-hints
+    'Pushed: launchers pick it up at their next check.'
+}
 if ($Close) {
-    gh issue comment $Issue -R $repo --body "Thank you! $added new places from this list are in the shared list for $code, and reach everyone's builds with the next 3DSrecomp+Zakuro update."
+    gh issue comment $Issue -R $repo --body "Thank you! $added new places from this list are in the shared list for $code, and reach everyone's launcher at its next check, which rebuilds the game quietly to cover them."
     gh issue close $Issue -R $repo
 }

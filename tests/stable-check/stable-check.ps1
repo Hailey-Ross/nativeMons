@@ -330,6 +330,10 @@ if (On 'recomp') {
   $zk = Join-Path $app 'engines\zakuro'
   $help = & "$zk\zakuro.exe" --help 2>&1 | Out-String
   T recomp 'Zakuro takes --fullscreen' ($help -match '--fullscreen') ''
+  T recomp 'Zakuro takes --state-save and --state-load (quick start)' ($help -match '--state-save' -and $help -match '--state-load') ''
+  # The shared lists from the nativemons-hints branch: each download is checked against index.txt.
+  $r = "$Work\hints.txt"; $null = Launcher @('--recomp-hints', $r); $hr = Get-Content $r -Raw
+  T recomp 'shared Zakuro findings download from their branch' ($hr -match '^ok .*\.hints=') $hr
   $junk = "$Work\0004000000164800.dll"; Set-Content $junk 'not a library'
   $o = & "$zk\nativemons-recomp.exe" check $junk 2>&1 | Out-String
   T recomp 'a library this Zakuro cannot run counts as outdated' ($LASTEXITCODE -eq 3 -and $o -match 'outdated') "exit $LASTEXITCODE $o"

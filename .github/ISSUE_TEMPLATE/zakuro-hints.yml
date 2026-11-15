@@ -1,5 +1,5 @@
 name: Zakuro findings
-description: Share where Zakuro had to interpret a 3DS game's code, so everyone's 3DSrecomp+Zakuro builds cover it.
+description: Share where Zakuro had to interpret a 3DS game's code. Once checked, it goes into the shared lists every launcher downloads, so everyone's 3DSrecomp+Zakuro builds cover it.
 title: "Zakuro hints: "
 labels: ["zakuro-hints"]
 body:

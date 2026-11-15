@@ -297,6 +297,7 @@ static class Recomp {
     public static string Dir { get { return Path.Combine(Ctr3dsSaves.Root, "recomp"); } }
     public static string LibraryOf(GameEntry g) { return Path.Combine(Dir, g.Ctr.ToUpperInvariant() + ".dll"); }
     static string StampOf(GameEntry g) { return Path.Combine(Dir, g.Ctr.ToUpperInvariant() + ".txt"); }
+    public static bool Built(GameEntry g) { return g.Ctr != null && File.Exists(LibraryOf(g)) && File.Exists(StampOf(g)); }
     static string Work { get { return Path.Combine(Dir, "work"); } }
     static string Cache { get { return Path.Combine(Dir, "cache"); } }
     static string ZigHome { get { return Path.Combine(Ctr3dsSaves.Root, "zig-" + ZigVersion); } }
@@ -323,6 +324,8 @@ static class Recomp {
             if (!File.Exists(lib) || stamp.Length == 0 || stamp[0].Trim() != RomKey(g)) return "missing";
             int covered;
             bool better = stamp.Length > 1 && int.TryParse(stamp[1], out covered) && HintCount(g) - covered >= ImproveAfter;
+            string sk = SharedKey(g);
+            if (sk != "" && (stamp.Length < 3 || stamp[2].Trim() != sk)) better = true;
             string key = lib + "|" + File.GetLastWriteTimeUtc(lib).Ticks + "|" + File.GetLastWriteTimeUtc(Tool).Ticks;
             string known;
             if (states.TryGetValue(key, out known)) return known == "ready" && better ? "old" : known;
@@ -361,6 +364,61 @@ static class Recomp {
         File.WriteAllLines(to, File.ReadAllLines(HintsOf(g)).Select(l => l.Trim()).Where(l => System.Text.RegularExpressions.Regex.IsMatch(l, "^(0x)?[0-9A-Fa-f]{1,8}$")).ToArray());
         return to;
     }
+    // Shared findings, kept current from our Zakuro fork's nativemons-hints branch without a Zakuro update (user, 2026-11-15).
+    const string HintsBranch = "https://raw.githubusercontent.com/Hailey-Ross/zakuro/nativemons-hints/";
+    public static string SharedDir { get { return Path.Combine(Dir, "shared-hints"); } }
+    static string PackagedHints { get { return Path.Combine(Path.GetDirectoryName(Config.Zakuro), "hints"); } }
+    static string CodeIdFile(GameEntry g) { return Path.Combine(Dir, g.Ctr.ToUpperInvariant() + ".codeid"); }
+    public static string KnownCodeId(GameEntry g) { try { return File.Exists(CodeIdFile(g)) ? File.ReadAllText(CodeIdFile(g)).Trim() : null; } catch { return null; } }
+    // Worked out once per built game, off the window's thread: it reads the dump.
+    public static void LearnCodeId(GameEntry g) {
+        if (KnownCodeId(g) != null || !File.Exists(LibraryOf(g))) return;
+        string id = CodeId(g);
+        if (id != null) try { File.WriteAllText(CodeIdFile(g), id); } catch { }
+    }
+    static string HintsDir { get { return Directory.Exists(SharedDir) && Directory.GetFiles(SharedDir, "*.hints").Length > 0 ? SharedDir : PackagedHints; } }
+    // The shared list this game's build would take in, by its checksum; "" when there's none.
+    public static string SharedKey(GameEntry g) {
+        string id = KnownCodeId(g);
+        return id == null ? "" : SaveGuard.Hash(Path.Combine(HintsDir, id + ".hints"));
+    }
+    static bool HintText(byte[] data) {
+        foreach (var raw in Encoding.ASCII.GetString(data).Split('\n')) {
+            string l = raw.Trim();
+            if (l != "" && !l.StartsWith("#") && !System.Text.RegularExpressions.Regex.IsMatch(l, "^[0-9A-F]{8}$")) return false;
+        }
+        return true;
+    }
+    // index.txt lists "<title id>-<code hash>.hints <sha256>"; only changed lists download, each checked before use.
+    public static string CheckSharedHints() {
+        try {
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            Directory.CreateDirectory(SharedDir);
+            using (var web = new System.Net.WebClient()) {
+                web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+                string index = web.DownloadString(HintsBranch + "index.txt");
+                foreach (var line in index.Split('\n')) {
+                    var m = System.Text.RegularExpressions.Regex.Match(line.Trim(), "^([0-9A-F]{16})-[0-9A-F]{16}\\.hints ([0-9a-f]{64})$");
+                    if (!m.Success || !Titles.Contains(m.Groups[1].Value)) continue;
+                    string name = line.Trim().Split(' ')[0], want = m.Groups[2].Value.ToUpperInvariant(), local = Path.Combine(SharedDir, name);
+                    if (SaveGuard.Hash(local) == want) continue;
+                    web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
+                    byte[] data = web.DownloadData(HintsBranch + "hints/" + name);
+                    string got; using (var sha = SHA256.Create()) got = BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "");
+                    if (data.Length > (2 << 20) || got != want || !HintText(data)) continue;
+                    File.WriteAllBytes(local + ".new", data);
+                    if (File.Exists(local)) File.Delete(local);
+                    File.Move(local + ".new", local);
+                }
+            }
+            // The lists this Zakuro came with, until the branch has its own of them.
+            if (Directory.Exists(PackagedHints)) foreach (var f in Directory.GetFiles(PackagedHints, "*.hints")) {
+                string to = Path.Combine(SharedDir, Path.GetFileName(f));
+                if (!File.Exists(to)) File.Copy(f, to);
+            }
+            return null;
+        } catch (Exception x) { return x.Message; }
+    }
     // Zig, the C compiler, downloaded once and checked against its pinned checksum (the one Zakuro pins).
     public static string EnsureZig() {
         string zip = ZigHome + ".download.zip", temp = ZigHome + ".new";
@@ -388,7 +446,8 @@ static class Recomp {
     static ProcessStartInfo BuildInto(GameEntry g, string library, string work) {
         Directory.CreateDirectory(Dir);
         if (Directory.Exists(work)) Directory.Delete(work, true);
-        string shared = Path.Combine(Path.GetDirectoryName(Config.Zakuro), "hints");
+        string shared = HintsDir;
+        try { File.WriteAllText(library + ".shared", SharedKey(g)); } catch { }
         var psi = new ProcessStartInfo(Tool, "build \"" + g.CtrPlainRom + "\" \"" + work + "\" \"" + library + "\" --cache \"" + Cache + "\"" + (Directory.Exists(shared) ? " --shared-hints \"" + shared + "\"" : "")) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Dir, RedirectStandardOutput = true, RedirectStandardError = true };
         psi.EnvironmentVariables["PATH"] = Path.GetDirectoryName(ZigExe) + ";" + Environment.GetEnvironmentVariable("PATH");
         string appdata = Path.Combine(Dir, "appdata"), hintsFor = Path.Combine(appdata, "3dsrecomp", g.Ctr.ToUpperInvariant() + ".hints");
@@ -409,9 +468,14 @@ static class Recomp {
         try { if (Directory.Exists(Path.Combine(Dir, "zig-cache"))) Directory.Delete(Path.Combine(Dir, "zig-cache"), true); } catch { }
         // The linker's debug file (about 750 MB) and import library aren't needed to play.
         foreach (var pattern in new[] { "*.pdb", "*.lib", "*.part" }) foreach (var f in Directory.GetFiles(Dir, pattern)) try { File.Delete(f); } catch { }
-        try { if (ok) File.WriteAllLines(StampOf(g), new[] { RomKey(g), HintCount(g).ToString() }); else if (File.Exists(LibraryOf(g)) && code != 0) File.Delete(LibraryOf(g)); } catch { }
+        string used = UsedShared(LibraryOf(g));
+        try { if (ok) File.WriteAllLines(StampOf(g), new[] { RomKey(g), HintCount(g).ToString(), used }); else if (File.Exists(LibraryOf(g)) && code != 0) File.Delete(LibraryOf(g)); } catch { }
         PruneCache(3L << 30);
         return ok;
+    }
+    static string UsedShared(string library) {
+        string f = library + ".shared";
+        try { string k = File.Exists(f) ? File.ReadAllText(f).Trim() : ""; File.Delete(f); return k; } catch { return ""; }
     }
     static Process quiet; static GameEntry quietFor;
     // For the launcher's banner: what's improving and how far, or what just finished (user, 2026-11-15).
@@ -434,8 +498,13 @@ static class Recomp {
     static void NextQueued() {
         if (quiet != null) return;
         GameEntry g = null;
-        lock (queued) while (queued.Count > 0 && g == null) { var c = queued.Dequeue(); if (State(c) == "missing" || State(c) == "outdated") g = c; }
-        if (g != null) ImproveQuietly(g, true);
+        bool first = true;
+        lock (queued) while (queued.Count > 0 && g == null) {
+            var c = queued.Dequeue(); string st = State(c);
+            if (st == "missing" || st == "outdated") g = c;
+            else if (st == "old") { g = c; first = false; }
+        }
+        if (g != null) ImproveQuietly(g, first);
     }
     public static void ImproveQuietly(GameEntry g) { ImproveQuietly(g, false); }
     static void ImproveQuietly(GameEntry g, bool first) {
@@ -457,7 +526,7 @@ static class Recomp {
                 foreach (var pattern in new[] { "*.pdb", "*.lib", "*.part" }) foreach (var f in Directory.GetFiles(Dir, pattern)) try { File.Delete(f); } catch { }
                 try { if (Directory.Exists(Path.Combine(Dir, "zig-cache"))) Directory.Delete(Path.Combine(Dir, "zig-cache"), true); } catch { }
                 if (ok) { try { File.WriteAllText(Next(g) + ".covers", covered.ToString()); } catch { } SwapIn(g); DoneAt = DateTime.Now; }
-                else try { File.Delete(Next(g)); } catch { }
+                else try { File.Delete(Next(g)); File.Delete(Next(g) + ".shared"); } catch { }
                 quiet = null; quietFor = null;
                 NextQueued();
             };
@@ -473,10 +542,11 @@ static class Recomp {
         try {
             if (!File.Exists(Next(g)) || Emu3ds.Running(Emu3ds.Zakuro)) return;
             string covers = File.Exists(Next(g) + ".covers") ? File.ReadAllText(Next(g) + ".covers").Trim() : HintCount(g).ToString();
+            string used = UsedShared(Next(g));
             Directory.CreateDirectory(Dir);
             File.Copy(Next(g), LibraryOf(g), true);
             File.Delete(Next(g)); File.Delete(Next(g) + ".covers");
-            File.WriteAllLines(StampOf(g), new[] { RomKey(g), covers });
+            File.WriteAllLines(StampOf(g), new[] { RomKey(g), covers, used });
         } catch { }
     }
     // A quiet rebuild cut off by the launcher closing leaves its work folder (compilers still held it): cleared at start.
@@ -4599,7 +4669,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Wallpapers: " + (Wallpaper.Drawn ? "Drawn scenes" : "From your games"), "", true, delegate { pages.Push(WallpaperPage(false)); }) { Icon = '\uE790', Info = "Drawn scenes or pictures from your own play, and a picture of your own for any game." });
         p.Items.Add(new Item("Controls", "", true, delegate { pages.Push(ControlsPage()); }) { Icon = '\uE765', Info = "The keys each engine uses while you play: saving, fast forward, snapshots, screenshots." });
         p.Items.Add(new Item("Screenshots", "", true, delegate { pages.Push(ScreenshotsPage()); }) { Icon = '', Info = "Open the folders where nativeplat and Infinite Fusion put the screenshots you take while you play." });
-        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, and DS games on Fulldex. Select to turn it " + (QuickStart ? "off" : "on") + "." });
+        p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, DS games on Fulldex, and 3DSrecomp+Zakuro. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: " + Updater.Upper(Updater.LatestLabel) + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
         p.Items.Add(new Item("Credits", "", true, delegate { pages.Push(CreditsPage()); }) { Icon = '\uE946', Info = "The projects this is built from." });
@@ -7955,6 +8025,7 @@ class LauncherForm : Form {
     List<GameEntry> new3ds = new List<GameEntry>();
     void Prepare3ds() {
         if (!Recomp.Installed) return;
+        RefreshSharedHints();
         var asked = new HashSet<string>(File.Exists(RecompAskedFile) ? File.ReadAllLines(RecompAskedFile) : new string[0]);
         var found = Library.Games.Where(g => g.OnRecomp && g.Engine() == "recomp" && !asked.Contains(g.Ctr) && Recomp.State(g) != "ready" && Recomp.State(g) != "old").ToList();
         if (found.Count == 0) return;
@@ -7962,6 +8033,16 @@ class LauncherForm : Form {
         if (!File.Exists(Recomp.ZigExe)) { startStage = "Getting your 3DS games ready (downloading Zig)"; Recomp.EnsureZig(); }
         foreach (var g in found) CtrHeaderFix.Needs(g.CtrPlainRom);
         new3ds = found;
+    }
+    void RefreshSharedHints() {
+        Recomp.CheckSharedHints();
+        foreach (var g in Library.Games.Where(x => x.OnRecomp && x.Engine() == "recomp" && Recomp.Built(x)).ToList()) Recomp.LearnCodeId(g);
+    }
+    // Built games whose shared list grew since their build: rebuilt quietly, one by one, when the launcher is idle.
+    void ImproveFromShared() {
+        if (!Recomp.Installed || job != null || RunningGames() != "") return;
+        var old = Library.Games.Where(g => g.OnRecomp && g.Engine() == "recomp" && Recomp.Built(g) && Recomp.State(g) == "old").ToList();
+        if (old.Count > 0) Recomp.BuildQuietly(old);
     }
     // Prepares every Gen1Recomp game behind the splash (notes/launcher.md, Gen1Recomp).
     void PrepareAll() {
@@ -8057,6 +8138,7 @@ class LauncherForm : Form {
     void AskAboutRecomp() {
         if (!Recomp.Installed) return;
         if (!Recomp.Busy) Recomp.ClearLeftovers();
+        ImproveFromShared();
         // For tests: NATIVEMONS_TEST_IMPROVE=<game> starts its quiet rebuild now, to see the banner.
         var test = Library.Games.Find(x => x.Id == Environment.GetEnvironmentVariable("NATIVEMONS_TEST_IMPROVE"));
         if (test != null && test.OnRecomp) Recomp.ImproveQuietly(test);
@@ -8114,7 +8196,7 @@ class LauncherForm : Form {
     Page ShareHintsPage(GameEntry g, bool afterPlay) {
         var p = new Page { Title = "Share Zakuro findings?", Theme = g.Theme, FitBody = true };
         p.Body = "While you played " + g.Title + ", Zakuro found " + Recomp.HintCount(g) + " places in its code that its build didn't cover, so it ran them the slow way.\n\n"
-            + "Sharing them improves the game for you and every other player: a nativeMons update adds them to the shared lists, and every build of " + g.Title + " from then on covers them, yours on any PC included. That means smoother play, with fewer slowdowns in the places you've been.\n\n"
+            + "Sharing them improves the game for you and every other player: once checked, they go into the shared lists every launcher downloads, and every build of " + g.Title + " from then on covers them, yours on any PC included. That means smoother play, with fewer slowdowns in the places you've been.\n\n"
             + "What's shared: those addresses only (numbers like 0010022D), named by the game's code version. No game code, save or anything about you.\n\n"
             + "Share opens a form on the nativeMons GitHub page (you need a GitHub account) and shows the file to attach. Nothing is sent until you submit the form.";
         p.Items.Add(new Item(afterPlay ? "Yes, share" : "Share", "", true, delegate {
@@ -8220,6 +8302,9 @@ class LauncherForm : Form {
             var area = Screen.FromControl(this).WorkingArea;
             string place = " --at " + (area.X + 40) + "," + (area.Y + 30) + " --scale " + Ctr3dsSaves.ZakuroScale(area) + " --focus-pad --fast-forward 4";
             string args = e.Native ? "\"" + g.CtrPlainRom + "\" --recompiled \"" + Recomp.LibraryOf(g) + "\" --data \"" + Ctr3dsSaves.EmuData(e) + "\"" + place + (fullscreen ? " --fullscreen" : "") : "\"" + g.CtrRom + "\"";
+            // Quick start: from the title-screen snapshot, only while the save is exactly the one it was made from.
+            if (e.Native && QuickStart && SnapshotGood(g)) { args += " --state-load \"" + SnapFile(g) + "\""; QuickNote("snapshot used " + g.Id); }
+            else if (e.Native && QuickStart && CanSnapshot(g)) QuickNote("snapshot not used " + g.Id);
             var psi = new ProcessStartInfo(e.ExePath, args) { UseShellExecute = false, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
             if (e.Native) psi.EnvironmentVariables["APPDATA"] = Path.Combine(Ctr3dsSaves.EmuData(e), "appdata");
             RunJob(g.Title, psi, true, delegate(int code) {
@@ -8553,18 +8638,27 @@ class LauncherForm : Form {
         readySave = QuickSave(g);
         QuickNote("starting " + g.Id + " pid " + p.Id);
     }
-    // Fulldex DS quick start: a title-screen snapshot, used only while the save matches (notes/launcher.md, Quick start).
+    // Fulldex DS and 3DSrecomp+Zakuro quick start: a title-screen snapshot, used only while the save matches (notes/launcher.md, Quick start).
     static string SnapDir { get { return Path.Combine(Config.State, "quick-start"); } }
     static string SnapFile(GameEntry g) { return Path.Combine(SnapDir, g.Id + ".snap"); }
     static string SnapInfo(GameEntry g) { return Path.Combine(SnapDir, g.Id + ".txt"); }
     static string FulldexSave(GameEntry g) { return Path.Combine(Config.FulldexDir, "saves", g.Save); }
     static string FulldexFuncs(GameEntry g) { return g.FulldexCode == "IPGE" || g.FulldexCode == "IPKE" ? null : Path.Combine(Config.FulldexDir, "data", "funcs", g.FulldexCode + ".txt"); }
+    // Frames from boot to the title screen, which waits there.
+    const int ZakuroTitleFrames = 1800;
+    static bool ZakuroSnap(GameEntry g) {
+        return g != null && g.Playable && g.Engine() == "recomp" && g.CtrPlainRom != null && Recomp.Built(g) && !Recomp.Busy && File.Exists(Config.Zakuro);
+    }
+    static string SnapSave(GameEntry g) { return g.Engine() == "recomp" ? Ctr3dsSaves.Main(g) : FulldexSave(g); }
     static bool CanSnapshot(GameEntry g) {
+        if (ZakuroSnap(g)) return true;
         return g != null && g.Playable && g.Engine() == "fulldex" && g.IsDs && g.ArtFrame > 0 && g.FulldexRom != null && g.FulldexCode != null
             && File.Exists(Config.Fulldex) && !Library.NeedsPatch(g.FulldexRom);
     }
     static string FileKey(string path) { try { var f = new FileInfo(path); return f.Exists ? path + "|" + f.Length + "|" + f.LastWriteTimeUtc.Ticks : path + "|none"; } catch { return path + "|?"; } }
     static string SnapKey(GameEntry g) {
+        if (g.Engine() == "recomp")
+            return string.Join("\n", new[] { FileKey(g.CtrPlainRom), FileKey(Config.Zakuro), FileKey(Recomp.LibraryOf(g)), SaveHash(Path.Combine(Ctr3dsSaves.Master(g), "metadata")), ZakuroTitleFrames.ToString() });
         return string.Join("\n", new[] { FileKey(g.FulldexRom), FileKey(Config.Fulldex), SaveGuard.Hash(Path.Combine(Config.FulldexDir, "settings.cfg")), FulldexFuncs(g) ?? "", g.ArtFrame.ToString() });
     }
     // The save's hash, worked out again only when the file changes: this is asked several times a second.
@@ -8581,7 +8675,7 @@ class LauncherForm : Form {
         try {
             if (!CanSnapshot(g) || !File.Exists(SnapFile(g)) || !File.Exists(SnapInfo(g))) return false;
             var info = File.ReadAllText(SnapInfo(g)).Split(new[] { "\n--\n" }, StringSplitOptions.None);
-            return info.Length == 2 && info[0] == SnapKey(g) && info[1] == SaveHash(FulldexSave(g));
+            return info.Length == 2 && info[0] == SnapKey(g) && info[1] == SaveHash(SnapSave(g));
         } catch { return false; }
     }
     Process snapping; string snapFailed;
@@ -8593,21 +8687,42 @@ class LauncherForm : Form {
         if (snapping != null) { if (job != null && jobIsGame) StopSnapshot(); return; }
         if (!menuIdle || !QuickStart || !CanSnapshot(current) || SnapshotGood(current) || RunningGames() != "") return;
         var g = current;
-        string key = SnapKey(g), save = FulldexSave(g), saveHash = SaveHash(save);
+        string key = SnapKey(g), save = SnapSave(g), saveHash = SaveHash(save);
         if (snapFailed == key + saveHash) return;
         string work = Path.Combine(SnapDir, g.Id + "-making"), copy = Path.Combine(work, "source.sav"), made = Path.Combine(work, "title.snap");
         try {
             if (Directory.Exists(work)) Directory.Delete(work, true);
             Directory.CreateDirectory(work);
-            if (File.Exists(save)) { File.Copy(save, copy); File.SetAttributes(copy, FileAttributes.Normal); }
+            if (g.Engine() == "recomp") {
+                // Zakuro plays a copy of the save folder, as Play hands it over, in a data folder of the snapshot's own.
+                string to = Path.Combine(work, "data", "user", "savedata", g.Ctr.ToUpperInvariant()), from = Path.Combine(Ctr3dsSaves.Master(g), "data");
+                if (Directory.Exists(from)) {
+                    Ctr3dsSaves.Mirror(from, to);
+                    string meta = Path.Combine(Ctr3dsSaves.Master(g), "metadata");
+                    if (File.Exists(meta)) File.Copy(meta, to + ".format");
+                    else if (File.Exists(Path.Combine(to, "main"))) File.WriteAllBytes(to + ".format", new byte[] { 0, 0, 4, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 });
+                }
+                copy = Path.Combine(to, "main");
+            } else if (File.Exists(save)) { File.Copy(save, copy); File.SetAttributes(copy, FileAttributes.Normal); }
             // The copy must be the save that was hashed; if the player's save moved on meanwhile, try again later.
             if (SaveGuard.Hash(copy) != saveHash) { Directory.Delete(work, true); return; }
         } catch { return; }
         string dir = Config.FulldexDir, funcs = FulldexFuncs(g);
+        ProcessStartInfo psi;
+        if (g.Engine() == "recomp") {
+            var e = Emu3ds.Zakuro;
+            // Its data folder is only made at the first play: a start in a missing folder fails.
+            Directory.CreateDirectory(Ctr3dsSaves.WorkingDir(e));
+            psi = new ProcessStartInfo(Config.Zakuro, "\"" + g.CtrPlainRom + "\" --recompiled \"" + Recomp.LibraryOf(g) + "\" --data \"" + Path.Combine(work, "data") + "\" --mute --headless " + ZakuroTitleFrames + " --state-save \"" + made + "\"")
+                { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Ctr3dsSaves.WorkingDir(e), RedirectStandardOutput = true, RedirectStandardError = true };
+            psi.EnvironmentVariables["APPDATA"] = Path.Combine(Ctr3dsSaves.EmuData(e), "appdata");
+        } else {
         string args = "\"" + g.FulldexRom + "\" --save \"" + copy + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --keep-settings --jit"
             + (funcs != null ? " --funcs \"" + funcs + "\"" : "") + " --headless --frames " + (g.ArtFrame + 5) + " --state-save \"" + made + "\" --state-at " + g.ArtFrame;
-        var p = new Process { StartInfo = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true } };
-        try { p.Start(); } catch { snapFailed = key + saveHash; return; }
+        psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };
+        }
+        var p = new Process { StartInfo = psi };
+        try { p.Start(); } catch (Exception x) { snapFailed = key + saveHash; QuickNote("snapshot failed " + g.Id + ": " + x.Message); try { Directory.Delete(work, true); } catch { } return; }
         try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
         snapping = p; snapPid = p.Id;
         QuickNote("snapshot making " + g.Id);
@@ -9154,7 +9269,10 @@ class LauncherForm : Form {
             RequestTick();
             QuickStartTick();
             // A launcher left open still finds out.
-            if (job == null && (DateTime.Now - updateCheckedAt).TotalHours >= 6) { updateCheckedAt = DateTime.Now; Task.Run(() => Updater.Check()); }
+            if (job == null && (DateTime.Now - updateCheckedAt).TotalHours >= 6) {
+                updateCheckedAt = DateTime.Now; Task.Run(() => Updater.Check());
+                if (Recomp.Installed) Task.Run(() => { try { RefreshSharedHints(); } catch { } }).ContinueWith(t => BeginInvoke((Action)ImproveFromShared));
+            }
         }
         // A tablet while Move Pokemon's boxes are anywhere in the page stack, a phone again once they've closed.
         MorphTowards(pages.Any(pg => pg.Boxes != null));
@@ -11722,6 +11840,12 @@ static class NativeMonsLauncher {
             if (argv[3] == "check") { var n = CtrHeaderFix.Needed(argv[2]); result = n == null ? "still encrypted" : n.Count == 0 ? "fine" : "needs " + string.Join(" ", n.Select(x => x.At.ToString("X") + ":" + x.Was.ToString("X2") + ">" + x.Now.ToString("X2")).ToArray()); }
             else result = (argv[3] == "fix" ? CtrHeaderFix.Fix(argv[2]) : CtrHeaderFix.Undo(argv[2])) ?? "ok";
             File.WriteAllText(argv[1], result);
+            return;
+        }
+        // --recomp-hints <result>: downloads the shared lists that changed, as start-up does.
+        if (argv.Length == 2 && argv[0] == "--recomp-hints") {
+            string why = Recomp.CheckSharedHints();
+            File.WriteAllText(argv[1], why ?? "ok " + string.Join(" ", Directory.GetFiles(Recomp.SharedDir, "*.hints").Select(f => Path.GetFileName(f) + "=" + SaveGuard.Hash(f).Substring(0, 8)).ToArray()));
             return;
         }
         // --recomp <result> <game> state|build: 3DSrecomp+Zakuro with no window (build: Idle, the Settings cores).

@@ -25,7 +25,7 @@ runs:
         FULLDEX_RELEASE: "fulldex-2026-11-12"
         PLATINUM_RELEASE: "v0.2.2"
         NATIVEPLAT_RELEASE: "windows-22adf5d0d"
-        ZAKURO_RELEASE: "windows-1768916d2"
+        ZAKURO_RELEASE: "windows-642579ff3"
       run: |
         $dist = "dist\nativeMons"
         Copy-Item LICENSE, README.md $dist
