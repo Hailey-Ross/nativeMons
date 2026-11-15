@@ -208,7 +208,9 @@ if (On 'repo') {
   $msgs = git log -60 --format=%B | Select-String -Pattern 'co-authored-by|claude-session' -SimpleMatch:$false
   T repo 'no attribution lines in recent commits' (-not $msgs)
   # Git for Windows' sh, which usually isn't on PATH.
-  $sh = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin\sh.exe'
+  # git.exe is in Git\cmd or, from Git Bash, Git\mingw64in: sh.exe is in Gitin either way.
+  $gitDir = Split-Path (Split-Path (Get-Command git).Source); if ((Split-Path $gitDir -Leaf) -eq 'mingw64') { $gitDir = Split-Path $gitDir }
+  $sh = Join-Path $gitDir 'bin\sh.exe'
   $removed = if (Test-Path $sh) { & $sh engines/gen1recomp/tools/nativemons/check-removed.sh 2>&1 | Select-Object -Last 1 } else { "no sh at $sh" }
   T repo 'Gen1Recomp proprietary launcher files are absent' ("$removed" -match '^OK') "$removed"
   $ba = Get-Content launcher\build-all.ps1 -Raw; $ay = Get-Content .github\actions\build-package\action.yml -Raw
