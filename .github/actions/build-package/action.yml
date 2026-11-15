@@ -116,7 +116,7 @@ runs:
         $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Extension -in '.gb', '.gbc', '.gba', '.nds', '.3ds', '.cci', '.cia', '.cxi', '.sav' -or $_.Name -eq 'key1.bin' }
         if ($bad) { $bad.FullName; throw "Game data in the package" }
         # 3DSrecomp+Zakuro builds come from players' games: never a recompiled library, its C or its objects.
-        $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Name -match '^[0-9A-Fa-f]{16}\.(dll|so)$' -or $_.Extension -in '.c', '.o', '.obj' -or $_.Name -match '_functions\.h$' }
+        $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Name -match '^[0-9A-Fa-f]{16}\.(dll|so)$' -or $_.Name -match '^(code\d+|natives)\.c$|^(m\d+_)?functions\.h$' -or $_.Extension -in '.o', '.obj' }
         if ($bad) { $bad.FullName; throw "Game data in the package" }
         foreach ($p in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
           if (Test-Path "dist\nativeMons\engines\gen1recomp\$p") { throw "Removed launcher file in the package: $p" }

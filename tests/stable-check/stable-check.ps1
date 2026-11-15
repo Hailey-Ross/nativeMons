@@ -199,7 +199,7 @@ if (On 'repo') {
   $tracked = git ls-files
   $bad = $tracked | Where-Object { $_ -match '\.(gb|gbc|gba|nds|sav)$' -or $_ -match '^\.claude/' -or $_ -match 'key1\.bin$' -or $_ -match '(^|/)state/' }
   T repo 'no games, saves, keys or private folders are tracked' (-not $bad) ($bad -join ', ')
-  $recomp = $tracked | Where-Object { $_ -match '\.(3ds|cci|cia|cxi|c|o|obj)$' -or $_ -match '(^|/)[0-9A-Fa-f]{16}\.(dll|so)$' -or $_ -match '_functions\.h$' }
+  $recomp = $tracked | Where-Object { $_ -match '\.(3ds|cci|cia|cxi|o|obj)$' -or $_ -match '(^|/)[0-9A-Fa-f]{16}\.(dll|so)$' -or $_ -match '(^|/)((code\d+|natives)\.c|(m\d+_)?functions\.h)$' }
   T repo 'no 3DS dumps or recompiled game code are tracked' (-not $recomp) ($recomp -join ', ')
   $attr = git grep -il -E 'co-authored-by|claude-session|generated with claude' -- ':!tests/stable-check'
   T repo 'no attribution lines in the tree' (-not $attr) ($attr -join ', ')
@@ -255,7 +255,7 @@ if (On 'package') {
   $all = Get-ChildItem $app -Recurse -File -Force
   $bad = $all | Where-Object { $_.Extension -match '^\.(gb|gbc|gba|nds|sav)$' -or $_.Name -eq 'key1.bin' -or $_.FullName -match '\\\.claude\\' -or $_.FullName -match [regex]::Escape($app) + '\\state\\' }
   T package 'no games, saves, keys or state inside' (-not $bad) (($bad | Select-Object -First 5 | ForEach-Object Name) -join ', ')
-  $recomp = $all | Where-Object { $_.FullName -notmatch [regex]::Escape($app) + '\\state\\' -and ($_.Extension -match '^\.(3ds|cci|cia|cxi|c|o|obj)$' -or $_.Name -match '^[0-9A-Fa-f]{16}\.(dll|so)$' -or $_.Name -match '_functions\.h$') }
+  $recomp = $all | Where-Object { $_.FullName -notmatch [regex]::Escape($app) + '\\state\\' -and ($_.Extension -match '^\.(3ds|cci|cia|cxi|o|obj)$' -or $_.Name -match '^[0-9A-Fa-f]{16}\.(dll|so)$' -or $_.Name -match '^((code\d+|natives)\.c|(m\d+_)?functions\.h)$') }
   T package 'no 3DS dumps or recompiled game code inside' (-not $recomp) (($recomp | Select-Object -First 5 | ForEach-Object Name) -join ', ')
   $prop = $all | Where-Object { $_.Name -match '^(LauncherView|LauncherSettings|OnlinePanel|CartLabelArt|CartShape|LauncherMods)\.lua$' -or $_.FullName -match '\\assets\\(launcher|labels)\\' }
   T package 'no Gen1Recomp proprietary launcher files inside' (-not $prop) (($prop | Select-Object -First 5 | ForEach-Object Name) -join ', ')

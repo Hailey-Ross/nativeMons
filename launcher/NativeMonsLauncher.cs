@@ -4193,7 +4193,11 @@ class LauncherForm : Form {
         if (err != null) ShowText("Something went wrong", err, null);
         // NATIVEMONS_TEST_SETUP=1: the guided setup even where games are already found, to try it out.
         else if ((Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) || Environment.GetEnvironmentVariable("NATIVEMONS_TEST_SETUP") == "1") StartSetup();
-        else { AskAboutEncrypted(); AskAboutRecomp(); }
+        else {
+            AskAboutEncrypted();
+            // The one-time wallpaper question below ends at the main screen: the build question follows it instead.
+            if (Wallpaper.Chosen) AskAboutRecomp();
+        }
         // Asked once, also on the first start of the version that brought the choice.
         if (err == null && !firstSetup && !Wallpaper.Chosen) { setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds; pages.Push(SetupPage(3, true)); }
         Invalidate();
@@ -6489,6 +6493,7 @@ class LauncherForm : Form {
         inSetup = false; firstSetup = false; setupFrom = null;
         while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
         ReplaceMain();
+        AskAboutRecomp();
     }
     static readonly string[] SetupTitles = { "Welcome to nativeMons", "Where are your games?", "Play 3DS games too?", "Pick a wallpaper", "You're all set" };
     Page SetupPage(int step, bool only) {
@@ -7760,6 +7765,7 @@ class LauncherForm : Form {
         bool stopped = false;
         RunJob("Building " + g.Title, Recomp.BuildStart(g), false, delegate(int code) {
             bool ok = Recomp.Finish(g, code);
+            if (pages.Count > 1 && !pages.Peek().Main && pages.Peek().Title == g.Title) RebuildTop(delegate { return GamePage(g); });
             if (stopped) { ShowText("Build stopped", g.Title + " wasn't built. It starts over next time.", null); return; }
             if (!ok) { ShowLog("Couldn't build " + g.Title, "Your dump wasn't changed, and an emulator can still play it."); return; }
             BuildRecomp(rest, play);
