@@ -216,13 +216,20 @@ class Emu3ds {
             Notes = "The one to use: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well. Based on Azahar, with extras: it also opens encrypted dumps, and has built-in cheats." },
         new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
             Tag = "windows-a6aa2ad2e", Sha256 = "f011f57f9c37a1f7abfc6981e8806dd1129321b3875bea71299c2c1e0de19f83", Size = "about 44 MB",
-            Notes = "The backup: plain Azahar, for when AzaharPlus misbehaves. Needs decrypted dumps." },
+            Notes = "The backup: plain Azahar, for when AzaharPlus misbehaves. It opens decrypted dumps only: encrypted ones play with AzaharPlus." },
     };
     public static bool Enabled { get { return Config.Read("3ds-games.txt", "off") == "on"; } set { Config.Write("3ds-games.txt", value ? "on" : "off"); } }
     // Picked by the player, else the first one installed.
     public static Emu3ds Default {
         get { string id = Config.Read("3ds-emulator.txt", ""); return All.FirstOrDefault(e => e.Id == id && e.Installed) ?? All.FirstOrDefault(e => e.Installed); }
         set { Config.Write("3ds-emulator.txt", value == null ? "" : value.Id); }
+    }
+    public static Emu3ds Plus { get { return All.First(x => x.Id == "azaharplus"); } }
+    // An encrypted dump goes to AzaharPlus, whichever is picked: Azahar can't open it.
+    public static Emu3ds ForGame(GameEntry g) {
+        var d = Default;
+        if (g == null || !g.CtrEncrypted || d == Plus) return d;
+        return Plus.Installed ? Plus : null;
     }
     public static bool CanDownload(Emu3ds e) { return e.Tag != null && e.Sha256 != null; }
     // Only this emulator's own program blocks replacing its folder; other games and background jobs don't.
@@ -811,9 +818,9 @@ class GameEntry {
     public bool SaveTools { get { return Playable && Pc == null && Ctr == null; } }
     // Move Pokemon also takes 3DS games once they have a save (user, 2026-11-14).
     public bool MoveTools { get { return SaveTools || (Ctr != null && File.Exists(Ctr3dsSaves.Main(this))); } }
-    // A 3DS game: its title ID, and the decrypted dump an emulator plays in place.
-    public string Ctr, CtrRom;
-    public bool On3ds { get { return Ctr != null && CtrRom != null && Emu3ds.Enabled && Emu3ds.Default != null; } }
+    // A 3DS game: its title ID, and the dump an emulator plays in place.
+    public string Ctr, CtrRom; public bool CtrEncrypted;
+    public bool On3ds { get { return Ctr != null && CtrRom != null && Emu3ds.Enabled && Emu3ds.ForGame(this) != null; } }
     public int ArtFrame, TownFrame;   // frames from power-on to the title screen
     public string Gen1Rom, FulldexRom, NativeplatRom, FoundUnsupported, FoundSha1;
     public List<RomFile> Roms = new List<RomFile>();   // every distinct dump found
@@ -861,8 +868,8 @@ class GameEntry {
         string chosen = Config.Read("engine-" + Id + ".txt", l[0]);
         return l.Contains(chosen) ? chosen : l[0];
     }
-    public static string EngineName(string engine) { if (engine == "3ds") { var e = Emu3ds.Default; return e != null ? e.Name : "a 3DS emulator"; } return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
-    public static string EngineShort(string engine) { if (engine == "3ds") { var e = Emu3ds.Default; return e != null ? e.Short : "3DS"; } return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
+    public static string EngineName(string engine, GameEntry g = null) { if (engine == "3ds") { var e = g != null ? Emu3ds.ForGame(g) : Emu3ds.Default; return e != null ? e.Name : "a 3DS emulator"; } return engine == "fulldex" ? "Fulldex (widescreen, 60 fps)" : engine == "port" ? "the Platinum PC port (native)" : engine == "nativeplat" ? "nativeplat (native)" : engine == "pc" ? "its own program" : "Gen1Recomp (native, with mods)"; }
+    public static string EngineShort(string engine, GameEntry g = null) { if (engine == "3ds") { var e = g != null ? Emu3ds.ForGame(g) : Emu3ds.Default; return e != null ? e.Short : "3DS"; } return engine == "fulldex" ? "Fulldex" : engine == "port" ? "Platinum PC port" : engine == "nativeplat" ? "nativeplat" : engine == "pc" ? "PC" : "Gen1Recomp"; }
 }
 
 // Games that are PC programs of their own, such as Infinite Fusion (notes/launcher.md, PC games).
@@ -2956,9 +2963,9 @@ static class Library {
         if (g.Pc == "custom") return "Its program has moved or been deleted.";
         if (g.Pc != null) return "Not installed yet. Select it to install.";
         if (g.Ctr != null) {
-            if (g.CtrRom == null && g.FoundUnsupported != null) return "Found " + Path.GetFileName(g.FoundUnsupported) + ", but it is encrypted. Azahar needs a decrypted dump of your cartridge (GodMode9 on your 3DS makes one), or pick AzaharPlus under Emu, which opens encrypted dumps too.";
-            if (g.CtrRom == null) return "No ROM found. Add the folder with your decrypted .3ds dump under ROM folders.";
+            if (g.CtrRom == null) return "No ROM found. Add the folder with your .3ds dump under ROM folders.";
             if (!Emu3ds.Enabled) return "Found " + Path.GetFileName(g.CtrRom) + ". Turn on 3DS games under Emu on the home screen to play it.";
+            if (g.CtrEncrypted && Emu3ds.Default != null) return "Found " + Path.GetFileName(g.CtrRom) + ", an encrypted dump. Azahar can't open it, but AzaharPlus can: install AzaharPlus under Emu on the home screen, and this game plays with it.";
             return "Found " + Path.GetFileName(g.CtrRom) + ". Install an emulator under Emu on the home screen to play it.";
         }
         string rom = g.FulldexRom ?? g.FoundUnsupported;
@@ -3011,11 +3018,11 @@ static class Library {
         if (g.Roms.Count > 1 && g.Chosen.Sha1 != saved) Config.Write("rom-" + g.Id + ".txt", g.Chosen.Sha1);
         if (g.FulldexCode != null) g.FulldexRom = g.Chosen.File;
         if (g.Ctr != null) {
-            // AzaharPlus opens encrypted dumps too; Azahar only decrypted ones.
-            bool takesEncrypted = Emu3ds.Default != null && Emu3ds.Default.Id == "azaharplus";
-            var r = g.Chosen.Encrypted && !takesEncrypted ? Ranked(g).FirstOrDefault(x => !x.Encrypted) : g.Chosen;
-            g.CtrRom = r != null ? r.File : null;
-            if (r == null) g.FoundUnsupported = g.Chosen.File;
+            // With Azahar picked, a decrypted dump is used when there is one; an encrypted one goes to AzaharPlus.
+            var r = g.Chosen;
+            if (r.Encrypted && Emu3ds.Default != Emu3ds.Plus) r = Ranked(g).FirstOrDefault(x => !x.Encrypted) ?? r;
+            g.CtrRom = r.File;
+            g.CtrEncrypted = r.Encrypted;
         }
         // An engine with an exact list uses the chosen dump if it's on the list, or its best one that is.
         if (g.Gen1 != null) { var r = g.Chosen.Gen1Ok ? g.Chosen : Ranked(g).FirstOrDefault(x => x.Gen1Ok); g.Gen1Rom = r != null ? r.File : null; }
@@ -4166,7 +4173,7 @@ class LauncherForm : Form {
     Page MainPage() {
         var p = new Page { Title = "nativeMons", Main = true };
         p.OnBack = delegate { };
-        p.Items.Add(new Item(current != null ? "Play " + current.Title : "Play", current != null ? "Start " + current.Title + " with " + GameEntry.EngineName(current.Engine()) + "." : "Add a ROM folder first.", current != null, delegate { Play(current); }) { Icon = '' });
+        p.Items.Add(new Item(current != null ? "Play " + current.Title : "Play", current != null ? "Start " + current.Title + " with " + GameEntry.EngineName(current.Engine(), current) + "." : "Add a ROM folder first.", current != null, delegate { Play(current); }) { Icon = '' });
         int have = Library.Games.Count(g => g.Playable);
         p.Items.Add(new Item("Games", have + " of " + Library.Games.Count + " found in your ROM folders.", true, delegate { pages.Push(GamesPage()); }) { Icon = '' });
         p.Items.Add(new Item("My Collection", "Your Pokedex, across your games.", have > 0 && File.Exists(Config.MonBridge), delegate { OpenCollection(); }) { Icon = '\uE8F1' });
@@ -4208,7 +4215,7 @@ class LauncherForm : Form {
         bool on = Emu3ds.Enabled;
         p.Items.Add(new Item("3DS games: " + (on ? "On" : "Off"), "", true, delegate { Emu3ds.Enabled = !on; pages.Pop(); pages.Push(EmuPage()); ReplaceMain(); }) { Icon = '', Tint = AppColors[App("Emu")], Info = "Play your Nintendo 3DS Pokemon games with an emulator you choose. Nothing downloads until you pick one, and turning this off keeps your saves. Select to turn it " + (on ? "off" : "on") + "." });
         if (!on) {
-            p.Body = "nativeMons can play X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon through a 3DS emulator, with your saves, collection and Move Pokemon working as they do for the other games.\n\nYou need decrypted dumps of your own cartridges. No games or keys are included.";
+            p.Body = "nativeMons can play X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon, Ultra Sun and Ultra Moon through a 3DS emulator, with your saves, collection and Move Pokemon working as they do for the other games.\n\nYou need dumps of your own cartridges. Encrypted ones play with AzaharPlus, decrypted ones with either emulator. No games or keys are included.";
             p.FitBody = true;
             return p;
         }
@@ -4933,7 +4940,7 @@ class LauncherForm : Form {
         var p = new Page { Title = "Export saves: which game?" };
         foreach (var game in Library.Games.Where(x => x.SaveTools)) {
             var g = game;
-            p.Items.Add(new Item(g.Title, "", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898', Theme = g.Theme, Info = "Uses this game's save from " + GameEntry.EngineName(g.Engine()) + "." });
+            p.Items.Add(new Item(g.Title, "", true, delegate { pages.Push(ExportPage(g)); }) { Icon = '\uE898', Theme = g.Theme, Info = "Uses this game's save from " + GameEntry.EngineName(g.Engine(), g) + "." });
         }
         return p;
     }
@@ -5081,7 +5088,7 @@ class LauncherForm : Form {
     Item SaveRow(FoundSave one) {
         bool ready = one.Game != null && one.Game.Playable;
         string title = one.Game != null ? one.Game.Title : "Unknown game";
-        string info = !ready ? (one.Game == null ? "" : "Its ROM isn't in your ROM folders, so there's nowhere to put it yet. ") : "Copies it to " + GameEntry.EngineName(one.Game.Engine()) + ". The file here isn't changed. ";
+        string info = !ready ? (one.Game == null ? "" : "Its ROM isn't in your ROM folders, so there's nowhere to put it yet. ") : "Copies it to " + GameEntry.EngineName(one.Game.Engine(), one.Game) + ". The file here isn't changed. ";
         // What's in the save comes first, as that's how the player tells two of the same game apart.
         if (one.Info != null) info = one.Info.Details(File.GetLastWriteTime(one.File)) + (one.Note != null ? "\n" + one.Note : "") + (ready ? "" : "\n" + info.Trim());
         else info += one.Note ?? "";
@@ -5720,7 +5727,7 @@ class LauncherForm : Form {
             string why = Library.WhyNotPlayable(g);
             // A PC game not yet installed opens its page, where it's installed.
             var it = new Item(g.Title, g.Playable ? "" : why, g.Playable || g.Pc != null, delegate { pages.Push(GamePage(g)); }) { Icon = '', Theme = g.Theme };
-            it.Info = g.Pc != null ? (g.Playable ? "A PC game of its own, installed in the launcher." : why) : g.Playable ? g.Console + ". Runs with " + GameEntry.EngineName(g.Engine()) + "." : g.Console + ". " + why;
+            it.Info = g.Pc != null ? (g.Playable ? "A PC game of its own, installed in the launcher." : why) : g.Playable ? g.Console + ". Runs with " + GameEntry.EngineName(g.Engine(), g) + "." : g.Console + ". " + why;
             it.Records = GameRecords(g);
             p.Items.Add(it);
         }
@@ -5743,10 +5750,10 @@ class LauncherForm : Form {
         var p = new Page { Title = "Engine", Theme = g.Theme, FitBody = true, Body = "Choose what plays " + g.Title + "." + (share ? " They all share one save." : "") };
         foreach (var one in engines) {
             var e = one;
-            p.Items.Add(new Item(GameEntry.EngineShort(e) + (e == engine ? ": In use" : ""), "", true, delegate {
+            p.Items.Add(new Item(GameEntry.EngineShort(e, g) + (e == engine ? ": In use" : ""), "", true, delegate {
                 Config.Write("engine-" + g.Id + ".txt", e);
                 pages.Pop(); RebuildTop(delegate { return GamePage(g); }); ReplaceMain();
-            }) { Icon = '', Info = GameEntry.EngineName(e) + "." + (e == engine ? " In use now." : " Select to play " + g.Title + " with it.") });
+            }) { Icon = '', Info = GameEntry.EngineName(e, g) + "." + (e == engine ? " In use now." : " Select to play " + g.Title + " with it.") });
         }
         p.Sel = Math.Max(0, engines.IndexOf(engine));
         return p;
@@ -5755,12 +5762,12 @@ class LauncherForm : Form {
         if (g.Pc != null) return PcGamePage(g);
         var p = new Page { Title = g.Title, Theme = g.Theme };
         string engine = g.Engine();
-        var play = new Item("Play", "Start with " + GameEntry.EngineName(engine) + ".", g.Playable, delegate { Play(g); }) { Icon = '' };
+        var play = new Item("Play", "Start with " + GameEntry.EngineName(engine, g) + ".", g.Playable, delegate { Play(g); }) { Icon = '' };
         play.Records = GameRecords(g);
         p.Items.Add(play);
         var engines = g.Engines();
-        if (engines.Count > 1) p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine), "", true, delegate { pages.Push(EnginePage(g)); }) { Icon = '',
-            Info = g.Title + " plays with " + GameEntry.EngineName(engine) + ". Select to choose from its " + engines.Count + " engines." });
+        if (engines.Count > 1) p.Items.Add(new Item("Engine: " + GameEntry.EngineShort(engine, g), "", true, delegate { pages.Push(EnginePage(g)); }) { Icon = '',
+            Info = g.Title + " plays with " + GameEntry.EngineName(engine, g) + ". Select to choose from its " + engines.Count + " engines." });
         if (g.Roms.Count > 1) p.Items.Add(new Item("ROM version: " + g.LabelOf(g.Chosen), "", true, delegate { pages.Push(RomsPage(g)); }) { Icon = '\uE8B7', Info = g.Roms.Count + " different dumps of this game were found. " + Path.GetFileName(g.Chosen.File) + " is in use." });
         if (g.IsHack) {
             var baseGame = Library.Games.Find(x => x.Id == g.BaseId);
@@ -6765,7 +6772,7 @@ class LauncherForm : Form {
         if (folders.Count + roms.Count + zips.Count == 0) {
             if (saves.Count > 0) { ImportSaveFiles(saves); return; }
             bool packed = other.Any(x => new[] { ".7z", ".rar" }.Contains(Path.GetExtension(x).ToLowerInvariant()));
-            ShowText("Can't use that", string.Join(", ", other.Select(Path.GetFileName).ToArray()) + "\n\nDrop a folder of ROMs, a .gb, .gbc, .gba, .nds or decrypted .3ds ROM, a .zip of ROMs, or a .sav save." + (packed ? "\n\n.7z and .rar can't be opened here: extract it first, then drop the ROM." : ""), null);
+            ShowText("Can't use that", string.Join(", ", other.Select(Path.GetFileName).ToArray()) + "\n\nDrop a folder of ROMs, a .gb, .gbc, .gba, .nds or .3ds ROM, a .zip of ROMs, or a .sav save." + (packed ? "\n\n.7z and .rar can't be opened here: extract it first, then drop the ROM." : ""), null);
             return;
         }
         var notes = new List<string>();
@@ -7278,7 +7285,7 @@ class LauncherForm : Form {
         var p = new Page { Title = "Move Pokemon: from which game?" };
         foreach (var game in Library.Games.Where(x => x.MoveTools)) {
             var g = game;
-            p.Items.Add(new Item(g.Title, "", true, delegate { OpenBoxes(g); }) { Icon = '', Theme = g.Theme, Info = "Choose a Pokemon from this game's PC boxes. Saves from " + GameEntry.EngineName(g.Engine()) + " are used.", Records = new[] { "Backups: both saves are copied first" } });
+            p.Items.Add(new Item(g.Title, "", true, delegate { OpenBoxes(g); }) { Icon = '', Theme = g.Theme, Info = "Choose a Pokemon from this game's PC boxes. Saves from " + GameEntry.EngineName(g.Engine(), g) + " are used.", Records = new[] { "Backups: both saves are copied first" } });
         }
         return p;
     }
@@ -7580,7 +7587,7 @@ class LauncherForm : Form {
     }
     // A 3DS game: its save goes into the emulator, the ROM is played where it is, and the save comes back after.
     void Play3ds(GameEntry g) {
-        var e = Emu3ds.Default;
+        var e = Emu3ds.ForGame(g);
         if (e == null) return;
         if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is already open. Close it, then press Play.", null); return; }
         // An update is asked about before every play, until the player stops reminders for that one update (user, 2026-11-14).
@@ -10667,7 +10674,7 @@ class LauncherForm : Form {
         else Write(g, "Play", itemBold, pink, word, StringAlignment.Near, StringAlignment.Center, false);
         float textW = pill.X - widget.X - pad * 1.4f, subH = smallFont.Height * 1.25f;
         string name = current != null ? current.Title.Replace("Pokemon ", "") : "No games yet";
-        string sub = current != null ? GameEntry.EngineShort(current.Engine()) : "Add a ROM folder to start";
+        string sub = current != null ? GameEntry.EngineShort(current.Engine(), current) : "Add a ROM folder to start";
         Write(g, sub, smallFont, Color.FromArgb(225, 255, 255, 255), new RectangleF(widget.X + pad, widget.Bottom - pad - subH, textW, subH), StringAlignment.Near, StringAlignment.Far, false);
         var nameArea = new SizeF(textW, titleFont.Height * 1.25f);
         var nf = FitFont(g, name, nameArea, titleFont, 0.65f, false);
@@ -11122,7 +11129,7 @@ static class NativeMonsLauncher {
             Library.Scan(LauncherForm.Gen1Cli);
             var o = new List<string>();
             foreach (var g in Library.Games) {
-                o.Add(g.Id + " found=" + g.Roms.Count + " chosen=" + (g.Chosen != null ? g.Chosen.Label + " " + Path.GetFileName(g.Chosen.File) : "-") + " | fulldex=" + Path.GetFileName(g.FulldexRom ?? "") + " | gen1=" + Path.GetFileName(g.Gen1Rom ?? "") + " | nativeplat=" + Path.GetFileName(g.NativeplatRom ?? "") + " | refused=" + Path.GetFileName(g.FoundUnsupported ?? ""));
+                o.Add(g.Id + " found=" + g.Roms.Count + " chosen=" + (g.Chosen != null ? g.Chosen.Label + " " + Path.GetFileName(g.Chosen.File) : "-") + " | fulldex=" + Path.GetFileName(g.FulldexRom ?? "") + " | gen1=" + Path.GetFileName(g.Gen1Rom ?? "") + " | nativeplat=" + Path.GetFileName(g.NativeplatRom ?? "") + " | refused=" + Path.GetFileName(g.FoundUnsupported ?? "") + (g.Ctr != null ? " | 3ds=" + Path.GetFileName(g.CtrRom ?? "") + " enc=" + g.CtrEncrypted + " emu=" + (Emu3ds.ForGame(g) != null ? Emu3ds.ForGame(g).Id : "-") : ""));
                 foreach (var r in g.Roms) o.Add("    " + r.Label + " gen1=" + r.Gen1Ok + " nativeplat=" + r.NativeplatOk + " enc=" + r.Encrypted + " copy=" + r.EngineCopy + " " + r.File);
             }
             File.WriteAllLines(argv[1], o.ToArray());

@@ -2,6 +2,10 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
+## Next
+
+- An encrypted 3DS dump always plays with AzaharPlus, even when Azahar is the emulator picked: Azahar only opens decrypted dumps. A decrypted dump of the same game is still used with Azahar.
+
 ## 0.0.6
 
 - Fulldex 12 November: the nickname question after a catch no longer covers your Pokémon, HeartGold and SoulSilver radio text stays in view in widescreen, DS music keeps its normal tempo and pitch during fast forward, and many smaller fixes.

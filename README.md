@@ -62,7 +62,7 @@ Gen1Recomp and nativeplat only run exact dumps, so they check each ROM's SHA-1. 
 
 Fulldex and the Platinum PC port don't check a hash: they go by the game code in the ROM's header, so most dumps of a supported game work.
 
-3DS games (`.3ds` or `.cci` cartridge dumps) are found by the title ID in their header, so any dump of a supported game works. Azahar needs a decrypted dump (GodMode9 on your 3DS makes one); AzaharPlus also opens encrypted ones.
+3DS games (`.3ds` or `.cci` cartridge dumps) are found by the title ID in their header, so any dump of a supported game works. Azahar needs a decrypted dump (GodMode9 on your 3DS makes one); an encrypted dump always plays with AzaharPlus, even when Azahar is the one picked.
 
 Decrypt an encrypted DS ROM first: the launcher offers this when it finds one. nativeplat's own import screen refuses Platinum Rev 0, but nativeMons places the ROM itself. The two revisions share the same game files, differing only in a GTS screen, and Platinum runs nativeplat's Rev 1 code either way.
 
