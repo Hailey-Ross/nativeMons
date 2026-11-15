@@ -2,7 +2,7 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
-## Next
+## 0.0.7a
 
 - Quick start for 3DSrecomp+Zakuro: a 3DS game starts from a snapshot of its title screen, made in the background from a copy of your save and used only while your save is exactly the one it was made from.
 - Shared Zakuro findings now download on their own, at start-up and every few hours, from their own branch of our Zakuro fork; a built game whose shared list grew is rebuilt quietly to cover it. Shared lists no longer wait for a Zakuro update.

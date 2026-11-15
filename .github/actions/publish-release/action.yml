@@ -33,7 +33,7 @@ runs:
         # Stable carries the number in VERSION. Dev carries the last stable version it came after, if any.
         $stable = $env:PRE -ne "true"
         $version = if ($stable) { (Get-Content VERSION -Raw).Trim() } else {
-          @(git ls-remote --tags origin "refs/tags/v*" | ForEach-Object { ($_ -split 'refs/tags/v')[1] } | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } | Sort-Object { [version]$_ }) | Select-Object -Last 1
+          @(git ls-remote --tags origin "refs/tags/v*" | ForEach-Object { ($_ -split 'refs/tags/v')[1] } | Where-Object { $_ -match '^\d+\.\d+\.\d+[a-z]?$' } | Sort-Object { [version]($_ -replace '[a-z]$', '') }, { $_ }) | Select-Object -Last 1
         }
         # The launcher's updater compares this with the channel's release.json.
         "channel=$env:TAG`nbuild=$env:BUILD`nrevision=$sha`nversion=$version" | Out-File -Encoding ascii dist\nativeMons\version.txt
