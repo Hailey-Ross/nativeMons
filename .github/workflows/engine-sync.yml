@@ -24,7 +24,7 @@ jobs:
           app-id: ${{ vars.ENGINE_SYNC_APP_ID }}
           private-key: ${{ secrets.ENGINE_SYNC_APP_KEY }}
           owner: Hailey-Ross
-          repositories: nativeMons,gen1recomp,pokemon-fulldex,gen4recomp,azahar,AzaharPlus,pokeplatinum
+          repositories: nativeMons,gen1recomp,pokemon-fulldex,gen4recomp,azahar,AzaharPlus,pokeplatinum,3dsrecomp
 
       - uses: actions/checkout@v7
         with:

@@ -206,6 +206,8 @@ sync_fork Azahar "$OWNER/azahar" azahar-emu/azahar master release
 sync_fork AzaharPlus "$OWNER/AzaharPlus" AzaharPlus/AzaharPlus AzaharPlus release
 # The Platinum PC port: the fork only follows upstream's pc_port. Packages use upstream's release (check_releases).
 sync_fork PlatinumPort "$OWNER/pokeplatinum" cybervisi0n/pokeplatinum pc_port 0
+# Watched only, not used yet: a 3DS static recompiler (todo 22).
+sync_fork 3dsrecomp "$OWNER/3dsrecomp" fearkov/3dsrecomp main 0
 
 pin_submodule Gen1Recomp engines/gen1recomp "$(cat "$WORK/Gen1Recomp.head")"
 pin_submodule Fulldex engines/fulldex "$(cat "$WORK/Fulldex.head")"
