@@ -695,10 +695,10 @@ class Emu3ds {
     public static readonly Emu3ds[] All = {
         // Azahar with extras: opens encrypted dumps too, built-in cheats. Its system-file downloader is off in our build.
         new Emu3ds { Id = "azaharplus", Name = "AzaharPlus-modified (nativeMons)", Short = "AzaharPlus", Repo = "Hailey-Ross/AzaharPlus", Upstream = "AzaharPlus/AzaharPlus", Exe = "azahar.exe", Asset = "azaharplus-nativemons-windows-x64.zip",
-            Tag = "windows-3f15f3f40", Sha256 = "70dd3c2ec33bc71974ae421f76cf0d1fcd06db1db9a5670641e5be830d06a410", Size = "about 73 MB", Recommended = true,
+            Tag = "windows-a36429f9c", Sha256 = "75207d934a015a29764c821dc6d4f76acb43e0c66c46083c070f3414fcebce86", Size = "about 73 MB", Recommended = true,
             Notes = "The one to use: X, Y, Omega Ruby, Alpha Sapphire, Sun, Moon and the Ultra games all run well. Based on Azahar, with extras: it also opens encrypted dumps, and has built-in cheats." },
         new Emu3ds { Id = "azahar", Name = "Azahar-modified (nativeMons)", Short = "Azahar", Repo = "Hailey-Ross/azahar", Upstream = "azahar-emu/azahar", Exe = "azahar.exe", Asset = "azahar-nativemons-windows-x64.zip",
-            Tag = "windows-a6aa2ad2e", Sha256 = "f011f57f9c37a1f7abfc6981e8806dd1129321b3875bea71299c2c1e0de19f83", Size = "about 44 MB",
+            Tag = "windows-9551905d0", Sha256 = "3fb4f936e015bbac6ad33754d0692d53bacbb0fc43a98b16a06cf4cff78a34e4", Size = "about 44 MB",
             Notes = "The backup: plain Azahar, for when AzaharPlus misbehaves. It opens decrypted dumps only: encrypted ones play with AzaharPlus." },
     };
     public static bool Enabled { get { return Config.Read("3ds-games.txt", "off") == "on"; } set { Config.Write("3ds-games.txt", value ? "on" : "off"); } }
