@@ -13,6 +13,9 @@ if (-not ($i.labels.name -contains 'zakuro-hints')) { throw "Issue $Issue isn't 
 $code = [regex]::Match($i.body, '### Code version\s+([0-9A-Fa-f]{16}-[0-9A-Fa-f]{16})').Groups[1].Value.ToUpperInvariant()
 if (-not $code) { throw 'No code version (<title id>-<code hash>) in the issue.' }
 if ($titles -notcontains $code.Substring(0, 16)) { throw "Title $($code.Substring(0, 16)) isn't one 3DSrecomp+Zakuro builds." }
+# Which launcher and Zakuro made it (older forms don't have the field).
+$versions = [regex]::Match($i.body, '### Versions\s+([^\r\n]+)').Groups[1].Value.Trim()
+if (-not $versions -or $versions -eq '_No response_') { $versions = 'not given' }
 $url = [regex]::Match($i.body, 'https://github\.com/user-attachments/files/\d+/[^\s\)\]]+').Value
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "zakuro-hints-$Issue.txt"
 if ($url) { Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp }
@@ -53,10 +56,10 @@ $added = $have.Count - $before
 [IO.File]::WriteAllText($file, (($have | ForEach-Object { $_.ToString('X8') + "`n" }) -join ''))
 $index = Get-ChildItem $dir -Filter *.hints | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())`n" }
 [IO.File]::WriteAllText((Join-Path $Branch 'index.txt'), ($index -join ''))
-"Issue ${Issue}: $($got.Count) addresses for $code, $added new; $file now holds $($have.Count)."
+"Issue ${Issue}: $($got.Count) addresses for $code, $added new; $file now holds $($have.Count). Made by: $versions."
 if ($Push -and $added -gt 0) {
     git -C $Branch add hints index.txt
-    git -C $Branch commit -q -m "Findings from nativeMons issue $Issue for $code"
+    git -C $Branch commit -q -m "Findings from nativeMons issue $Issue for $code" -m "Made by: $versions"
     git -C $Branch push -q origin nativemons-hints
     'Pushed: launchers pick it up at their next check.'
 }

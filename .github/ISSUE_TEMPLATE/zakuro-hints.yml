@@ -22,6 +22,11 @@ body:
       placeholder: 0004000000164800-0123456789ABCDEF
     validations:
       required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Filled in by the launcher. Leave it as it is.
   - type: textarea
     id: file
     attributes:

@@ -357,6 +357,15 @@ static class Recomp {
             }
         } catch { return null; }
     }
+    // Which launcher and Zakuro made a shared list, so a bad Zakuro build's lists can be found again.
+    public static string ShareVersions() {
+        string zakuro = "";
+        try {
+            var m = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Config.Zakuro), "NATIVEMONS-BUILD.txt")), @"/tree/([0-9a-f]{9})");
+            if (m.Success) zakuro = m.Groups[1].Value;
+        } catch { }
+        return "nativeMons " + Updater.InstalledLabel + ", Zakuro " + (zakuro == "" ? "unknown" : zakuro);
+    }
     // The addresses alone, for sharing: one per line. .txt, since GitHub refuses a .hints attachment.
     public static string ShareFile(GameEntry g, string codeId) {
         string to = Path.Combine(Dir, "share", codeId + ".hints.txt");
@@ -8208,7 +8217,8 @@ class LauncherForm : Form {
                 try { Process.Start("explorer.exe", "/select,\"" + file + "\""); } catch { }
                 string url = "https://github.com/Hailey-Ross/nativeMons/issues/new?template=zakuro-hints.yml"
                     + "&title=" + Uri.EscapeDataString("Zakuro hints: " + g.Title + " " + id)
-                    + "&game=" + Uri.EscapeDataString(g.Title) + "&code=" + Uri.EscapeDataString(id);
+                    + "&game=" + Uri.EscapeDataString(g.Title) + "&code=" + Uri.EscapeDataString(id)
+                    + "&versions=" + Uri.EscapeDataString(Recomp.ShareVersions());
                 // The player's default browser; if it can't open, the link goes to the clipboard to paste into one.
                 bool opened = false;
                 try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); opened = true; } catch { }
