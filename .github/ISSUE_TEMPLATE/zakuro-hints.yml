@@ -26,7 +26,7 @@ body:
     id: file
     attributes:
       label: The .hints file
-      description: Drag the file the launcher showed you into this box, or paste its lines here.
+      description: Paste the list the launcher put on your clipboard (Ctrl+V), or drag in the .txt file it showed you.
     validations:
       required: true
   - type: checkboxes

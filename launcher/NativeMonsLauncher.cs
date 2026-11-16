@@ -357,9 +357,9 @@ static class Recomp {
             }
         } catch { return null; }
     }
-    // The addresses alone, for sharing: one per line.
+    // The addresses alone, for sharing: one per line. .txt, since GitHub refuses a .hints attachment.
     public static string ShareFile(GameEntry g, string codeId) {
-        string to = Path.Combine(Dir, "share", codeId + ".hints");
+        string to = Path.Combine(Dir, "share", codeId + ".hints.txt");
         Directory.CreateDirectory(Path.GetDirectoryName(to));
         File.WriteAllLines(to, File.ReadAllLines(HintsOf(g)).Select(l => l.Trim()).Where(l => System.Text.RegularExpressions.Regex.IsMatch(l, "^(0x)?[0-9A-Fa-f]{1,8}$")).ToArray());
         return to;
@@ -8198,7 +8198,7 @@ class LauncherForm : Form {
         p.Body = "While you played " + g.Title + ", Zakuro found " + Recomp.HintCount(g) + " places in its code that its build didn't cover, so it ran them the slow way.\n\n"
             + "Sharing them improves the game for you and every other player: once checked, they go into the shared lists every launcher downloads, and every build of " + g.Title + " from then on covers them, yours on any PC included. That means smoother play, with fewer slowdowns in the places you've been.\n\n"
             + "What's shared: those addresses only (numbers like 0010022D), named by the game's code version. No game code, save or anything about you.\n\n"
-            + "Share opens a form on the nativeMons GitHub page (you need a GitHub account) and shows the file to attach. Nothing is sent until you submit the form.";
+            + "Share opens a form on the nativeMons GitHub page (you need a GitHub account) and puts your list on the clipboard to paste into it. Nothing is sent until you submit the form.";
         p.Items.Add(new Item(afterPlay ? "Yes, share" : "Share", "", true, delegate {
             pages.Pop();
             Recomp.Answered(g);
@@ -8212,10 +8212,15 @@ class LauncherForm : Form {
                 // The player's default browser; if it can't open, the link goes to the clipboard to paste into one.
                 bool opened = false;
                 try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); opened = true; } catch { }
-                if (!opened) try { Clipboard.SetText(url); } catch { }
-                ShowText("Almost done", (opened ? "Your browser shows the form" : "Your browser didn't open, so the form's link is on your clipboard: paste it into your browser's address bar") + ", and Explorer the file " + Path.GetFileName(file) + ". Sign in to GitHub if it asks, drag the file into the form (or paste its lines), and submit it. Thank you!", null);
+                // The list goes on the clipboard to paste into the form; one too long for a GitHub text box is attached as the file.
+                string list = ""; try { list = File.ReadAllText(file); } catch { }
+                bool pasted = false;
+                try { Clipboard.SetText(opened && list.Length > 0 && list.Length < 60000 ? list : url); pasted = opened && list.Length > 0 && list.Length < 60000; } catch { }
+                string how = pasted ? "Your list is on your clipboard: click the form's \".hints file\" box and press Ctrl+V. (It's also in the file Explorer shows, " + Path.GetFileName(file) + ", if you'd rather drag it in.)"
+                    : "Drag the file Explorer shows, " + Path.GetFileName(file) + ", into the form's \".hints file\" box.";
+                ShowText("Almost done", (opened ? "Your browser shows the form. " : "Your browser didn't open, so the form's link is on your clipboard: paste it into your browser's address bar. ") + "Sign in to GitHub if it asks. " + how + " Then submit it. Thank you!", null);
             });
-        }) { Icon = '', Info = "Opens the form and the file; you submit it yourself." });
+        }) { Icon = '', Info = "Opens the form and copies your list to paste in; you submit it yourself." });
         p.Items.Add(new Item(afterPlay ? "No" : "Not now", "", true, delegate { pages.Pop(); Recomp.Answered(g); }) { Icon = '', Info = "Nothing is shared. You're asked again after more new findings." });
         if (afterPlay) p.Items.Add(new Item("Never ask again", "", true, delegate { pages.Pop(); Recomp.Answered(g); Recomp.AskToShare = false; }) { Icon = '',
             Info = "Stops this question for every game. Turn it back on in Settings; a game's page can still share any time." });
