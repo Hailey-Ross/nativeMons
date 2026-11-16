@@ -14,10 +14,16 @@ $code = [regex]::Match($i.body, '### Code version\s+([0-9A-Fa-f]{16}-[0-9A-Fa-f]
 if (-not $code) { throw 'No code version (<title id>-<code hash>) in the issue.' }
 if ($titles -notcontains $code.Substring(0, 16)) { throw "Title $($code.Substring(0, 16)) isn't one 3DSrecomp+Zakuro builds." }
 $url = [regex]::Match($i.body, 'https://github\.com/user-attachments/files/\d+/[^\s\)\]]+').Value
-if (-not $url) { throw 'No attached file in the issue.' }
-
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "zakuro-hints-$Issue.txt"
-Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp
+if ($url) { Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp }
+else {
+    # No file attached: the lines pasted into the form's file box (in a code block or not).
+    $box = [regex]::Match($i.body, '### The \.hints file\s+(.*?)(
+### |\z)', 'Singleline').Groups[1].Value
+    $box = ($box -replace '```[a-z]*', '').Trim()
+    if (-not $box) { throw 'No attached file and no pasted list in the issue.' }
+    [IO.File]::WriteAllText($tmp, $box)
+}
 if ((Get-Item $tmp).Length -gt 2MB) { Remove-Item $tmp; throw 'The file is over 2 MB: not a hint list.' }
 $bad = 0; $got = New-Object System.Collections.Generic.List[uint32]
 foreach ($line in Get-Content $tmp) {
