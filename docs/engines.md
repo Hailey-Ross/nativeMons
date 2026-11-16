@@ -2,15 +2,29 @@
 
 [Back to the README](../README.md)
 
-The engines each game can run on, and every project nativeMons uses.
+The two decompilation ports in more detail, and every project nativeMons is built from.
 
 ## nativeplat
 
-Diamond, Pearl and Platinum can run on [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, native ports from the pret decompilations. It's the only engine for Diamond and Pearl, and an option for Platinum under **Engine** on the game's page. Packages carry a Windows build made by [our fork's public workflow](https://github.com/Hailey-Ross/gen4recomp), program only: your ROM stays on your PC. Our fork adds the quick start mode. It shares one save with the other engines, checked each time it comes back. This is experimental, so keep a backup. nativeMons isn't affiliated with that project, so please report problems here first.
+[nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117 runs Diamond, Pearl and Platinum natively, ported
+from the pret decompilations. It's the only engine for Diamond and Pearl, and an option for Platinum under **Engine**
+on the game's page.
+- Packages carry a Windows build of the program only, made by [our fork's public workflow](https://github.com/Hailey-Ross/gen4recomp).
+  Your ROM stays on your PC.
+- Our fork adds quick start.
+- It shares one save with the other engines, checked every time it comes back.
+- It's experimental, so keep a backup. nativeMons isn't affiliated with nativeplat, so please report problems here
+  first.
 
 ## Pokémon Platinum PC port
 
-Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, from the pret decompilation and [libntr](https://github.com/cybervisi0n/libntr). Choose it with **Engine** on the game's page. The download has only the program: the first start unpacks the game's files from your own ROM, on your PC. It shares one save with Fulldex, checked each time it comes back. This is experimental, so keep a backup. nativeMons isn't affiliated with that project, so please report problems here first.
+The [Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors is another native
+Platinum, from the pret decompilation and [libntr](https://github.com/cybervisi0n/libntr). Choose it with **Engine**
+on Platinum's page.
+- The download has only the program: its first start unpacks the game's files from your own ROM, on your PC.
+- It shares one save with Fulldex, checked every time it comes back.
+- It's experimental, so keep a backup. nativeMons isn't affiliated with the port, so please report problems here
+  first.
 
 ## What it's built from
 
@@ -28,4 +42,4 @@ Platinum can also run on the native [PC port](https://github.com/cybervisi0n/pok
 | `tools/openhome-bridge` | Converts Pokémon between games that have no real transfer | [OpenHome](https://github.com/andrewbenington/OpenHome) by Andrew Benington, run on Node.js |
 | `launcher` | The menu | Window and input code from the steam launcher of [the Skate 3 Rust Engine's hails-additions branch](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) (SK8-ENGINE) |
 
-Pokémon Infinite Fusion isn't part of a package: you import it or add your own installation.
+Pokémon Infinite Fusion isn't part of a package: you import it, or add your own installation.
