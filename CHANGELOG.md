@@ -2,6 +2,12 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
+## 0.0.8
+
+- Share Zakuro findings sends your list straight to nativeMons' own submission service, submit.hails.app: no account needed, signed by your launcher, and checked before anything uses it. Sharing through a GitHub form is still there as the other way, with the list on your clipboard to paste.
+- The shared Zakuro lists now cover the start of every game, not only its title screen: about four times as many places for each of the eight games, so first builds run smoother from the start.
+- The README is shorter, with each topic (3DS games, saves, mods, settings and more) on a page of its own in `docs`, which now comes with the download.
+
 ## 0.0.7a
 
 - Quick start for 3DSrecomp+Zakuro: a 3DS game starts from a snapshot of its title screen, made in the background from a copy of your save and used only while your save is exactly the one it was made from.
