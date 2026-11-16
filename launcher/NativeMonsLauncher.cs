@@ -657,9 +657,12 @@ static class Submit {
         using (var key = LoadKey()) {
             string pub = PublicKey(key);
             string ch = Post("/v1/challenge", "application/json", Encoding.ASCII.GetBytes("{\"key\":\"" + pub + "\"}"), null);
+            var since = Stopwatch.StartNew();
             string nonce = System.Text.RegularExpressions.Regex.Match(ch, "\"nonce\":\"([A-Za-z0-9+/]{43}=)\"").Groups[1].Value;
-            if (nonce == "") throw new IOException("the server's challenge wasn't readable");
-            long created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var now = System.Text.RegularExpressions.Regex.Match(ch, "\"now\":([1-9][0-9]{9})[,}]");
+            if (nonce == "" || !now.Success) throw new IOException("the server's challenge wasn't readable");
+            // The server's clock, never this PC's: a wrong PC clock would get the package refused.
+            long created = long.Parse(now.Groups[1].Value) + (long)since.Elapsed.TotalSeconds;
             string body = "{\"code\":\"" + codeId + "\",\"addresses\":[" + string.Join(",", addrs.Select(a => "\"" + a.ToString("X8") + "\"").ToArray()) + "]}";
             string pkg = "{\"v\":1,\"kind\":\"zakuro-hints\",\"key\":\"" + pub + "\",\"nonce\":\"" + nonce + "\",\"created\":" + created
                 + ",\"launcher\":\"" + Clean("nativeMons " + Updater.InstalledLabel, 80) + "\",\"zakuro\":\"" + ZakuroBuild() + "\",\"body\":" + body + "}";
