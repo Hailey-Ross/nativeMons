@@ -8209,8 +8209,11 @@ class LauncherForm : Form {
                 string url = "https://github.com/Hailey-Ross/nativeMons/issues/new?template=zakuro-hints.yml"
                     + "&title=" + Uri.EscapeDataString("Zakuro hints: " + g.Title + " " + id)
                     + "&game=" + Uri.EscapeDataString(g.Title) + "&code=" + Uri.EscapeDataString(id);
-                try { Process.Start(url); } catch { }
-                ShowText("Almost done", "Your browser shows the form, and Explorer the file " + Path.GetFileName(file) + ". Drag the file into the form and submit it. Thank you!", null);
+                // The player's default browser; if it can't open, the link goes to the clipboard to paste into one.
+                bool opened = false;
+                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); opened = true; } catch { }
+                if (!opened) try { Clipboard.SetText(url); } catch { }
+                ShowText("Almost done", (opened ? "Your browser shows the form" : "Your browser didn't open, so the form's link is on your clipboard: paste it into your browser's address bar") + ", and Explorer the file " + Path.GetFileName(file) + ". Sign in to GitHub if it asks, drag the file into the form (or paste its lines), and submit it. Thank you!", null);
             });
         }) { Icon = '', Info = "Opens the form and the file; you submit it yourself." });
         p.Items.Add(new Item(afterPlay ? "No" : "Not now", "", true, delegate { pages.Pop(); Recomp.Answered(g); }) { Icon = '', Info = "Nothing is shared. You're asked again after more new findings." });
