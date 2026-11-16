@@ -45,6 +45,8 @@ Step 'Launcher'
 & (Join-Path $here 'build.bat') $out
 if ($LASTEXITCODE -ne 0) { throw 'The launcher did not build.' }
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE'), (Join-Path $repo 'README.md') -Destination $out
+New-Item -ItemType Directory -Force (Join-Path $out 'docs') | Out-Null
+Copy-Item -Path (Join-Path $repo 'docs\*') -Destination (Join-Path $out 'docs') -Recurse -Force
 
 # Records which published build this already contains, so the updater only offers newer ones.
 Step 'Version'

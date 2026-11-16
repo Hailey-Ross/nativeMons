@@ -29,6 +29,7 @@ runs:
       run: |
         $dist = "dist\nativeMons"
         Copy-Item LICENSE, README.md $dist
+        Copy-Item -Recurse docs "$dist\docs"
 
         # Gen1Recomp: what the game needs at run time, with its licence.
         $gen1 = "$dist\engines\gen1recomp"
