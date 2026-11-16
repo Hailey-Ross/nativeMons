@@ -310,6 +310,7 @@ static class Recomp {
     // Zakuro writes down where it had to interpret (beside the library); a rebuild covers those, so the game runs faster.
     public const int ImproveAfter = 25;
     static string HintsOf(GameEntry g) { return Path.ChangeExtension(LibraryOf(g), ".hints"); }
+    public static string HintsFile(GameEntry g) { return HintsOf(g); }
     public static int HintCount(GameEntry g) {
         try { return File.Exists(HintsOf(g)) ? File.ReadAllLines(HintsOf(g)).Count(l => l.Trim() != "" && !l.TrimStart().StartsWith("#")) : 0; } catch { return 0; }
     }
@@ -582,6 +583,93 @@ static class Recomp {
             long total = 0;
             foreach (var f in files) { total += f.Length; if (total > cap || f.Name.EndsWith(".part")) f.Delete(); }
         } catch { }
+    }
+}
+
+// Shared packages to submit.hails.app (nativemons-submit, docs/protocol.md there): signed with this install's
+// own P-256 key, kept encrypted for the Windows user, each on a one-time challenge, in the one layout the
+// server accepts. Zakuro hint lists first.
+static class Submit {
+    static string Base { get { return (Environment.GetEnvironmentVariable("NATIVEMONS_SUBMIT_URL") ?? "https://submit.hails.app").TrimEnd('/'); } }
+    static string KeyFile { get { return Path.Combine(Config.State, "submit", "install.key"); } }
+    static readonly byte[] Entropy = Encoding.ASCII.GetBytes("nativeMons submit key v1");
+
+    static ECDsa LoadKey() {
+        var curve = ECCurve.NamedCurves.nistP256;
+        if (File.Exists(KeyFile)) {
+            byte[] raw = ProtectedData.Unprotect(File.ReadAllBytes(KeyFile), Entropy, DataProtectionScope.CurrentUser);
+            if (raw.Length == 96) {
+                var p = new ECParameters { Curve = curve, D = raw.Take(32).ToArray(), Q = new ECPoint { X = raw.Skip(32).Take(32).ToArray(), Y = raw.Skip(64).ToArray() } };
+                return ECDsa.Create(p);
+            }
+        }
+        var key = ECDsa.Create(curve);
+        var e = key.ExportParameters(true);
+        Directory.CreateDirectory(Path.GetDirectoryName(KeyFile));
+        byte[] blob = Fixed(e.D).Concat(Fixed(e.Q.X)).Concat(Fixed(e.Q.Y)).ToArray();
+        File.WriteAllBytes(KeyFile, ProtectedData.Protect(blob, Entropy, DataProtectionScope.CurrentUser));
+        return key;
+    }
+    // A coordinate as exactly 32 bytes.
+    static byte[] Fixed(byte[] b) { return b.Length == 32 ? b : new byte[32 - Math.Min(32, b.Length)].Concat(b.Skip(Math.Max(0, b.Length - 32))).ToArray(); }
+    static string PublicKey(ECDsa key) {
+        var e = key.ExportParameters(false);
+        return Convert.ToBase64String(new byte[] { 4 }.Concat(Fixed(e.Q.X)).Concat(Fixed(e.Q.Y)).ToArray());
+    }
+    // Only the characters the server takes.
+    static string Clean(string s, int max) {
+        var t = new string((s ?? "").Select(c => char.IsLetterOrDigit(c) && c < 128 || " .,()-".IndexOf(c) >= 0 ? c : ' ').ToArray()).Trim();
+        if (t.Length > max) t = t.Substring(0, max).Trim();
+        return t == "" ? "unknown" : t;
+    }
+    static string ZakuroBuild() {
+        try {
+            var m = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Config.Zakuro), "NATIVEMONS-BUILD.txt")), @"/tree/([0-9a-f]{9})");
+            return m.Success ? m.Groups[1].Value : "unknown";
+        } catch { return "unknown"; }
+    }
+    static string Post(string path, string contentType, byte[] body, string signature) {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(Base + path);
+        req.Method = "POST"; req.ContentType = contentType; req.UserAgent = "nativeMons"; req.Timeout = 30000;
+        req.ContentLength = body.Length; req.AllowAutoRedirect = false;
+        if (signature != null) req.Headers["X-NM-Signature"] = signature;
+        using (var o = req.GetRequestStream()) o.Write(body, 0, body.Length);
+        try {
+            using (var resp = (System.Net.HttpWebResponse)req.GetResponse()) using (var r = new StreamReader(resp.GetResponseStream())) return r.ReadToEnd();
+        } catch (System.Net.WebException x) {
+            string why = "";
+            try { using (var r = new StreamReader(x.Response.GetResponseStream())) why = System.Text.RegularExpressions.Regex.Match(r.ReadToEnd(), "\"error\":\"([a-z ]{1,40})\"").Groups[1].Value; } catch { }
+            throw new IOException(why != "" ? "the server said: " + why : x.Message);
+        }
+    }
+    // Sends a Zakuro hint list; the receipt, or throws with why.
+    public static string ZakuroHints(string codeId, IEnumerable<string> lines) {
+        var addrs = new SortedSet<uint>();
+        foreach (var l in lines) {
+            var m = System.Text.RegularExpressions.Regex.Match(l.Trim(), "^(0x)?([0-9A-Fa-f]{1,8})$");
+            if (!m.Success) continue;
+            uint a = Convert.ToUInt32(m.Groups[2].Value, 16);
+            if (a >= 0x00100000 && a < 0x10000000) addrs.Add(a);
+        }
+        if (addrs.Count == 0) throw new IOException("there are no findings to send");
+        if (addrs.Count > 65536) addrs = new SortedSet<uint>(addrs.Take(65536));
+        using (var key = LoadKey()) {
+            string pub = PublicKey(key);
+            string ch = Post("/v1/challenge", "application/json", Encoding.ASCII.GetBytes("{\"key\":\"" + pub + "\"}"), null);
+            string nonce = System.Text.RegularExpressions.Regex.Match(ch, "\"nonce\":\"([A-Za-z0-9+/]{43}=)\"").Groups[1].Value;
+            if (nonce == "") throw new IOException("the server's challenge wasn't readable");
+            long created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            string body = "{\"code\":\"" + codeId + "\",\"addresses\":[" + string.Join(",", addrs.Select(a => "\"" + a.ToString("X8") + "\"").ToArray()) + "]}";
+            string pkg = "{\"v\":1,\"kind\":\"zakuro-hints\",\"key\":\"" + pub + "\",\"nonce\":\"" + nonce + "\",\"created\":" + created
+                + ",\"launcher\":\"" + Clean("nativeMons " + Updater.InstalledLabel, 80) + "\",\"zakuro\":\"" + ZakuroBuild() + "\",\"body\":" + body + "}";
+            byte[] bytes = Encoding.ASCII.GetBytes(pkg);
+            string sig = Convert.ToBase64String(key.SignData(bytes, HashAlgorithmName.SHA256));
+            string done = Post("/v1/submit/zakuro-hints", "application/vnd.nativemons.package+json", bytes, sig);
+            var r = System.Text.RegularExpressions.Regex.Match(done, "\"receipt\":\"([0-9]{8}-[0-9a-f]{16})\"");
+            if (!r.Success) throw new IOException("the server didn't give a receipt");
+            return r.Groups[1].Value;
+        }
     }
 }
 
@@ -8207,8 +8295,24 @@ class LauncherForm : Form {
         p.Body = "While you played " + g.Title + ", Zakuro found " + Recomp.HintCount(g) + " places in its code that its build didn't cover, so it ran them the slow way.\n\n"
             + "Sharing them improves the game for you and every other player: once checked, they go into the shared lists every launcher downloads, and every build of " + g.Title + " from then on covers them, yours on any PC included. That means smoother play, with fewer slowdowns in the places you've been.\n\n"
             + "What's shared: those addresses only (numbers like 0010022D), named by the game's code version. No game code, save or anything about you.\n\n"
-            + "Share opens a form on the nativeMons GitHub page (you need a GitHub account) and puts your list on the clipboard to paste into it. Nothing is sent until you submit the form.";
+            + "Share sends them to nativeMons' own submission service (submit.hails.app), signed by this launcher; they're checked before anything uses them. Or share them through GitHub instead.";
         p.Items.Add(new Item(afterPlay ? "Yes, share" : "Share", "", true, delegate {
+            pages.Pop();
+            Recomp.Answered(g);
+            string receipt = null, problem = null;
+            Busy("Sending your list", delegate {
+                try {
+                    string codeId = Recomp.CodeId(g);
+                    if (codeId == null) problem = "The game's code version couldn't be read.";
+                    else receipt = Submit.ZakuroHints(codeId, File.ReadAllLines(Recomp.HintsFile(g)));
+                } catch (Exception x) { problem = x.Message; }
+                return null;
+            }, delegate(string x) {
+                if (x != null || problem != null) { ShowText("Not sent", "Your list wasn't sent: " + (x ?? problem) + ".\n\nIt's kept on this PC; you can share it again from the game's page, or through GitHub.", null); return; }
+                ShowText("Sent, thank you!", "Your findings for " + g.Title + " are on their way. They're checked, then go into the shared lists every launcher downloads.\n\nReceipt: " + receipt, null);
+            });
+        }) { Icon = '\uE724', Info = "Sends your list, signed by this launcher. Nothing about you goes with it." });
+        p.Items.Add(new Item("Share through GitHub instead", "", true, delegate {
             pages.Pop();
             Recomp.Answered(g);
             string id = null, file = null;
@@ -8230,7 +8334,7 @@ class LauncherForm : Form {
                     : "Drag the file Explorer shows, " + Path.GetFileName(file) + ", into the form's \".hints file\" box.";
                 ShowText("Almost done", (opened ? "Your browser shows the form. " : "Your browser didn't open, so the form's link is on your clipboard: paste it into your browser's address bar. ") + "Sign in to GitHub if it asks. " + how + " Then submit it. Thank you!", null);
             });
-        }) { Icon = '', Info = "Opens the form and copies your list to paste in; you submit it yourself." });
+        }) { Icon = '', Info = "Opens a form on GitHub (you need an account) and copies your list to paste in; you submit it yourself." });
         p.Items.Add(new Item(afterPlay ? "No" : "Not now", "", true, delegate { pages.Pop(); Recomp.Answered(g); }) { Icon = '', Info = "Nothing is shared. You're asked again after more new findings." });
         if (afterPlay) p.Items.Add(new Item("Never ask again", "", true, delegate { pages.Pop(); Recomp.Answered(g); Recomp.AskToShare = false; }) { Icon = '',
             Info = "Stops this question for every game. Turn it back on in Settings; a game's page can still share any time." });
@@ -11857,6 +11961,13 @@ static class NativeMonsLauncher {
             string result;
             if (argv[3] == "check") { var n = CtrHeaderFix.Needed(argv[2]); result = n == null ? "still encrypted" : n.Count == 0 ? "fine" : "needs " + string.Join(" ", n.Select(x => x.At.ToString("X") + ":" + x.Was.ToString("X2") + ">" + x.Now.ToString("X2")).ToArray()); }
             else result = (argv[3] == "fix" ? CtrHeaderFix.Fix(argv[2]) : CtrHeaderFix.Undo(argv[2])) ?? "ok";
+            File.WriteAllText(argv[1], result);
+            return;
+        }
+        // --submit-hints <result> <code id> <list file>: sends a list as Share does (NATIVEMONS_SUBMIT_URL for a test server).
+        if (argv.Length == 4 && argv[0] == "--submit-hints") {
+            string result;
+            try { result = "receipt " + Submit.ZakuroHints(argv[2], File.ReadAllLines(argv[3])); } catch (Exception x) { result = "failed: " + x.Message; }
             File.WriteAllText(argv[1], result);
             return;
         }

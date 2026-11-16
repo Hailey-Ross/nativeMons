@@ -1,35 +1,56 @@
-# Merges a player's shared Zakuro findings (an issue from the launcher's "Share Zakuro findings") into the definitions
-# branch of the Zakuro fork, nativemons-hints (hints\<title id>-<code hash>.hints and index.txt), after checking them.
-# Launchers download changed lists from that branch, so -Push puts them in front of every player within hours.
+# Merges a player's shared Zakuro findings into the definitions branch of the Zakuro fork, nativemons-hints
+# (hints\<title id>-<code hash>.hints and index.txt), after checking them. Launchers download changed lists
+# from that branch, so -Push puts them in front of every player within hours. A list comes either from
+#   - a package the launcher sent to submit.hails.app, approved there (data/approved/<receipt>.package), or
+#   - an issue from the GitHub form.
+#   merge.ps1 -Package <file> -Branch <checkout of the nativemons-hints branch> [-Push]
 #   merge.ps1 -Issue 123 -Branch <checkout of the nativemons-hints branch> [-Push] [-Close]
-param([Parameter(Mandatory)][int]$Issue, [Parameter(Mandatory)][string]$Branch, [switch]$Push, [switch]$Close)
+param([int]$Issue, [string]$Package, [Parameter(Mandatory)][string]$Branch, [switch]$Push, [switch]$Close)
 $ErrorActionPreference = 'Stop'
 $repo = 'Hailey-Ross/nativeMons'
+if (($Issue -gt 0) -eq [bool]$Package) { throw 'Give either -Issue or -Package.' }
 # The titles 3DSrecomp+Zakuro builds (Recomp.Titles in the launcher).
 $titles = '0004000000055D00', '0004000000055E00', '000400000011C400', '000400000011C500', '0004000000164800', '0004000000175E00', '00040000001B5000', '00040000001B5100'
 
-$i = gh issue view $Issue -R $repo --json title,body,labels | ConvertFrom-Json
-if (-not ($i.labels.name -contains 'zakuro-hints')) { throw "Issue $Issue isn't labelled zakuro-hints." }
-$code = [regex]::Match($i.body, '### Code version\s+([0-9A-Fa-f]{16}-[0-9A-Fa-f]{16})').Groups[1].Value.ToUpperInvariant()
-if (-not $code) { throw 'No code version (<title id>-<code hash>) in the issue.' }
-if ($titles -notcontains $code.Substring(0, 16)) { throw "Title $($code.Substring(0, 16)) isn't one 3DSrecomp+Zakuro builds." }
-# Which launcher and Zakuro made it (older forms don't have the field).
-$versions = [regex]::Match($i.body, '### Versions\s+([^\r\n]+)').Groups[1].Value.Trim()
-if (-not $versions -or $versions -eq '_No response_') { $versions = 'not given' }
-$url = [regex]::Match($i.body, 'https://github\.com/user-attachments/files/\d+/[^\s\)\]]+').Value
-$tmp = Join-Path ([IO.Path]::GetTempPath()) "zakuro-hints-$Issue.txt"
-if ($url) { Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp }
-else {
-    # No file attached: the lines pasted into the form's file box (in a code block or not).
-    $box = [regex]::Match($i.body, '### The \.hints file\s+(.*?)(
-### |\z)', 'Singleline').Groups[1].Value
-    $box = ($box -replace '```[a-z]*', '').Trim()
-    if (-not $box) { throw 'No attached file and no pasted list in the issue.' }
-    [IO.File]::WriteAllText($tmp, $box)
+$lines = @()
+if ($Package) {
+    # Checked again here, whatever the server said: only the one layout the launcher writes (docs/protocol.md
+    # of nativemons-submit), read as text and never run.
+    if ((Get-Item -LiteralPath $Package).Length -gt 800KB) { throw 'The package is too large.' }
+    $text = [IO.File]::ReadAllText($Package, [Text.Encoding]::ASCII)
+    $m = [regex]::Match($text, '^\{"v":1,"kind":"zakuro-hints","key":"[A-Za-z0-9+/]{87}=","nonce":"[A-Za-z0-9+/]{43}=","created":[1-9][0-9]{9},"launcher":"([A-Za-z0-9 .,()\-]{1,80})","zakuro":"([0-9a-f]{7,40}|unknown)","body":\{"code":"([0-9A-F]{16}-[0-9A-F]{16})","addresses":\[("[0-9A-F]{8}"(,"[0-9A-F]{8}"){0,65535})\]\}\}$')
+    if (-not $m.Success) { throw 'The package is not in the launcher''s layout: nothing merged.' }
+    $versions = "$($m.Groups[1].Value), Zakuro $($m.Groups[2].Value)"
+    $code = $m.Groups[3].Value
+    $lines = $m.Groups[4].Value -split ',' | ForEach-Object { $_.Trim('"') }
+    $source = "package $([IO.Path]::GetFileNameWithoutExtension($Package))"
+} else {
+    $i = gh issue view $Issue -R $repo --json title,body,labels | ConvertFrom-Json
+    if (-not ($i.labels.name -contains 'zakuro-hints')) { throw "Issue $Issue isn't labelled zakuro-hints." }
+    $code = [regex]::Match($i.body, '### Code version\s+([0-9A-Fa-f]{16}-[0-9A-Fa-f]{16})').Groups[1].Value.ToUpperInvariant()
+    if (-not $code) { throw 'No code version (<title id>-<code hash>) in the issue.' }
+    # Which launcher and Zakuro made it (older forms don't have the field).
+    $versions = [regex]::Match($i.body, '### Versions\s+([^\r\n]+)').Groups[1].Value.Trim()
+    if (-not $versions -or $versions -eq '_No response_') { $versions = 'not given' }
+    $url = [regex]::Match($i.body, 'https://github\.com/user-attachments/files/\d+/[^\s\)\]]+').Value
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "zakuro-hints-$Issue.txt"
+    if ($url) { Invoke-WebRequest -UseBasicParsing $url -OutFile $tmp }
+    else {
+        # No file attached: the lines pasted into the form's file box (in a code block or not).
+        $box = [regex]::Match($i.body, '### The \.hints file\s+(.*?)(\n### |\z)', 'Singleline').Groups[1].Value
+        $box = ($box -replace '```[a-z]*', '').Trim()
+        if (-not $box) { throw 'No attached file and no pasted list in the issue.' }
+        [IO.File]::WriteAllText($tmp, $box)
+    }
+    if ((Get-Item $tmp).Length -gt 2MB) { Remove-Item $tmp; throw 'The file is over 2 MB: not a hint list.' }
+    $lines = Get-Content $tmp
+    Remove-Item $tmp
+    $source = "issue $Issue"
 }
-if ((Get-Item $tmp).Length -gt 2MB) { Remove-Item $tmp; throw 'The file is over 2 MB: not a hint list.' }
+if ($titles -notcontains $code.Substring(0, 16)) { throw "Title $($code.Substring(0, 16)) isn't one 3DSrecomp+Zakuro builds." }
+
 $bad = 0; $got = New-Object System.Collections.Generic.List[uint32]
-foreach ($line in Get-Content $tmp) {
+foreach ($line in $lines) {
     $l = $line.Trim()
     if ($l -eq '' -or $l.StartsWith('#')) { continue }
     if ($l -notmatch '^(0x)?([0-9A-Fa-f]{1,8})$') { $bad++; continue }
@@ -38,9 +59,8 @@ foreach ($line in Get-Content $tmp) {
     if ($a -lt 0x00100000 -or $a -ge 0x10000000) { $bad++; continue }
     $got.Add($a)
 }
-Remove-Item $tmp
 if ($bad -gt 0) { throw "$bad lines aren't addresses in a game's code: nothing merged." }
-if ($got.Count -eq 0) { throw 'The file has no addresses.' }
+if ($got.Count -eq 0) { throw 'The list has no addresses.' }
 
 if ((git -C $Branch rev-parse --abbrev-ref HEAD) -ne 'nativemons-hints') { throw "$Branch isn't on the nativemons-hints branch." }
 git -C $Branch pull -q --ff-only
@@ -56,14 +76,14 @@ $added = $have.Count - $before
 [IO.File]::WriteAllText($file, (($have | ForEach-Object { $_.ToString('X8') + "`n" }) -join ''))
 $index = Get-ChildItem $dir -Filter *.hints | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())`n" }
 [IO.File]::WriteAllText((Join-Path $Branch 'index.txt'), ($index -join ''))
-"Issue ${Issue}: $($got.Count) addresses for $code, $added new; $file now holds $($have.Count). Made by: $versions."
+"${source}: $($got.Count) addresses for $code, $added new; $file now holds $($have.Count). Made by: $versions."
 if ($Push -and $added -gt 0) {
     git -C $Branch add hints index.txt
-    git -C $Branch commit -q -m "Findings from nativeMons issue $Issue for $code" -m "Made by: $versions"
+    git -C $Branch commit -q -m "Findings from nativeMons $source for $code" -m "Made by: $versions"
     git -C $Branch push -q origin nativemons-hints
     'Pushed: launchers pick it up at their next check.'
 }
-if ($Close) {
+if ($Close -and $Issue -gt 0) {
     gh issue comment $Issue -R $repo --body "Thank you! $added new places from this list are in the shared list for $code, and reach everyone's launcher at its next check, which rebuilds the game quietly to cover them."
     gh issue close $Issue -R $repo
 }
