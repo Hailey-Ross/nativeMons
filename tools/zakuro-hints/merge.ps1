@@ -1,7 +1,8 @@
 # Merges a player's shared Zakuro findings into the definitions branch of the Zakuro fork, nativemons-hints
 # (hints\<title id>-<code hash>.hints and index.txt), after checking them. Launchers download changed lists
 # from that branch, so -Push puts them in front of every player within hours. A list comes either from
-#   - a package the launcher sent to submit.hails.app, approved there (data/approved/<receipt>.package), or
+#   - a package the launcher sent to submit.hails.app, approved there (data/approved/<receipt>.package, with its
+#     .sig beside it), or
 #   - an issue from the GitHub form.
 #   merge.ps1 -Package <file> -Branch <checkout of the nativemons-hints branch> [-Push]
 #   merge.ps1 -Issue 123 -Branch <checkout of the nativemons-hints branch> [-Push] [-Close]
@@ -14,15 +15,31 @@ $titles = '0004000000055D00', '0004000000055E00', '000400000011C400', '000400000
 
 $lines = @()
 if ($Package) {
-    # Checked again here, whatever the server said: only the one layout the launcher writes (docs/protocol.md
-    # of nativemons-submit), read as text and never run.
+    # Checked again here, whatever the server said (docs/protocol.md of nativemons-submit): read as bytes and
+    # never run; only the one layout the launcher writes; signed, by the key inside it, as the .sig beside it says.
     if ((Get-Item -LiteralPath $Package).Length -gt 800KB) { throw 'The package is too large.' }
-    $text = [IO.File]::ReadAllText($Package, [Text.Encoding]::ASCII)
-    $m = [regex]::Match($text, '^\{"v":1,"kind":"zakuro-hints","key":"[A-Za-z0-9+/]{87}=","nonce":"[A-Za-z0-9+/]{43}=","created":[1-9][0-9]{9},"launcher":"([A-Za-z0-9 .,()\-]{1,80})","zakuro":"([0-9a-f]{7,40}|unknown)","body":\{"code":"([0-9A-F]{16}-[0-9A-F]{16})","addresses":\[("[0-9A-F]{8}"(,"[0-9A-F]{8}"){0,65535})\]\}\}$')
+    $bytes = [IO.File]::ReadAllBytes($Package)
+    # Latin-1 maps each byte to one character, so any byte outside printable ASCII shows up here.
+    $text = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
+    if ($text -cmatch '[^ -~]') { throw 'The package has bytes the launcher never writes: nothing merged.' }
+    $m = [regex]::Match($text, '^\{"v":1,"kind":"zakuro-hints","key":"(?<key>[A-Za-z0-9+/]{87}=)","nonce":"[A-Za-z0-9+/]{43}=","created":[1-9][0-9]{9},"launcher":"(?<launcher>[A-Za-z0-9 .,()\-]{1,80})","zakuro":"(?<zakuro>[0-9a-f]{7,40}|unknown)","body":\{"code":"(?<code>[0-9A-F]{16}-[0-9A-F]{16})","addresses":\[(?<addrs>"[0-9A-F]{8}"(,"[0-9A-F]{8}"){0,65535})\]\}\}$')
     if (-not $m.Success) { throw 'The package is not in the launcher''s layout: nothing merged.' }
-    $versions = "$($m.Groups[1].Value), Zakuro $($m.Groups[2].Value)"
-    $code = $m.Groups[3].Value
-    $lines = $m.Groups[4].Value -split ',' | ForEach-Object { $_.Trim('"') }
+    $sigFile = [IO.Path]::ChangeExtension($Package, '.sig')
+    if (-not (Test-Path -LiteralPath $sigFile)) { throw "No signature beside it ($sigFile): nothing merged." }
+    $sigText = [IO.File]::ReadAllText($sigFile, [Text.Encoding]::ASCII).Trim()
+    if ($sigText -notmatch '^[A-Za-z0-9+/]{86}==$') { throw 'The signature file is not a signature: nothing merged.' }
+    $kb = [Convert]::FromBase64String($m.Groups['key'].Value)
+    if ($kb.Length -ne 65 -or $kb[0] -ne 4) { throw 'The package''s key is not a P-256 point: nothing merged.' }
+    $q = New-Object Security.Cryptography.ECPoint
+    $q.X = [byte[]]$kb[1..32]; $q.Y = [byte[]]$kb[33..64]
+    $ep = New-Object Security.Cryptography.ECParameters
+    $ep.Curve = [Security.Cryptography.ECCurve+NamedCurves]::nistP256; $ep.Q = $q
+    $ok = $false
+    try { $ec = [Security.Cryptography.ECDsa]::Create($ep); $ok = $ec.VerifyData($bytes, [Convert]::FromBase64String($sigText), [Security.Cryptography.HashAlgorithmName]::SHA256) } catch { $ok = $false }
+    if (-not $ok) { throw 'The signature does not match the package: nothing merged.' }
+    $versions = "$($m.Groups['launcher'].Value), Zakuro $($m.Groups['zakuro'].Value)"
+    $code = $m.Groups['code'].Value
+    $lines = $m.Groups['addrs'].Value -split ',' | ForEach-Object { $_.Trim('"') }
     $source = "package $([IO.Path]::GetFileNameWithoutExtension($Package))"
 } else {
     $i = gh issue view $Issue -R $repo --json title,body,labels | ConvertFrom-Json
