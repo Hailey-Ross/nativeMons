@@ -2,8 +2,10 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
-## Next
+## 0.0.8a
 
+- Fulldex 15 November for the DS games: FullDex Nav, a watch menu on L3 (or N) with Fly, Party, Open PC, Repel and an encounter counter; a fuller Pokédex in its pause menu; Fly from its own menu; and the right stick to zoom out and look around. Its new tidy folders don't change anything for nativeMons: your saves stay where they were.
+- Engines brought up to date with upstream: Gen1Recomp, Fulldex's source for our GBA player, nativeplat, 3DSrecomp+Zakuro, and both 3DS emulators.
 - My Collection looks more like the games: a Poké Ball by each Pokémon you've caught, dashes for names you haven't seen yet, and the shiny picture for one caught shiny. Each region has its own colors and pattern, with a bar of how much of it you've caught.
 - A caught Pokémon shows a badge for each game you have it in, in that game's colors, with a star where it's shiny.
 - Pokémon you got by trading, or moved in with Move Pokemon, count as caught even where the game's Pokédex never recorded them.
