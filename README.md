@@ -98,6 +98,7 @@ official package from python.org into its own `tools\python` folder, without ins
 | [Settings](docs/settings.md) | Game options, quick start, Discord, updates, controls |
 | [Engines](docs/engines.md) | nativeplat, the Platinum PC port, and everything nativeMons is built from |
 | [Building from source](docs/building.md) | Building it yourself, and the pre-release check |
+| [Linux and Steam Deck (early)](docs/linux.md) | Early, not ready for everyone: running it under Proton or Wine |
 
 ## Credits
 
@@ -121,6 +122,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - [hails.nds-Patcher](https://github.com/Hailey-Ross/hails.nds-Patcher) by Hails.
 - Pokédex entries from [PokéAPI](https://pokeapi.co).
 - Pokémon pictures served by [hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO) at pogo.hails.app, from the [PokeAPI sprites](https://github.com/PokeAPI/sprites) collection. The busy Poké Ball is based on its "Updating" page.
+- [Noto Sans](https://notofonts.github.io) by Google (SIL Open Font License 1.1), included for where Windows' own fonts aren't installed, such as Linux.
 - Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
 
 Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company. Pokémon and all

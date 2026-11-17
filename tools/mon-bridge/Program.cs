@@ -205,7 +205,12 @@ static class Program
     {
         var sav = Open(path);
         var ids = Enumerable.Range(1, sav.MaxSpeciesID);
-        Console.WriteLine("caught:" + (sav.HasPokeDex ? string.Join(',', ids.Where(i => sav.GetCaught((ushort)i))) : ""));
+        // Caught: the Pokedex's own flags, and anything held in the party or boxes (traded or moved in, even where
+        // the Pokedex never recorded it).
+        var caught = new HashSet<int>(sav.HasPokeDex ? ids.Where(i => sav.GetCaught((ushort)i)) : Enumerable.Empty<int>());
+        foreach (var mon in sav.BoxData.Concat(sav.PartyData))
+            if (mon.Species != 0 && !mon.IsEgg && mon.Species <= sav.MaxSpeciesID) caught.Add(mon.Species);
+        Console.WriteLine("caught:" + string.Join(',', caught.OrderBy(x => x)));
         Console.WriteLine("seen:" + (sav.HasPokeDex ? string.Join(',', ids.Where(i => sav.GetSeen((ushort)i))) : ""));
         var shiny = new HashSet<int>();
         foreach (var mon in sav.BoxData.Concat(sav.PartyData))

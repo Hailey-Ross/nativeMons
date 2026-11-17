@@ -13,7 +13,12 @@ Your Pokédex across every game, and moving Pokémon between games.
 - a list for **each region**, Kanto to Paldea (by the generation that introduced each Pokémon);
 - your **counts by game**.
 
-Pokémon you haven't seen yet show as `???`.
+The lists read like the games' own: a Poké Ball by each Pokémon you've caught, an empty circle by one you've only
+seen, and dashes in place of a name until you've seen it. Each region has its own colors and pattern, and the
+Pokédex shows how much of each one you've caught.
+
+**Caught** means the game's Pokédex says so, or the Pokémon is in a party or a box of yours. That includes Pokémon
+you traded for or moved in with Move Pokemon, even where the game never recorded them.
 
 **Romhacks and fan games** never count toward it. They're listed apart, each with a Pokédex of its own. Infinite
 Fusion's is read from its own saves (species caught and seen, by National Dex number), with its fusions counted
@@ -23,6 +28,7 @@ separately. The launcher only reads the game's species list and saves, and never
 description from a game you caught it in, plus every game that has it.
 - Types, base stats and abilities are shown as that game's generation had them (from PKHeX's tables): Clefairy is
   Normal in Crystal, Generation 1 has one Special stat, and abilities start with Generation 3.
+- A badge for each game you have it in, in that game's colors, with a star where it's shiny.
 - A gold star marks a shiny, and A switches between its shiny and normal pictures. Shinies are counted only while
   they're in a party or a box, because saves keep no record of the rest.
 

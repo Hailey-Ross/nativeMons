@@ -61,4 +61,7 @@ only one shows. Turn it off in Settings.
 - **Emu** (also under **3DS games**): turns 3DS games on, and installs, updates or removes the 3DS emulators.
 - **Import saves** and **Export saves** (see [Saves](saves.md)).
 - **Download Pokedex**, for offline pictures and entries (see [My Collection](pokemon.md#pokémon-pictures)).
-- **Credits**, and **Last session**: how the last game ended.
+- **Wide layout**, on landscape screens at least 1000 pixels across: the menu as a column on the left, with the
+  chosen option shown large beside it. It changes the window right away. Left alone, the launcher picks the wide layout
+  on short screens, such as a Steam Deck's 1280x800.
+- **Credits**, with links that open in your browser, and **Last session**: how the last game ended.

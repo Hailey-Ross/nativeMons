@@ -586,6 +586,62 @@ static class Recomp {
     }
 }
 
+// Fonts by name. Where Windows' own aren't installed (Wine or Proton on Linux, whose .NET throws for a missing family
+// where Windows quietly substitutes one), the open Noto fonts beside the exe stand in, then any installed ones.
+static class UiFont {
+    static readonly HashSet<string> have = new HashSet<string>(new System.Drawing.Text.InstalledFontCollection().Families.Select(f => f.Name), StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<string, string> bundled = new Dictionary<string, string> {
+        { "Segoe UI", "NotoSans-Regular.ttf" }, { "Segoe UI Semibold", "NotoSans-SemiBold.ttf" },
+        { "Segoe UI Black", "NotoSans-Black.ttf" }, { "Segoe UI Light", "NotoSans-Light.ttf" }, { "Consolas", "NotoSansMono-Regular.ttf" },
+    };
+    static readonly Dictionary<string, string[]> stand = new Dictionary<string, string[]> {
+        { "Segoe UI", new[] { "Noto Sans", "DejaVu Sans", "Liberation Sans" } },
+        { "Segoe UI Semibold", new[] { "Noto Sans SemiBold", "Noto Sans Medium", "Noto Sans", "DejaVu Sans", "Liberation Sans" } },
+        { "Segoe UI Black", new[] { "Noto Sans Black", "Noto Sans ExtraBold", "Noto Sans", "DejaVu Sans", "Liberation Sans" } },
+        { "Segoe UI Light", new[] { "Noto Sans Light", "Noto Sans", "DejaVu Sans", "Liberation Sans" } },
+        { "Consolas", new[] { "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono" } },
+        { "Segoe MDL2 Assets", new[] { "Segoe Fluent Icons" } },
+    };
+    // One collection per file, kept for the program's life: each holds exactly one family.
+    static readonly List<System.Drawing.Text.PrivateFontCollection> mine = new List<System.Drawing.Text.PrivateFontCollection>();
+    static readonly Dictionary<string, FontFamily> loaded = new Dictionary<string, FontFamily>();
+    static FontFamily Bundled(string name) {
+        string file;
+        if (!bundled.TryGetValue(name, out file)) return null;
+        lock (loaded) {
+            FontFamily f;
+            if (loaded.TryGetValue(name, out f)) return f;
+            try {
+                string path = Path.Combine(Config.Here, "fonts", file);
+                if (File.Exists(path)) {
+                    var c = new System.Drawing.Text.PrivateFontCollection();
+                    c.AddFontFile(path);
+                    mine.Add(c);
+                    f = c.Families.Length > 0 ? c.Families[0] : null;
+                }
+            } catch { f = null; }
+            loaded[name] = f;
+            return f;
+        }
+    }
+    // Each candidate is tried in turn: the installed list can name a family the font lookup still can't open.
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi)] static extern IntPtr GetProcAddress(IntPtr module, string name);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string name);
+    // Under Wine or Proton, whatever its font list says: Proton lists stand-ins under Windows' own names.
+    public static readonly bool Wine = DetectWine();
+    static bool DetectWine() { try { var nt = GetModuleHandle("ntdll.dll"); return nt != IntPtr.Zero && GetProcAddress(nt, "wine_get_version") != IntPtr.Zero; } catch { return false; } }
+    public static Font Get(string name, float size, GraphicsUnit unit) {
+        if (!Wine && have.Contains(name)) try { return new Font(name, size, unit); } catch (ArgumentException) { }
+        var own = Bundled(name);
+        if (own != null) try { return new Font(own, size, own.IsStyleAvailable(FontStyle.Regular) ? FontStyle.Regular : FontStyle.Bold, unit); } catch (ArgumentException) { }
+        string[] alts;
+        if (stand.TryGetValue(name, out alts)) foreach (var a in alts) if (have.Contains(a)) try { return new Font(a, size, unit); } catch (ArgumentException) { }
+        var style = name.EndsWith("Black") || name.EndsWith("Semibold") ? FontStyle.Bold : FontStyle.Regular;
+        try { return new Font(name == "Consolas" ? FontFamily.GenericMonospace : FontFamily.GenericSansSerif, size, style, unit); }
+        catch (ArgumentException) { return SystemFonts.DefaultFont; }
+    }
+}
+
 // Shared packages to submit.hails.app (nativemons-submit, docs/protocol.md there): signed with this install's
 // own P-256 key, kept encrypted for the Windows user, each on a one-time challenge, in the one layout the
 // server accepts. Zakuro hint lists first.
@@ -2503,6 +2559,8 @@ static class GameArt {
     }
     // A run that walks a list leaves <shot>-stop-NN.png per town (gen4recomp NP_STAT_WARP_STOPS); stop `first` is towns[0].
     static int SaveStops(GameEntry g, string shot, string[] towns, int first, RectangleF part) {
+        // A run stopped early (the launcher closing, a game starting) isn't the set: keep the old one and try again later.
+        if (Hold) return 0;
         string stem = shot.Substring(0, shot.Length - 4);
         if (Directory.Exists(TownsDir(g.Id))) Directory.Delete(TownsDir(g.Id), true);
         Directory.CreateDirectory(TownsDir(g.Id));
@@ -2773,6 +2831,17 @@ static class GameArt {
         g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
         g.DrawImage(pic, r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h);
         g.Restore(st);
+    }
+    // A tile much wider than the picture: the whole picture at its height, over a dimmed copy filling the tile,
+    // instead of a close crop of its middle.
+    public static void DrawFitted(Graphics g, Bitmap pic, RectangleF r, bool always = false) {
+        // The phone's tile (about 2.5:1) keeps its close crop.
+        if (!always && r.Width < r.Height * 3.5f) { Draw(g, pic, r); return; }
+        float fit = r.Height / pic.Height;
+        Draw(g, pic, r);
+        using (var b = new SolidBrush(Color.FromArgb(150, 0, 0, 0))) g.FillRectangle(b, r);
+        float w = pic.Width * fit;
+        Draw(g, pic, new RectangleF(r.X + (r.Width - w) / 2, r.Y, w, r.Height));
     }
     static long Distance(Bitmap a, Bitmap b) {
         long sum = 0;
@@ -4079,6 +4148,10 @@ class Item {
     public string Info = ""; public string[] Records = new string[0];   // the detail panel
     public char Icon = '';
     public Theme Theme;   // a game's row: its colours
+    public string GameId; // a game's row: its intro plays in the wide layout's side panel
+    public int DexNo; public int DexState; public bool DexStar;
+    public int Region = -1;           // a region's row or one of its Pokemon: its colors and motif (9: national)
+    public int RegionCaught, RegionTotal;   // a Pokedex row: number, 0 unseen 1 seen 2 caught, shiny
     public string Sprite; // a Pokemon's row: its picture (see Sprites)
     public string TileHint = "";   // a short second line on its grid tile, to tell similar rows apart
     public int Fold;   // a section header: 1 open, 2 closed
@@ -4100,12 +4173,14 @@ class Page {
     public int[] DexOrder;       // what left and right step through on an entry
     public bool DexShiny;        // the entry is showing its shiny picture
     public GameEntry DexOnly;    // a list or entry of one game's own Pokedex (a romhack's), not the collection's
+    public bool Links;           // web addresses in the Body open in the browser when clicked
     public bool FitBody;         // the Body's box only as tall as its text, so the list below it has room
     public float DexHeight;      // how tall the entry came out
     public bool Mods;            // hides the clash banner while open
     public BoxView Boxes;        // Move Pokemon's box screen
     public bool Main;
     public Theme Theme;
+    public string GameId;        // a game's own page: its intro plays in the wide layout's side panel
     public List<WallResult> Gallery;   // Find a wallpaper's results, shown as a grid
     public Bitmap Picture;       // a wallpaper's preview, shown above the buttons
     public BrowseRequest Browse; // a folder in the launcher's own browser
@@ -4180,11 +4255,10 @@ class LauncherForm : Form {
         // Tests can name a screen (NATIVEMONS_TEST_SCREEN=DISPLAY3) so the user keeps their own.
         string testScreen = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_SCREEN");
         var area = (Screen.AllScreens.FirstOrDefault(s => testScreen != null && s.DeviceName.EndsWith(testScreen, StringComparison.OrdinalIgnoreCase)) ?? Screen.PrimaryScreen).WorkingArea;
-        int h = area.Height * 94 / 100;
         FormBorderStyle = FormBorderStyle.None;
-        StartPosition = FormStartPosition.Manual; ClientSize = new Size(h * 60 / 100, h);
+        StartPosition = FormStartPosition.Manual; ClientSize = WindowSize(area);
         Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
-        using (var outline = Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), CornerRadius(ClientSize.Width))) Region = new Region(outline);
+        using (var outline = Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), CornerRadius(ClientSize.Width, ClientSize.Height))) Region = new Region(outline);
         BackColor = Color.FromArgb(18, 20, 24); ForeColor = Color.White;
         DoubleBuffered = true; KeyPreview = true;
         AllowDrop = true;
@@ -4194,34 +4268,39 @@ class LauncherForm : Form {
         tick.Interval = 16; tick.Tick += delegate { Poll(); };
         Load += delegate { tick.Start(); };
         Shown += delegate { Start(); };
-        MakeFonts(ClientSize.Width);
+        // Wide: drawn as the tablet the whole time, with the phone's text sizes.
+        wideWindow = ClientSize.Width > ClientSize.Height;
+        if (wideWindow) { phoneW = ClientSize.Height * 60 / 100; tabletK = 1; tabletW = ClientSize.Width; MakeFonts(WideText(ClientSize.Width, phoneW)); } else MakeFonts(ClientSize.Width);
     }
+    // A wide window's text grows with its width: the phone's sizes for this height, up to 1.4 times at about 1280x800.
+    static int WideText(int w, int phone) { return (int)(phone * Math.Max(1f, Math.Min(1.4f, (float)Math.Sqrt(w / (float)phone) * 0.82f))); }
+    bool wideWindow;
 
     void MakeFonts(int width) {
         float h = Math.Max(420, width * 1.15f);
         foreach (var f in fitFonts.Values) f.Dispose();
         fitFonts.Clear();
-        titleFont = new Font("Segoe UI Semibold", h / 24f, GraphicsUnit.Pixel);
-        heroFont = new Font("Segoe UI Semibold", h / 17f, GraphicsUnit.Pixel);
-        itemFont = new Font("Segoe UI", h / 34f, GraphicsUnit.Pixel);
-        itemBold = new Font("Segoe UI Semibold", h / 34f, GraphicsUnit.Pixel);
-        smallFont = new Font("Segoe UI", h / 52f, GraphicsUnit.Pixel);
-        monoFont = new Font("Consolas", h / 50f, GraphicsUnit.Pixel);
-        smallBold = new Font("Segoe UI Semibold", h / 52f, GraphicsUnit.Pixel);
-        bodyFont = new Font("Segoe UI", h / 42f, GraphicsUnit.Pixel);
-        markFont = new Font("Segoe UI Black", h / 30f, GraphicsUnit.Pixel);
-        markLight = new Font("Segoe UI Light", h / 30f, GraphicsUnit.Pixel);
-        splashMark = new Font("Segoe UI Black", h / 11f, GraphicsUnit.Pixel);
-        splashLight = new Font("Segoe UI Light", h / 11f, GraphicsUnit.Pixel);
-        playFont = new Font("Segoe UI Black", h / 26f, GraphicsUnit.Pixel);
-        iconFont = new Font("Segoe MDL2 Assets", h / 26f, GraphicsUnit.Pixel);
-        iconSmall = new Font("Segoe MDL2 Assets", h / 40f, GraphicsUnit.Pixel);
+        titleFont = UiFont.Get("Segoe UI Semibold", h / 24f, GraphicsUnit.Pixel);
+        heroFont = UiFont.Get("Segoe UI Semibold", h / 17f, GraphicsUnit.Pixel);
+        itemFont = UiFont.Get("Segoe UI", h / 34f, GraphicsUnit.Pixel);
+        itemBold = UiFont.Get("Segoe UI Semibold", h / 34f, GraphicsUnit.Pixel);
+        smallFont = UiFont.Get("Segoe UI", h / 52f, GraphicsUnit.Pixel);
+        monoFont = UiFont.Get("Consolas", h / 50f, GraphicsUnit.Pixel);
+        smallBold = UiFont.Get("Segoe UI Semibold", h / 52f, GraphicsUnit.Pixel);
+        bodyFont = UiFont.Get("Segoe UI", h / 42f, GraphicsUnit.Pixel);
+        markFont = UiFont.Get("Segoe UI Black", h / 30f, GraphicsUnit.Pixel);
+        markLight = UiFont.Get("Segoe UI Light", h / 30f, GraphicsUnit.Pixel);
+        splashMark = UiFont.Get("Segoe UI Black", h / 11f, GraphicsUnit.Pixel);
+        splashLight = UiFont.Get("Segoe UI Light", h / 11f, GraphicsUnit.Pixel);
+        playFont = UiFont.Get("Segoe UI Black", h / 26f, GraphicsUnit.Pixel);
+        iconFont = UiFont.Get("Segoe MDL2 Assets", h / 26f, GraphicsUnit.Pixel);
+        iconSmall = UiFont.Get("Segoe MDL2 Assets", h / 40f, GraphicsUnit.Pixel);
     }
 
     string previewId;
     public void Snapshot(string file, string screen, int w, int h) {
         // A size wider than tall shows the tablet, with the phone's text.
-        if (w > h) { phoneW = h * 60 / 100; tabletK = 1; MakeFonts(phoneW); } else MakeFonts(w);
+        if (w > h) { phoneW = h * 60 / 100; tabletK = 1; wideWindow = true; MakeFonts(WideText(w, phoneW)); } else MakeFonts(w);
         try { Library.Scan(Gen1Cli); } catch (Exception e) { Library.Note = e.Message; }
         PickCurrent();
         int colon = screen.IndexOf(':');
@@ -4405,10 +4484,21 @@ class LauncherForm : Form {
         if (screen == "dexgame") { LoadDex(); var one = Library.Games.Find(g => g.Id == previewId); if (one != null) { pages.Push(DexOtherPage()); pages.Push(DexListPage(one.Title, 1, 151, one)); } }
         if (screen == "dex" || screen == "dexlist" || screen == "dexentry") {
             LoadDex();
+            // Snapshots only (NATIVEMONS_TEST_DEX=sample): a made-up collection, to see every kind of row.
+            if (Environment.GetEnvironmentVariable("NATIVEMONS_TEST_DEX") == "sample" && Library.Games.Count > 0) {
+                var d = new DexGame();
+                foreach (int n in new[] { 1, 4, 7, 16, 19, 21, 25 }) d.Caught.Add(n);
+                foreach (int n in new[] { 2, 10, 13, 17, 20, 23, 24 }) d.Seen.Add(n);
+                dexBy = new Dictionary<GameEntry, DexGame>();
+                var counted = Library.Games.Where(x => CountsInCollection(x)).Take(2).ToList();
+                if (counted.Count > 0) dexBy[counted[0]] = d;
+                if (counted.Count > 1) { var d2 = new DexGame(); foreach (int n in new[] { 16, 19, 25 }) d2.Caught.Add(n); d2.Shiny.Add(19); dexBy[counted[1]] = d2; }
+                else d.Shiny.Add(19);
+            }
             int species; if (!(colon > 0 && int.TryParse(previewId, out species))) species = 25;
             var order = Enumerable.Range(1, Sprites.MaxDex).Where(DexSeen).ToArray();
             if (screen == "dex") pages.Push(DexHomePage());
-            else if (screen == "dexlist") { var list = DexListPage("Kanto", 1, 151); list.Sel = Math.Min(species - 1, 150); pages.Push(list); for (int i = 0; i < 12 && list.Sel + i < 151; i++) if (DexSeen(list.Sel + i + 1)) Sprites.Get((list.Sel + i + 1).ToString()); Sprites.Wait(15); }
+            else if (screen == "dexlist") { var list = DexListPage("Kanto", 1, 151); list.Sel = Math.Min(species - 1, 150); pages.Push(list); for (int i = -10; i < 12; i++) { int k = list.Sel + i; if (k >= 0 && k < list.Items.Count && list.Items[k].Sprite != null) Sprites.Get(list.Items[k].Sprite); } if (DexCaught(species)) DexInfos.Wait(species, 30); Sprites.Wait(15); }
             else { pages.Push(DexEntryPage(species, order)); if (DexCaught(species)) DexInfos.Wait(species, 30); Sprites.Get((DexShiny(species) ? "shiny/" : "") + species); Sprites.Wait(15); }
         }
         if (screen == "job") {
@@ -4636,6 +4726,7 @@ class LauncherForm : Form {
         if (chooseId != null) { Request("show", chooseId, directSlot); chooseId = null; }
         // For tests: straight to a screen once the start is done, with no key presses to miss (NATIVEMONS_TEST_OPEN=move).
         if (Environment.GetEnvironmentVariable("NATIVEMONS_TEST_OPEN") == "move") OpenBoxView();
+        if (Environment.GetEnvironmentVariable("NATIVEMONS_TEST_OPEN") == "credits") BeginInvoke((Action)delegate { pages.Push(CreditsPage()); Invalidate(); });
         if (err != null) ShowText("Something went wrong", err, null);
         // NATIVEMONS_TEST_SETUP=1: the guided setup even where games are already found, to try it out.
         else if ((Config.RomFolders().Count == 0 && !Library.Games.Exists(g => g.Playable)) || Environment.GetEnvironmentVariable("NATIVEMONS_TEST_SETUP") == "1") StartSetup();
@@ -4769,6 +4860,12 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Wallpapers: " + (Wallpaper.Drawn ? "Drawn scenes" : "From your games"), "", true, delegate { pages.Push(WallpaperPage(false)); }) { Icon = '\uE790', Info = "Drawn scenes or pictures from your own play, and a picture of your own for any game." });
         p.Items.Add(new Item("Controls", "", true, delegate { pages.Push(ControlsPage()); }) { Icon = '\uE765', Info = "The keys each engine uses while you play: saving, fast forward, snapshots, screenshots." });
         p.Items.Add(new Item("Screenshots", "", true, delegate { pages.Push(ScreenshotsPage()); }) { Icon = '', Info = "Open the folders where nativeplat and Infinite Fusion put the screenshots you take while you play." });
+        // Only where it fits: a landscape screen at least 1000 px across.
+        var screenArea = Screen.FromControl(this).WorkingArea;
+        if (WideFits(screenArea)) p.Items.Add(new Item("Wide layout: " + (wideWindow ? "On" : "Off"), "", true, delegate {
+            Config.Write("layout.txt", wideWindow ? "phone" : "wide");
+            ApplyLayout(!wideWindow); pages.Pop(); pages.Push(SettingsPage());
+        }) { Icon = '', Info = "Fills more of the screen, with the menu as a column on the left and the chosen option shown large beside it. Off is the phone. Select to turn it " + (wideWindow ? "off" : "on") + "." });
         p.Items.Add(new Item("Quick start: " + (QuickStart ? "On" : "Off"), "", true, delegate { QuickStart = !QuickStart; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "Games open straight at their title screen, past the intro. The last game you played waits there while the menu is open, so Play starts it at once. Gen1Recomp, nativeplat, DS games on Fulldex, and 3DSrecomp+Zakuro. Select to turn it " + (QuickStart ? "off" : "on") + "." });
         if (DiscordPresence.Available) p.Items.Add(new Item("Discord status: " + (DiscordPresence.Enabled ? "On" : "Off"), "", true, delegate { DiscordPresence.Enabled = !DiscordPresence.Enabled; pages.Pop(); pages.Push(SettingsPage()); }) { Icon = '', Info = "While you play, Discord shows which game, played through nativeMons. Select to turn it " + (DiscordPresence.Enabled ? "off" : "on") + "." });
         p.Items.Add(new Item(Updater.Ready ? "Updates: " + Updater.Upper(Updater.LatestLabel) + " ready" : "Updates", "", true, delegate { OpenUpdates(); }) { Icon = '\uE895', Info = "Keeps the launcher and every engine up to date from this project's releases. Your saves and settings stay as they are." });
@@ -5810,7 +5907,8 @@ class LauncherForm : Form {
     bool DexShiny(int id, GameEntry only) { return DexOf(only).Any(d => d.Shiny.Contains(id)); }
     // What a game's Pokedex was read from, cheaply: when this changes, it's read again, and otherwise never.
     static string DexPrint(GameEntry g) {
-        var o = new StringBuilder(g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
+        // "held": read again since Pokemon held in a save count as caught (2026-11-16).
+        var o = new StringBuilder("held|" + g.Engine() + "|" + SaveSets.Active(g) + "|" + string.Join(",", SaveSets.All(g)));
         Action<string> file = delegate(string f) { try { var i = new FileInfo(f); if (i.Exists) o.Append("|" + i.Name + ":" + i.Length + ":" + i.LastWriteTimeUtc.Ticks); } catch { } };
         Action<string> folder = delegate(string d) { try { if (Directory.Exists(d)) foreach (var f in Directory.GetFiles(d, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal)) file(f); } catch { } };
         // Read again when the list grows (to 1025 on 2026-11-04), as its later Pokemon move into it.
@@ -5905,10 +6003,10 @@ class LauncherForm : Form {
     Page DexHomePage() {
         var p = new Page { Title = "Pokedex" };
         int last = DexRegionStart[DexRegions.Length] - 1;
-        p.Items.Add(new Item("National: " + DexCount(1, last), "", true, delegate { pages.Push(DexListPage("National", 1, last)); }) { Icon = '\uE8F1', Info = "Every Pokemon from 001 to " + last.ToString("0000") + "." });
+        p.Items.Add(new Item("National: " + DexCount(1, last), "", true, delegate { pages.Push(DexListPage("National", 1, last)); }) { Region = 9, RegionCaught = Enumerable.Range(1, last).Count(DexCaught), RegionTotal = last, Icon = '\uE8F1', Info = "Every Pokemon from 001 to " + last.ToString("0000") + "." });
         for (int i = 0; i < DexRegions.Length; i++) {
             int a = DexRegionStart[i], b = DexRegionStart[i + 1] - 1; string name = DexRegions[i];
-            p.Items.Add(new Item(name + ": " + DexCount(a, b), "", true, delegate { pages.Push(DexListPage(name, a, b)); }) { Icon = '\uE707', Info = "Numbers " + a.ToString("000") + " to " + b.ToString("000") + ", the Pokemon introduced in " + name + "." });
+            p.Items.Add(new Item(name + ": " + DexCount(a, b), "", true, delegate { pages.Push(DexListPage(name, a, b)); }) { Region = i, RegionCaught = Enumerable.Range(a, b - a + 1).Count(DexCaught), RegionTotal = b - a + 1, Icon = '\uE707', Info = "Numbers " + a.ToString("000") + " to " + b.ToString("000") + ", the Pokemon introduced in " + name + "." });
         }
         p.Items.Add(new Item("By game", "", true, delegate { pages.Push(DexGamesPage()); }) { Icon = '\uE7FC', Info = "How many each of your games has caught." });
         if (Library.Games.Any(OwnSection))
@@ -5939,15 +6037,28 @@ class LauncherForm : Form {
         return p;
     }
     Page DexListPage(string title, int from, int to) { return DexListPage(title, from, to, null); }
+    // Each region's own colors and motif, so its list feels like its games.
+    static readonly Theme[] RegionThemes = {
+        Theme.Make("#E3350D", "#A51E0A", "#FFD9CF", "plain"), Theme.Make("#C9A227", "#8C6A12", "#F7EBC4", "plain"),
+        Theme.Make("#1F8A70", "#0F5E4B", "#CDEFE4", "plain"), Theme.Make("#6A5ACD", "#463A9A", "#E3DEFA", "plain"),
+        Theme.Make("#3A3F4B", "#1E2229", "#E2E4E8", "plain"), Theme.Make("#2E6FD8", "#1B4A9C", "#D6E4FB", "plain"),
+        Theme.Make("#F28C28", "#C2601A", "#FFE7CC", "plain"), Theme.Make("#9B2D6F", "#65184A", "#F4D6E8", "plain"),
+        Theme.Make("#C8384B", "#7A2A8F", "#F6D9E0", "plain") };
+    static int RegionOf(int from, int to) {
+        for (int i = 0; i < DexRegions.Length; i++) if (DexRegionStart[i] == from && DexRegionStart[i + 1] - 1 == to) return i;
+        return -1;
+    }
     Page DexListPage(string title, int from, int to, GameEntry only) {
-        var p = new Page { Title = title, Jump = 10, DexOnly = only };
+        int region = only == null ? RegionOf(from, to) : -1;
+        var p = new Page { Title = title, Jump = 10, DexOnly = only, Theme = region >= 0 ? RegionThemes[region] : null };
         var order = Enumerable.Range(from, to - from + 1).Where(x => DexSeen(x, only)).ToArray();
         for (int n = from; n <= to; n++) {
             int id = n; bool caught = DexCaught(id, only), seen = DexSeen(id, only);
-            string label = "#" + id.ToString("000") + " " + (seen ? DexName(id) : "???");
-            if (DexShiny(id, only)) label += ": \u2605";
-            else if (caught) label += ": Caught";
-            p.Items.Add(new Item(label, seen ? "" : "Not seen yet", seen, delegate { pages.Push(DexEntryPage(id, order, only)); }) { Icon = '\uE9CE', Sprite = seen ? id.ToString() : null, Info = caught ? "Caught." : seen ? "Seen, not caught." : "Not seen yet." });
+            bool star = DexShiny(id, only);
+            // As the games list it: a ball by what's caught, the name once seen, dashes until then.
+            string label = "No." + id.ToString("000") + " " + (seen ? DexName(id) : "----------") + ": " + (star ? "Caught, shiny" : caught ? "Caught" : seen ? "Seen" : "Not seen yet");
+            p.Items.Add(new Item(label, "", seen, delegate { pages.Push(DexEntryPage(id, order, only)); }) { Icon = '\uE9CE', Sprite = seen ? (star ? "shiny/" : "") + id : null, DexNo = id, DexState = caught ? 2 : seen ? 1 : 0, DexStar = star, Region = region,
+                Info = caught ? "In your collection: caught, traded for, or moved in." : seen ? "Seen, not caught yet." : "Not met yet. Its name shows once you've seen it." });
         }
         return p;
     }
@@ -6293,7 +6404,7 @@ class LauncherForm : Form {
             var g = game;
             string why = Library.WhyNotPlayable(g);
             // A PC game not yet installed opens its page, where it's installed.
-            var it = new Item(g.Title, g.Playable ? "" : why, g.Playable || g.Pc != null, delegate { pages.Push(GamePage(g)); }) { Icon = '', Theme = g.Theme };
+            var it = new Item(g.Title, g.Playable ? "" : why, g.Playable || g.Pc != null, delegate { pages.Push(GamePage(g)); }) { Icon = '', Theme = g.Theme, GameId = g.Id };
             it.Info = g.Pc != null ? (g.Playable ? "A PC game of its own, installed in the launcher." : why) : g.Playable ? g.Console + ". Runs with " + GameEntry.EngineName(g.Engine(), g) + "." : g.Console + ". " + why;
             it.Records = GameRecords(g);
             p.Items.Add(it);
@@ -6327,7 +6438,7 @@ class LauncherForm : Form {
     }
     Page GamePage(GameEntry g) {
         if (g.Pc != null) return PcGamePage(g);
-        var p = new Page { Title = g.Title, Theme = g.Theme };
+        var p = new Page { Title = g.Title, Theme = g.Theme, GameId = g.Id };
         string engine = g.Engine();
         var play = new Item("Play", "Start with " + GameEntry.EngineName(engine, g) + ".", g.Playable, delegate { Play(g); }) { Icon = '' };
         play.Records = GameRecords(g);
@@ -7097,7 +7208,7 @@ class LauncherForm : Form {
                         if (i == 0) { var layer = LayerFor((int)c.Width, (int)c.Height, sample); g.DrawImage(layer.Picture, c.X, c.Y, c.Width, c.Height); }
                         else if (!GameArt.DrawTown(g, sample.GameId, c, c)) {
                             using (var b = new SolidBrush(Color.FromArgb(72, 76, 88))) g.FillRectangle(b, c);
-                            using (var big = new Font("Segoe MDL2 Assets", c.Width * 0.3f, GraphicsUnit.Pixel)) Write(g, "", big, Color.FromArgb(220, 255, 255, 255), c, StringAlignment.Center, StringAlignment.Center, false);
+                            using (var big = UiFont.Get("Segoe MDL2 Assets", c.Width * 0.3f, GraphicsUnit.Pixel)) Write(g, "", big, Color.FromArgb(220, 255, 255, 255), c, StringAlignment.Center, StringAlignment.Center, false);
                         }
                         g.Restore(st);
                         using (var pen = new Pen(sel ? Accent(th) : PhoneLine, Math.Max(2f, cw * (sel ? 0.03f : 0.012f)))) g.DrawPath(pen, path);
@@ -7493,7 +7604,7 @@ class LauncherForm : Form {
         return p;
     }
     Page CreditsPage() {
-        return new Page { Title = "Credits", Body = "Pokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
+        return new Page { Title = "Credits", Links = true, Body = "Pokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
             + "\n\nnativeplat by sohamb117 (github.com/sohamb117/gen4recomp), native Diamond, Pearl and Platinum from the pret decompilations. Not affiliated with nativeMons."
             + "\n\nPokemon Infinite Fusion and Infinite Fusion 2 by chardub (Frogman) and their contributors (github.com/infinitefusion/infinitefusion-e18, github.com/infinitefusion/infinitefusion-hoenn-public), made with Pokemon Essentials on RPG Maker XP. Its custom fusion sprites are by the Infinite Fusion artist community. Installed from your own copy or its GitHub; not included, and not affiliated with nativeMons."
@@ -7505,6 +7616,7 @@ class LauncherForm : Form {
             + "\n\nMoving Pokemon uses PKHeX.Core by Kaphotics and contributors (github.com/kwsch/PKHeX, GPL-3.0)."
             + "\n\n3DSrecomp+Zakuro: Zakuro and 3dsrecomp by fearkov (github.com/fearkov/zakuro, github.com/fearkov/3dsrecomp, both MIT), built from our fork (github.com/Hailey-Ross/zakuro) with a small build tool of ours; Zig (ziglang.org, MIT) compiles each game on your PC. Not affiliated with nativeMons."
             + "\n\nOptional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons: Azahar by the Azahar team, from Citra (github.com/azahar-emu/azahar, GPL-2.0-or-later; ours: github.com/Hailey-Ross/azahar); AzaharPlus by its contributors, from Azahar (github.com/AzaharPlus/AzaharPlus, GPL-3.0; ours, without its system-file downloader: github.com/Hailey-Ross/AzaharPlus). Not the official builds, and not affiliated with nativeMons."
+            + "\n\nNoto Sans by Google (notofonts.github.io, SIL Open Font License 1.1), for where Windows' own fonts aren't installed."
             + "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks."
             + "\n\n" + Gen1Credit
             + "\n\nNot affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokemon Company. Pokemon and all related names are the property of their owners. No games are included: you need your own ROMs." };
@@ -8169,8 +8281,11 @@ class LauncherForm : Form {
     void WallpapersAtStart() {
         string last = Config.Read("last-game.txt", "");
         var first = Library.Games.Find(g => g.Id == last && g.Playable) ?? Library.Games.Find(g => g.Playable);
-        if (RunningGames() == "")
-            GameArt.CaptureAtStart(first, delegate(int n, int total) { startStage = "Making wallpapers (" + (n + 1) + " of " + total + ")"; });
+        if (RunningGames() == "") {
+            var making = Task.Run(() => GameArt.CaptureAtStart(first, delegate(int n, int total) { startStage = "Making wallpapers (" + (n + 1) + " of " + total + ")"; }));
+            // At most 20 s behind the splash: a DS game's set of towns takes minutes, so it finishes behind the menu instead.
+            if (!making.Wait(20000)) startStage = "Almost ready";
+        }
         if (first != null) { GameArt.Frame(first.Id, 0); GameArt.Town(first.Id); }
     }
     static bool PrepareNow(GameEntry g, int workers) {
@@ -8590,7 +8705,7 @@ class LauncherForm : Form {
     }
     Page PcGamePage(GameEntry g) {
         if (PcGames.IsCustom(g)) return CustomGamePage(g);
-        var p = new Page { Title = g.Title, Theme = g.Theme };
+        var p = new Page { Title = g.Title, Theme = g.Theme, GameId = g.Id };
         Action pickExisting = delegate {
             string f = PickFolder("Choose your installation's folder, the one with " + PcGames.Of(g).Exe);
             if (f == null) return;
@@ -9315,10 +9430,10 @@ class LauncherForm : Form {
             var hits = new List<RectangleF>();
             using (var b = new SolidBrush(Color.FromArgb(10, 12, 18))) g.FillRectangle(b, 0, 0, size.Width, size.Height);
             float cw = Math.Min(640f, size.Width * 0.46f), pad = cw * 0.06f, rowH = cw * 0.12f, gap = cw * 0.02f, inner = cw - 2 * pad;
-            using (var f1 = new Font("Segoe UI Semibold", cw * 0.058f, GraphicsUnit.Pixel))
-            using (var f0 = new Font("Segoe UI", cw * 0.034f, GraphicsUnit.Pixel))
-            using (var f2 = new Font("Segoe UI Semibold", cw * 0.046f, GraphicsUnit.Pixel))
-            using (var f3 = new Font("Segoe UI", cw * 0.034f, GraphicsUnit.Pixel)) {
+            using (var f1 = UiFont.Get("Segoe UI Semibold", cw * 0.058f, GraphicsUnit.Pixel))
+            using (var f0 = UiFont.Get("Segoe UI", cw * 0.034f, GraphicsUnit.Pixel))
+            using (var f2 = UiFont.Get("Segoe UI Semibold", cw * 0.046f, GraphicsUnit.Pixel))
+            using (var f3 = UiFont.Get("Segoe UI", cw * 0.034f, GraphicsUnit.Pixel)) {
                 float titleH = f1.Height * 1.3f, labelH = f0.Height * 1.4f;
                 float textH = showControls ? g.MeasureString(controls, f3, (int)(inner - pad)).Height + pad : 0;
                 float hintH = f3.Height * 2.2f;
@@ -9400,13 +9515,15 @@ class LauncherForm : Form {
             }
         }
         // A tablet while Move Pokemon's boxes are anywhere in the page stack, a phone again once they've closed.
-        MorphTowards(pages.Any(pg => pg.Boxes != null));
+        if (!wideWindow) MorphTowards(pages.Any(pg => pg.Boxes != null));
         if (BannerAge((float)clock.Elapsed.TotalSeconds) >= 0) dirty = true;
         if (ClashShowing() && (float.IsNaN(clashAt) || (float)clock.Elapsed.TotalSeconds - clashAt < 0.4f)) dirty = true;
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
-        // A highlighted app moves at the full rate, so its motion stays smooth.
-        if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0) Invalidate();
+        // A highlighted app moves at the full rate, so its motion stays smooth; under Wine or Proton at half, where
+        // drawing costs several times more (a Steam Deck's battery).
+        if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0 && !UiFont.Wine) Invalidate();
+        if (Visible && panelIntro && frame % 6 == 0) Invalidate();
         if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || Recomp.BannerShowing || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
         GuideTick();
@@ -9498,6 +9615,7 @@ class LauncherForm : Form {
         if (prompt == "NX") { bannerClosed = bannerBuild.ToString(); Config.Write("update-dismissed.txt", bannerClosed); Invalidate(); return; }
         if (prompt == "N") { bannerAt = -BannerSeconds * 2; OpenUpdates(); return; }
         if (prompt == "C") { OpenClashes(); return; }
+        if (prompt != null && prompt.StartsWith("url:")) { try { Process.Start(new ProcessStartInfo(prompt.Substring(4)) { UseShellExecute = true }); } catch { } return; }
         if (prompt != null) {
             Act(prompt == "A" ? "ok" : prompt == "B" ? "back" : prompt == "U" ? "up" : prompt == "D" ? "down" : prompt == "L" ? "left" : prompt == "R" ? "right" : "", false);
             return;
@@ -9579,10 +9697,20 @@ class LauncherForm : Form {
     // Set while a loading Poke Ball is on screen, so the window keeps redrawing and it turns.
     bool spinning;
     protected override void OnPaint(PaintEventArgs ev) {
-        spinning = false;
-        if (drawW > 0) { ev.Graphics.TranslateTransform(drawX, 0); Render(ev.Graphics, drawW, ClientSize.Height); return; }
-        Render(ev.Graphics, ClientSize.Width, ClientSize.Height); Outro(ev.Graphics, ClientSize.Width, ClientSize.Height);
+        spinning = false; panelIntro = false;
+        long t0 = paintClock.ElapsedTicks;
+        if (drawW > 0) { ev.Graphics.TranslateTransform(drawX, 0); Render(ev.Graphics, drawW, ClientSize.Height); }
+        else { Render(ev.Graphics, ClientSize.Width, ClientSize.Height); Outro(ev.Graphics, ClientSize.Width, ClientSize.Height); }
+        // Test runs only: the average time a frame takes to draw, every 120 frames.
+        if (TestLog != null) {
+            paintTicks += paintClock.ElapsedTicks - t0;
+            if (++paintCount == 120) {
+                try { File.AppendAllText(TestLog, "frame " + (paintTicks * 1000.0 / Stopwatch.Frequency / paintCount).ToString("0.0") + " ms" + Environment.NewLine); } catch { }
+                paintTicks = 0; paintCount = 0;
+            }
+        }
     }
+    readonly Stopwatch paintClock = Stopwatch.StartNew(); long paintTicks; int paintCount;
 
     string screenKey = ""; int screenDepth, screenDir = 1, selIndex = -1; float screenAt = -1, selAt = -1, selEase = 1;
     static float Ease(float x) { x = Math.Max(0, Math.Min(1, x)); float r = 1 - x; return 1 - r * r * r; }
@@ -10092,6 +10220,38 @@ class LauncherForm : Form {
     }
     static Color Fade(Color c, int alpha) { return Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), c.R, c.G, c.B); }
     static Color Mix(Color a, Color b, float k) { return Color.FromArgb((int)(a.R + (b.R - a.R) * k), (int)(a.G + (b.G - a.G) * k), (int)(a.B + (b.B - a.B) * k)); }
+    // Web addresses in a body drawn by Write: underlined in the accent, a hand over them, and a click opens the browser.
+    static readonly System.Text.RegularExpressions.Regex LinkPattern = new System.Text.RegularExpressions.Regex(@"(?:https?://)?(?:[a-z0-9-]+\.)+(?:com|app|co|org|io|net|cc)(?:/[A-Za-z0-9._~%/-]*[A-Za-z0-9_/-])?");
+    readonly HashSet<string> linksLogged = new HashSet<string>();   // test runs: each link's place, once
+    void BodyLinks(Graphics g, string text, Font f, RectangleF r, RectangleF visible, Color link) {
+        using (var sf = new StringFormat()) {
+            sf.Alignment = StringAlignment.Near; sf.LineAlignment = StringAlignment.Near; sf.Trimming = StringTrimming.EllipsisCharacter;
+            sf.FormatFlags = StringFormatFlags.LineLimit;
+            foreach (System.Text.RegularExpressions.Match m in LinkPattern.Matches(text)) {
+                string url = m.Value.StartsWith("http") ? m.Value : "https://" + m.Value, key = "url:" + url;
+                sf.SetMeasurableCharacterRanges(new[] { new CharacterRange(m.Index, m.Length) });
+                var regions = g.MeasureCharacterRanges(text, f, r, sf);
+                foreach (var region in regions) {
+                    var st = g.Save();
+                    g.SetClip(region, System.Drawing.Drawing2D.CombineMode.Intersect);
+                    using (var b = new SolidBrush(PhoneRow)) g.FillRegion(b, region);
+                    if (hoverPrompt == key) using (var b = new SolidBrush(Color.FromArgb(40, link))) g.FillRegion(b, region);
+                    Write(g, text, f, link, r, StringAlignment.Near, StringAlignment.Near, true);
+                    g.Restore(st);
+                }
+                foreach (var region in regions) using (region) using (var ident = new System.Drawing.Drawing2D.Matrix()) {
+                    // One rectangle per line the address is on.
+                    foreach (var line in region.GetRegionScans(ident)) {
+                        if (line.Bottom < visible.Top || line.Top > visible.Bottom) continue;
+                        float uy = line.Bottom - f.Height * 0.12f;
+                        using (var pen = new Pen(link, Math.Max(1f, f.Height * 0.07f))) g.DrawLine(pen, line.Left, uy, line.Right, uy);
+                        promptHits.Add(new KeyValuePair<RectangleF, string>(new RectangleF(line.X + screenX, line.Y + screenY, line.Width, line.Height), key));
+                        if (TestLog != null && linksLogged.Add(key)) try { File.AppendAllText(TestLog, "link " + (int)(line.X + screenX + line.Width / 2) + " " + (int)(line.Y + screenY + line.Height / 2) + " " + url + Environment.NewLine); } catch { }
+                    }
+                }
+            }
+        }
+    }
     static void Write(Graphics g, string s, Font f, Color c, RectangleF r, StringAlignment h, StringAlignment v, bool wrap) {
         using (var b = new SolidBrush(c)) using (var sf = new StringFormat()) {
             sf.Alignment = h; sf.LineAlignment = v; sf.Trimming = StringTrimming.EllipsisCharacter;
@@ -11025,6 +11185,37 @@ class LauncherForm : Form {
     }
     // Tablet mode for Move Pokemon (notes/launcher.md, Window).
     float tabletK, tabletLast; int phoneW, tabletW, morphCentre;
+    // The phone, unless the screen is too short for a readable one: a landscape screen under 900 px tall opens wide,
+    // and a Steam Deck (SteamDeck=1, set in Game Mode) fills its screen. NATIVEMONS_LAYOUT=phone|wide overrides.
+    static Size WindowSize(Rectangle area) { return WindowSize(area, WantWide(area)); }
+    // Wide: NATIVEMONS_LAYOUT=phone|wide, else the Settings choice (layout.txt), else on its own where a phone
+    // would be too small (a landscape screen under 900 px tall, or a Steam Deck in Game Mode).
+    static bool WantWide(Rectangle area) {
+        string want = (Environment.GetEnvironmentVariable("NATIVEMONS_LAYOUT") ?? "").ToLowerInvariant();
+        if (want != "wide" && want != "phone") want = Config.Read("layout.txt", "auto").Trim().ToLowerInvariant();
+        if (want == "wide") return WideFits(area);
+        if (want == "phone") return false;
+        return Environment.GetEnvironmentVariable("SteamDeck") == "1" || (area.Width > area.Height && area.Height < 900);
+    }
+    // Room for the wide layout: a landscape screen at least 1000 px across.
+    static bool WideFits(Rectangle area) { return area.Width >= 1000 && area.Width > area.Height * 1.2f; }
+    static Size WindowSize(Rectangle area, bool wide) {
+        if (wide && Environment.GetEnvironmentVariable("SteamDeck") == "1") return area.Size;
+        if (wide) return new Size(area.Width * 94 / 100, area.Height * 94 / 100);
+        int h = area.Height * 94 / 100;
+        return new Size(h * 60 / 100, h);
+    }
+    // The Settings switch: the window becomes the other shape where it is, right away.
+    void ApplyLayout(bool wide) {
+        var area = Screen.FromControl(this).WorkingArea;
+        var size = WindowSize(area, wide);
+        drawX = 0; drawW = 0; wideWindow = wide;
+        if (wide) { phoneW = size.Height * 60 / 100; tabletK = 1; tabletW = size.Width; } else { phoneW = 0; tabletK = 0; }
+        SetBounds(area.Left + (area.Width - size.Width) / 2, area.Top + (area.Height - size.Height) / 2, size.Width, size.Height);
+        using (var outline = Round(new RectangleF(0, 0, size.Width, size.Height), CornerRadius(size.Width, size.Height))) Region = new Region(outline);
+        MakeFonts(wide ? WideText(size.Width, phoneW) : size.Width);
+        Invalidate();
+    }
     bool tablet { get { return tabletK > 0; } }
     float TabletEase { get { float k = tabletK; return k * k * (3 - 2 * k); } }
     int PhoneW(int h) { return phoneW > 0 ? phoneW : h * 60 / 100; }
@@ -11209,6 +11400,8 @@ class LauncherForm : Form {
         RoundKey(g, w * 0.70f, cy + rb * 0.55f, rb, "B", "Back", Color.FromArgb(228, 76, 70), th);
     }
     static float CornerRadius(int w) { return w * 0.075f; }
+    // A wide window keeps the phone's corner, as the tablet shell draws it: a width-sized one cut off the top keys.
+    static float CornerRadius(int w, int h) { return CornerRadius(Math.Min(w, h * 60 / 100)); }
     void Pad(Graphics g, RectangleF a, RectangleF b) {
         float r = a.Width * 0.18f;
         using (var br = new SolidBrush(Line)) { using (var p = Round(a, r)) g.FillPath(br, p); using (var p = Round(b, r)) g.FillPath(br, p); }
@@ -11231,12 +11424,34 @@ class LauncherForm : Form {
     void HardKey(Graphics g, RectangleF r, string key, string glyph) {
         promptHits.Add(new KeyValuePair<RectangleF, string>(r, key));
         Card(g, r, r.Height * 0.3f, hoverPrompt == key ? Cream : Mix(Line, Color.White, 0.2f), hoverPrompt == key ? Cream : Line, Color.Empty, 0);
-        using (var f = new Font("Segoe MDL2 Assets", r.Height * 0.46f, GraphicsUnit.Pixel)) Write(g, glyph, f, hoverPrompt == key ? Line : Cream, r, StringAlignment.Center, StringAlignment.Center, false);
+        using (var f = UiFont.Get("Segoe MDL2 Assets", r.Height * 0.46f, GraphicsUnit.Pixel)) Write(g, glyph, f, hoverPrompt == key ? Line : Cream, r, StringAlignment.Center, StringAlignment.Center, false);
     }
 
     // The screen is a phone's: status bar, home screen of apps, lists that fill the screen, and a home indicator.
     static readonly Color PhoneBg = Color.FromArgb(242, 242, 247), PhoneRow = Color.White, PhoneLine = Color.FromArgb(222, 222, 228), PhoneText = Color.FromArgb(28, 28, 30), PhoneSub = Color.FromArgb(108, 108, 114);
     // The game's colour, dark enough to read on white.
+    // Links: the theme color's complement (opposite hue), dark enough to read on white; a gray theme gets blue.
+    static Color LinkColor(Theme th) {
+        var c = th.Main;
+        float hue = c.GetSaturation() < 0.15f ? 210 : (c.GetHue() + 180) % 360, sat = Math.Max(0.6f, c.GetSaturation());
+        // Darker until it reads like body text: at least 7:1 against white.
+        for (float light = 0.42f; light > 0.1f; light -= 0.01f) { var k = FromHsl(hue, sat, light); if (Contrast(k) >= 7) return k; }
+        return FromHsl(hue, sat, 0.1f);
+    }
+    static double Contrast(Color c) {
+        Func<int, double> lin = v => { double x = v / 255.0; return x <= 0.03928 ? x / 12.92 : Math.Pow((x + 0.055) / 1.055, 2.4); };
+        return 1.05 / (0.2126 * lin(c.R) + 0.7152 * lin(c.G) + 0.0722 * lin(c.B) + 0.05);
+    }
+    static Color FromHsl(float hue, float sat, float light) {
+        float q = light < 0.5f ? light * (1 + sat) : light + sat - light * sat, p = 2 * light - q;
+        Func<float, int> part = tt => {
+            tt = (tt % 1 + 1) % 1;
+            float v = tt < 1 / 6f ? p + (q - p) * 6 * tt : tt < 0.5f ? q : tt < 2 / 3f ? p + (q - p) * (2 / 3f - tt) * 6 : p;
+            return (int)Math.Round(Math.Max(0, Math.Min(1, v)) * 255);
+        };
+        float hh = hue / 360f;
+        return Color.FromArgb(part(hh + 1 / 3f), part(hh), part(hh - 1 / 3f));
+    }
     static Color Accent(Theme th) {
         var c = th.Main;
         return 0.299 * c.R + 0.587 * c.G + 0.114 * c.B > 150 ? Mix(c, Color.Black, 0.42f) : c;
@@ -11554,8 +11769,17 @@ class LauncherForm : Form {
             Write(g, emuInstallName + " installed", itemBold, Color.FromArgb((int)(255 * words), 255, 255, 255), new RectangleF(0, r.Bottom + h * 0.02f, w, itemBold.Height * 1.6f), StringAlignment.Center, StringAlignment.Near, false);
     }
     // At the bottom, where a thumb would reach, leaving the wallpaper's town in view above them.
+    // The app grid's cell and icon: a phone's width sets them; a wide window's height caps them, the grid centered.
+    void AppGrid(Page p, int w, int h, float m, out float cell, out float icon, out float x0) {
+        float full = (w - 2 * m) / TileCols, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
+        int appRows = Math.Max(1, (Math.Min(p.Items.Count, AppNames.Length) - 1 + TileCols - 1) / TileCols);
+        icon = Math.Min(full * 0.68f, (h * 0.42f - appRows * labelH - (appRows - 1) * rowGap) / appRows);
+        cell = Math.Min(full, icon / 0.68f * 1.3f);
+        x0 = m + (w - 2 * m - cell * TileCols) / 2;
+    }
     float AppsTop(Page p, int w, int h, float m, float bottom) {
-        float cell = (w - 2 * m) / TileCols, icon = cell * 0.68f, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
+        float cell, icon, x0; AppGrid(p, w, h, m, out cell, out icon, out x0);
+        float labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
         int appRows = (Math.Min(p.Items.Count, AppNames.Length) - 1 + TileCols - 1) / TileCols;
         return bottom - h * 0.012f - appRows * (icon + labelH) - (appRows - 1) * rowGap;
     }
@@ -11569,7 +11793,7 @@ class LauncherForm : Form {
         using (var clip = Round(widget, rad)) {
             var st = g.Save();
             g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
-            if (intro != null) GameArt.Draw(g, intro, widget);
+            if (intro != null) GameArt.DrawFitted(g, intro, widget);
             else {
                 using (var b = new SolidBrush(th.Deep)) g.FillRectangle(b, widget);
                 // Its title screen is being made right now.
@@ -11599,13 +11823,14 @@ class LauncherForm : Form {
         Write(g, name, nf, Color.White, new RectangleF(widget.X + pad, widget.Bottom - pad - subH - nameArea.Height, textW, nameArea.Height), StringAlignment.Near, StringAlignment.Far, false);
 
         // The apps.
-        float cell = (w - 2 * m) / TileCols, icon = cell * 0.68f, labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
+        float cell, icon, x0; AppGrid(p, w, h, m, out cell, out icon, out x0);
+        float labelH = smallFont.Height * 1.35f, rowGap = h * 0.018f;
         float gy = AppsTop(p, w, h, m, bottom);
         if (p.Sel < 1) BallShake(-1);
         for (int i = 1; i < p.Items.Count && i < AppNames.Length; i++) {
             var it = p.Items[i];
             int k = i - 1;
-            float cx = m + (k % TileCols) * cell + cell / 2, cy = gy + (k / TileCols) * (icon + labelH + rowGap);
+            float cx = x0 + (k % TileCols) * cell + cell / 2, cy = gy + (k / TileCols) * (icon + labelH + rowGap);
             bool sel = i == p.Sel;
             float size = sel ? icon * (1 + 0.07f * selEase) : icon;
             var r = new RectangleF(cx - size / 2, cy + (icon - size) / 2, size, size);
@@ -11685,11 +11910,15 @@ class LauncherForm : Form {
                 var st = g.Save();
                 g.SetClip(new RectangleF(br.X, br.Y + pad, br.Width, bodyText), System.Drawing.Drawing2D.CombineMode.Intersect);
                 Write(g, p.Body, bodyFont, PhoneText, new RectangleF(br.X + pad, br.Y + pad - p.BodyScroll, br.Width - 2 * pad, whole), StringAlignment.Near, StringAlignment.Near, true);
+                if (p.Links) BodyLinks(g, p.Body, bodyFont, new RectangleF(br.X + pad, br.Y + pad - p.BodyScroll, br.Width - 2 * pad, whole), new RectangleF(br.X, br.Y + pad, br.Width, bodyText), LinkColor(th));
                 g.Restore(st);
                 float maxScroll = whole - bodyText, barW = Math.Max(3f, w * 0.008f), barH = bodyText * bodyText / whole;
                 using (var path = Round(new RectangleF(br.Right - barW * 2, br.Y + pad + (bodyText - barH) * p.BodyScroll / maxScroll, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
             }
-            else Write(g, p.Body, bodyFont, PhoneText, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
+            else {
+                Write(g, p.Body, bodyFont, PhoneText, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), StringAlignment.Near, StringAlignment.Near, true);
+                if (p.Links) BodyLinks(g, p.Body, bodyFont, new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), new RectangleF(br.X + pad, br.Y + pad, br.Width - 2 * pad, bodyText), LinkColor(th));
+            }
             if (p.Mono != null) {
                 var eb = new RectangleF(br.X + pad, br.Y + pad + bodyText, br.Width - 2 * pad, br.Height - 2 * pad - bodyText);
                 Card(g, eb, h * 0.012f, Color.FromArgb(28, 28, 30), Color.FromArgb(28, 28, 30), Color.Empty, 0);
@@ -11703,12 +11932,20 @@ class LauncherForm : Form {
         var chosen = p.Items[Math.Min(p.Sel, p.Items.Count - 1)];
         string note = p.Body != null ? "" : chosen.Info != "" ? chosen.Info : chosen.Hint;
         float width = w - 2 * m, noteX = m + w * 0.02f, noteW = width - w * 0.04f;
-        if (p.Body == null) {
+        // Wide: the list a column on the left, the chosen option shown large on the right.
+        bool side = p.Body == null && w > h * 1.25f;
+        RectangleF panel = RectangleF.Empty;
+        if (side) {
+            float gapX = w * 0.025f;
+            width = (w - 2 * m) * 0.46f;
+            panel = new RectangleF(m + width + gapX, y + rowHFor(h) * 0.06f, w - 2 * m - width - gapX, bottom - y - rowHFor(h) * 0.12f);
+        }
+        if (p.Body == null && !side) {
             if (note != "") footH += g.MeasureString(note, smallFont, (int)noteW).Height + h * 0.006f;
             foreach (var rec in chosen.Records) footH += g.MeasureString(rec.Replace(": ", ":  "), smallFont, (int)noteW).Height + h * 0.002f;
             footH = Math.Min(footH + h * 0.012f, (bottom - y) * 0.34f);
         }
-        float listBottom = bottom - footH, rowH = h * 0.082f;
+        float listBottom = bottom - footH, rowH = rowHFor(h);
         int fit = Math.Max(1, (int)((listBottom - y) / rowH));
         // The list moves only when the selection would leave it, and glides there.
         if (p.Sel < p.TopRow) p.TopRow = p.Sel;
@@ -11722,18 +11959,22 @@ class LauncherForm : Form {
         bool overflow = p.Items.Count > fit;
         float groupH = overflow ? listBottom - y : p.Items.Count * rowH;
         var group = new RectangleF(m, y, width, groupH);
-        Group(g, group, rad);
-        using (var clip = Round(group, rad)) {
+        // Each option its own rounded pill, with a gap between them.
+        float gap = rowH * 0.12f;
+        {
             var kept = g.Save();
-            g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+            g.SetClip(group, System.Drawing.Drawing2D.CombineMode.Intersect);
             for (int i = 0; i < p.Items.Count; i++) {
-                var r = new RectangleF(m, y + (i - p.ScrollRow) * rowH, width, rowH);
+                // A scroll bar gets its own lane, clear of the pills.
+                var slot = new RectangleF(m, y + (i - p.ScrollRow) * rowH, width - (overflow ? Math.Max(3f, w * 0.008f) * 3 : 0), rowH);
+                var r = new RectangleF(slot.X, slot.Y + gap / 2, slot.Width, slot.Height - gap);
                 if (!r.IntersectsWith(group)) continue;
                 float pop = BackOut((t - bounceAt - 0.05f * Math.Max(0, i - p.ScrollRow)) / 0.36f);
                 if (pop <= 0.01f) continue;
                 var popped = g.Save();
                 if (t - bounceAt < 1.4f) { float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2; g.TranslateTransform(cx, cy + (1 - pop) * rowH * 0.5f); g.ScaleTransform(0.85f + 0.15f * pop, 0.85f + 0.15f * pop); g.TranslateTransform(-cx, -cy); }
-                ListRow(g, p.Items[i], i == p.Sel, r, i < p.Items.Count - 1, h, accent, th);
+                using (var pill = Round(r, r.Height / 2)) using (var b = new SolidBrush(PhoneRow)) g.FillPath(b, pill);
+                ListRow(g, p.Items[i], i == p.Sel, r, false, h, accent, th);
                 g.Restore(popped);
                 hits.Add(new KeyValuePair<RectangleF, int>(RectangleF.Intersect(r, group), i));
             }
@@ -11742,8 +11983,9 @@ class LauncherForm : Form {
         if (overflow) {
             float barW = Math.Max(3f, w * 0.008f), barH = group.Height * fit / p.Items.Count;
             float barY = group.Y + (group.Height - barH) * p.ScrollRow / (p.Items.Count - fit);
-            using (var path = Round(new RectangleF(group.Right - barW * 1.6f, barY, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
+            using (var path = Round(new RectangleF(group.Right - barW * 1.2f, barY, barW, barH), barW / 2)) using (var b = new SolidBrush(Color.FromArgb(120, 120, 120, 128))) g.FillPath(b, path);
         }
+        if (side) { DetailPanel(g, chosen, chosen.GameId ?? p.GameId, panel, h, accent, t); return; }
         if (p.Body != null) return;
         float fy = listBottom + h * 0.01f;
         if (note != "") {
@@ -11761,23 +12003,317 @@ class LauncherForm : Form {
     static readonly Color Warn = Color.FromArgb(232, 128, 24);
     static readonly Color[] RowColors = { Color.FromArgb(232, 62, 58), Color.FromArgb(240, 142, 30), Color.FromArgb(46, 164, 79), Color.FromArgb(40, 124, 232), Color.FromArgb(124, 84, 214), Color.FromArgb(24, 164, 150), Color.FromArgb(226, 72, 140), Color.FromArgb(92, 104, 124) };
     void ListRow(Graphics g, Item it, bool sel, RectangleF r, bool line, int h, Color accent, Theme th) {
-        if (sel) using (var b = new SolidBrush(Fade(accent, 38))) g.FillRectangle(b, r);
+        if (sel) using (var pill = Round(r, r.Height / 2)) using (var b = new SolidBrush(Fade(accent, 38))) g.FillPath(b, pill);
         if (it.Fold != 0) { SectionRow(g, it, sel, r, line, h, accent); return; }
+        if (it.DexNo > 0) { DexRow(g, it, r, h); return; }
+        if (it.Region >= 0 && it.RegionTotal > 0) { RegionRow(g, it, sel, r, h); return; }
         float icon = r.Height * 0.62f, pad = r.Height * 0.2f, ix = r.X + pad, iy = r.Y + (r.Height - icon) / 2;
         var ib = new RectangleF(ix, iy, icon, icon);
+        RowIcon(g, it, ib, iconSmall);
+        ListRowText(g, it, sel, r, line, h, accent, ib.Right + pad, r.Right - pad);
+    }
+    // A row's picture: a Pokemon's sprite, a game's cartridge, or its icon on a glossy tile.
+    void RowIcon(Graphics g, Item it, RectangleF ib, Font glyph) {
+        float icon = ib.Width;
         var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
         if (pic != null) DrawSprite(g, pic, new RectangleF(ib.X - icon * 0.15f, ib.Y - icon * 0.15f, icon * 1.3f, icon * 1.3f));
         else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, ib.X + icon / 2, ib.Y + icon / 2, icon * 0.8f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
         else if (it.Theme != null) Cart(g, ib.X + icon * 0.1f, ib.Y, icon, it.Theme);
         else {
-            Color tint = !it.On ? Text3 : it.Tint != Color.Empty ? it.Tint : BrowseTints.ContainsKey(it.Icon) ? BrowseTints[it.Icon] : RowColors[it.Icon % RowColors.Length];
+            Color tint = RowTint(it);
             GlossTile(g, ib, icon * 0.24f, tint);
             if (!RowArt(g, it.Icon, ib, tint)) {
-            Write(g, it.Icon.ToString(), iconSmall, Color.FromArgb(90, Ink), new RectangleF(ib.X, ib.Y + icon * 0.04f, ib.Width, ib.Height), StringAlignment.Center, StringAlignment.Center, false);
-            Write(g, it.Icon.ToString(), iconSmall, Color.White, ib, StringAlignment.Center, StringAlignment.Center, false);
+            Write(g, it.Icon.ToString(), glyph, Color.FromArgb(90, Ink), new RectangleF(ib.X, ib.Y + icon * 0.04f, ib.Width, ib.Height), StringAlignment.Center, StringAlignment.Center, false);
+            Write(g, it.Icon.ToString(), glyph, Color.White, ib, StringAlignment.Center, StringAlignment.Center, false);
             }
         }
-        float tx = ib.Right + pad, right = r.Right - pad;
+    }
+    static float rowHFor(int h) { return h * 0.082f; }
+    static Theme RegionTheme(int region) { return region >= 0 && region < RegionThemes.Length ? RegionThemes[region] : Theme.Default; }
+    // A region's motif, in one color: drawn over its band or tile. 9 is the whole National dex.
+    static void Motif(Graphics g, RectangleF r, int region, Color c) {
+        var st = g.Save();
+        g.SetClip(r, System.Drawing.Drawing2D.CombineMode.Intersect);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        float u = Math.Min(r.Width, r.Height), lw = Math.Max(1.5f, u * 0.035f);
+        using (var pen = new Pen(c, lw)) using (var b = new SolidBrush(c)) {
+            switch (region) {
+                case 0:   // Kanto: Poke Balls
+                    foreach (var k in new[] { new[] { 0.78f, 0.3f, 0.32f }, new[] { 0.16f, 0.82f, 0.22f }, new[] { 0.5f, 0.95f, 0.14f } }) {
+                        float cx = r.X + r.Width * k[0], cy = r.Y + r.Height * k[1], rr = u * k[2];
+                        g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2); g.DrawLine(pen, cx - rr, cy, cx + rr, cy);
+                        g.DrawEllipse(pen, cx - rr * 0.3f, cy - rr * 0.3f, rr * 0.6f, rr * 0.6f);
+                    }
+                    break;
+                case 1: {  // Johto: a rising sun's rays
+                    float cx = r.X + r.Width * 0.85f, cy = r.Bottom;
+                    for (int i = 0; i < 9; i++) { double a = Math.PI + i * Math.PI / 8; g.DrawLine(pen, cx + (float)Math.Cos(a) * u * 0.3f, cy + (float)Math.Sin(a) * u * 0.3f, cx + (float)Math.Cos(a) * u * 1.4f, cy + (float)Math.Sin(a) * u * 1.4f); }
+                    g.DrawEllipse(pen, cx - u * 0.22f, cy - u * 0.22f, u * 0.44f, u * 0.44f);
+                    break;
+                }
+                case 2:   // Hoenn: waves
+                    for (int row = 0; row < 4; row++) {
+                        var pts = new List<PointF>();
+                        for (float x = r.X; x <= r.Right + 4; x += u * 0.05f) pts.Add(new PointF(x, r.Y + r.Height * (0.35f + row * 0.2f) + (float)Math.Sin((x - r.X) / (u * 0.18f) + row) * u * 0.05f));
+                        g.DrawLines(pen, pts.ToArray());
+                    }
+                    break;
+                case 3: {  // Sinnoh: snowy peaks
+                    float baseY = r.Bottom;
+                    var peaks = new[] { new PointF(r.X - u * 0.1f, baseY), new PointF(r.X + r.Width * 0.3f, r.Y + r.Height * 0.3f), new PointF(r.X + r.Width * 0.5f, r.Y + r.Height * 0.6f), new PointF(r.X + r.Width * 0.72f, r.Y + r.Height * 0.15f), new PointF(r.Right + u * 0.1f, baseY) };
+                    g.DrawLines(pen, peaks);
+                    for (int i = 0; i < 7; i++) { float x = r.X + r.Width * (0.08f + i * 0.14f), y = r.Y + r.Height * (0.15f + (i % 3) * 0.12f); g.FillEllipse(b, x, y, lw * 1.6f, lw * 1.6f); }
+                    break;
+                }
+                case 4: {  // Unova: a city skyline
+                    float x = r.X;
+                    var hs = new[] { 0.35f, 0.6f, 0.45f, 0.8f, 0.5f, 0.68f, 0.4f, 0.55f };
+                    for (int i = 0; x < r.Right; i++) { float w = u * 0.16f, hh = r.Height * hs[i % hs.Length]; g.DrawRectangle(pen, x, r.Bottom - hh, w, hh + lw); x += w + u * 0.05f; }
+                    break;
+                }
+                case 5:   // Kalos: a diamond lattice
+                    for (float d = -r.Height; d < r.Width; d += u * 0.22f) { g.DrawLine(pen, r.X + d, r.Bottom, r.X + d + r.Height, r.Y); g.DrawLine(pen, r.X + d, r.Y, r.X + d + r.Height, r.Bottom); }
+                    break;
+                case 6: {  // Alola: sun over the sea
+                    float cx = r.X + r.Width * 0.75f, cy = r.Y + r.Height * 0.45f, rr = u * 0.28f;
+                    g.FillEllipse(b, cx - rr, cy - rr, rr * 2, rr * 2);
+                    for (int i = 0; i < 4; i++) { float y = r.Y + r.Height * (0.72f + i * 0.08f); g.DrawLine(pen, r.X + r.Width * (0.1f + i * 0.05f), y, r.Right - r.Width * (0.05f + i * 0.04f), y); }
+                    break;
+                }
+                case 7:   // Galar: tartan
+                    for (float x = r.X; x < r.Right; x += u * 0.3f) { g.DrawLine(pen, x, r.Y, x, r.Bottom); using (var thin = new Pen(c, lw * 0.4f)) g.DrawLine(thin, x + u * 0.08f, r.Y, x + u * 0.08f, r.Bottom); }
+                    for (float y = r.Y; y < r.Bottom; y += u * 0.3f) { g.DrawLine(pen, r.X, y, r.Right, y); using (var thin = new Pen(c, lw * 0.4f)) g.DrawLine(thin, r.X, y + u * 0.08f, r.Right, y + u * 0.08f); }
+                    break;
+                case 8: {  // Paldea: mosaic tiles
+                    float t = u * 0.28f;
+                    for (float y = r.Y; y < r.Bottom; y += t) for (float x = r.X; x < r.Right; x += t) {
+                        g.DrawRectangle(pen, x, y, t, t);
+                        g.DrawArc(pen, x - t / 2, y - t / 2, t, t, 0, 90); g.DrawArc(pen, x + t / 2, y + t / 2, t, t, 180, 90);
+                    }
+                    break;
+                }
+                default: {  // National: rings
+                    float cx = r.X + r.Width * 0.8f, cy = r.Y + r.Height * 0.4f;
+                    for (int i = 1; i <= 6; i++) { float rr = u * 0.14f * i; g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2); }
+                    break;
+                }
+            }
+        }
+        g.Restore(st);
+    }
+    // The collection's region rows: a tile with its motif in its colors, its name, and a bar of what's caught.
+    void RegionRow(Graphics g, Item it, bool sel, RectangleF r, int h) {
+        var th = RegionTheme(it.Region);
+        float tileW = r.Height * 2.1f;
+        var tile = new RectangleF(r.X, r.Y, tileW, r.Height);
+        using (var pill = Round(r, r.Height / 2)) {
+            var st = g.Save();
+            g.SetClip(pill, System.Drawing.Drawing2D.CombineMode.Intersect);
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(tile.X - 1, tile.Y, tile.Width + 2, tile.Height), Mix(th.Main, Color.White, 0.15f), th.Deep, 0f)) g.FillRectangle(b, tile);
+            Motif(g, tile, it.Region, Color.FromArgb(70, 255, 255, 255));
+            g.Restore(st);
+        }
+        float pad = r.Height * 0.3f, x = tile.Right + pad, right = r.Right - pad * 1.2f;
+        string name = it.Text; int colon = name.IndexOf(": "); if (colon > 0) name = name.Substring(0, colon);
+        string count = it.RegionCaught + " / " + it.RegionTotal;
+        float countW = g.MeasureString(count, itemFont).Width + 4;
+        float barH = Math.Max(4f, r.Height * 0.1f), by = r.Bottom - r.Height * 0.2f - barH / 2, ty = r.Y + r.Height * 0.06f, lineH = by - ty - r.Height * 0.06f;
+        Write(g, name, itemBold, PhoneText, new RectangleF(x, ty, right - x - countW, lineH), StringAlignment.Near, StringAlignment.Center, false);
+        Write(g, count, itemFont, PhoneSub, new RectangleF(right - countW, ty, countW, lineH), StringAlignment.Far, StringAlignment.Center, false);
+        var bar = new RectangleF(x, by, right - x, barH);
+        using (var path = Round(bar, barH / 2)) using (var b = new SolidBrush(Color.FromArgb(226, 226, 232))) g.FillPath(b, path);
+        float k = it.RegionTotal > 0 ? it.RegionCaught / (float)it.RegionTotal : 0;
+        if (k > 0) using (var path = Round(new RectangleF(x, by, Math.Max(barH, bar.Width * k), barH), barH / 2)) using (var b = new SolidBrush(th.Main)) g.FillPath(b, path);
+    }
+    // As the games' summary shows it: a Poke Ball before the name once caught, a shiny star after it. No words.
+    void DexPanelName(Graphics g, Item it, string title, float x, float y, float tw, float bottom) {
+        float x0 = x;
+        float lineH = titleFont.Height * 1.3f, cy = y + lineH / 2, ball = titleFont.Height * 0.36f;
+        if (it.DexState == 2) using (var ink = new Pen(Ink, Math.Max(1.2f, ball * 0.14f))) Ball(g, new PointF(x + ball, cy), ball, ink);
+        else using (var pen = new Pen(Color.FromArgb(it.DexState == 1 ? 130 : 70, 150, 150, 160), Math.Max(1.2f, ball * 0.12f))) g.DrawEllipse(pen, x, cy - ball, ball * 2, ball * 2);
+        x += ball * 2 + ball * 0.9f;
+        var nameW = g.MeasureString(title, titleFont).Width;
+        Write(g, title, titleFont, it.DexState == 0 ? Text3 : PhoneText, new RectangleF(x, y, tw - (x - (x - ball * 2.9f)), lineH), StringAlignment.Near, StringAlignment.Center, false);
+        if (it.DexStar) {
+            float sx = x + Math.Min(nameW, tw) + titleFont.Height * 0.2f, sr = titleFont.Height * 0.32f;
+            var pts = new PointF[10];
+            for (int i = 0; i < 10; i++) { double a = -Math.PI / 2 + i * Math.PI / 5; float rr = i % 2 == 0 ? sr : sr * 0.45f; pts[i] = new PointF(sx + sr + (float)Math.Cos(a) * rr, cy + (float)Math.Sin(a) * rr); }
+            var mode = g.SmoothingMode; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var b = new SolidBrush(Color.FromArgb(232, 60, 50))) g.FillPolygon(b, pts);
+            using (var pen = new Pen(Color.FromArgb(150, 30, 26), Math.Max(1f, sr * 0.12f))) g.DrawPolygon(pen, pts);
+            g.SmoothingMode = mode;
+        }
+        // Its Pokedex entry once caught, as on the entry page: kind, then the entry and the game it's from.
+        var info = it.DexState == 2 ? DexInfos.Get(it.DexNo) : null;
+        if (info == null) return;
+        string from; int gen;
+        string flavor = DexFlavor(info, it.DexNo, out from, out gen);
+        y += lineH + titleFont.Height * 0.1f;
+        if (!string.IsNullOrEmpty(info.Genus)) { Write(g, info.Genus, itemBold, PhoneSub, new RectangleF(x0, y, tw, itemBold.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false); y += itemBold.Height * 1.5f; }
+        y = GameBadges(g, it.DexNo, x0, y, tw, bottom);
+        if (flavor != null && bottom - y > bodyFont.Height) {
+            float fh = Math.Min(bottom - y, g.MeasureString(flavor, bodyFont, (int)tw).Height + 2);
+            Write(g, flavor, bodyFont, PhoneText, new RectangleF(x0, y, tw, fh), StringAlignment.Near, StringAlignment.Near, true);
+        }
+    }
+    // A badge for each game it's caught in: the game's colors, a little cartridge, its name, a star where it's shiny.
+    float GameBadges(Graphics g, int id, float x0, float y, float tw, float bottom) {
+        var games = dexBy.Where(d => CountsInCollection(d.Key) && d.Value.Caught.Contains(id)).Select(d => d.Key).OrderBy(ge0 => Library.Games.IndexOf(ge0)).ToList();
+        if (games.Count == 0) return y;
+        float bh = smallBold.Height * 1.75f, gap = bh * 0.25f, x = x0, rows = 1;
+        var mode = g.SmoothingMode; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        foreach (var ge in games) {
+            var th = ge.Theme ?? Theme.Default;
+            string name = ge.Title.Replace("Pokemon ", "");
+            bool shiny = dexBy[ge].Shiny.Contains(id);
+            float cart = bh * 0.62f, textW = g.MeasureString(name, smallBold).Width + 2, bw = bh * 0.3f + cart + bh * 0.25f + textW + (shiny ? bh * 0.7f : 0) + bh * 0.35f;
+            if (x + bw > x0 + tw && x > x0) { x = x0; y += bh + gap; rows++; }
+            if (rows > 2 || y + bh > bottom) break;
+            var badge = new RectangleF(x, y, bw, bh);
+            using (var path = Round(badge, bh / 2)) {
+                using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(badge.X, badge.Y - 1, badge.Width, badge.Height + 2), Mix(th.Main, Color.White, 0.12f), th.Deep, 90f)) g.FillPath(b, path);
+                using (var pen = new Pen(Mix(th.Deep, Color.Black, 0.3f), Math.Max(1f, bh * 0.05f))) g.DrawPath(pen, path);
+            }
+            using (var b = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) g.FillEllipse(b, badge.X + bh * 0.15f, badge.Y + bh * 0.1f, bw * 0.5f, bh * 0.3f);
+            Cart(g, badge.X + bh * 0.3f, badge.Y + (bh - cart) / 2, cart, th);
+            float tx = badge.X + bh * 0.3f + cart + bh * 0.25f;
+            Write(g, name, smallBold, th.Ink, new RectangleF(tx, badge.Y, textW, bh), StringAlignment.Near, StringAlignment.Center, false);
+            if (shiny) {
+                float sr = bh * 0.24f, sx = tx + textW + bh * 0.1f + sr, sy = badge.Y + bh / 2;
+                var pts = new PointF[10];
+                for (int i = 0; i < 10; i++) { double a = -Math.PI / 2 + i * Math.PI / 5; float rr = i % 2 == 0 ? sr : sr * 0.45f; pts[i] = new PointF(sx + (float)Math.Cos(a) * rr, sy + (float)Math.Sin(a) * rr); }
+                using (var b = new SolidBrush(Color.FromArgb(255, 214, 64))) g.FillPolygon(b, pts);
+                using (var pen = new Pen(Color.FromArgb(150, 100, 10), Math.Max(1f, sr * 0.12f))) g.DrawPolygon(pen, pts);
+            }
+            x += bw + gap;
+        }
+        g.SmoothingMode = mode;
+        return y + bh + gap * 2;
+    }
+    // A Pokedex row in the games' style: a Poke Ball for one caught, the number, the name (dashes before it's seen),
+    // and its picture at the right once seen.
+    void DexRow(Graphics g, Item it, RectangleF r, int h) {
+        float pad = r.Height * 0.28f, ball = r.Height * 0.2f, x = r.X + pad;
+        if (it.DexState == 2) using (var ink = new Pen(Ink, Math.Max(1f, ball * 0.16f))) Ball(g, new PointF(x + ball, r.Y + r.Height / 2), ball, ink);
+        else using (var pen = new Pen(Color.FromArgb(it.DexState == 1 ? 120 : 60, 150, 150, 160), Math.Max(1f, ball * 0.14f))) g.DrawEllipse(pen, x, r.Y + r.Height / 2 - ball, ball * 2, ball * 2);
+        x += ball * 2 + pad * 0.8f;
+        string no = "No." + it.DexNo.ToString("000"), title = it.Text.Substring(no.Length + 1);
+        int colon = title.LastIndexOf(": "); if (colon > 0) title = title.Substring(0, colon);
+        float noW = g.MeasureString("No.0000", itemBold).Width;
+        Color ink2 = it.DexState == 0 ? Text3 : PhoneText;
+        Write(g, no, itemBold, ink2, new RectangleF(x, r.Y, noW, r.Height), StringAlignment.Near, StringAlignment.Center, false);
+        float pic = r.Height * 1.15f, right = r.Right - pad * 0.6f;
+        if (it.DexState > 0) {
+            var sp = Sprites.Get(it.Sprite);
+            if (sp != null) { var st = g.Save(); g.SetClip(r, System.Drawing.Drawing2D.CombineMode.Intersect); DrawSprite(g, sp, new RectangleF(right - pic, r.Y + (r.Height - pic) / 2 - r.Height * 0.06f, pic, pic)); g.Restore(st); }
+            else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, right - pic / 2, r.Y + r.Height / 2, r.Height * 0.5f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
+            if (it.DexStar) Write(g, "\u2605", itemFont, Color.FromArgb(226, 164, 16), new RectangleF(right - pic - itemFont.Height * 1.4f, r.Y, itemFont.Height * 1.4f, r.Height), StringAlignment.Center, StringAlignment.Center, false);
+        }
+        Write(g, title, itemFont, ink2, new RectangleF(x + noW, r.Y, right - pic - x - noW, r.Height), StringAlignment.Near, StringAlignment.Center, false);
+    }
+    // The wide layout's right side: the chosen option's picture on a band of its color, its name and value large,
+    // a big slider for a slider, and what it does.
+    bool panelIntro;   // the side panel is playing a game's intro, so keep redrawing at its rate
+    void DetailPanel(Graphics g, Item it, string gameId, RectangleF r, int h, Color accent, float t) {
+        // A Pokemon gets most of the panel for its picture.
+        float rad = r.Width * 0.045f, bandH = r.Height * (it.DexNo > 0 ? 0.46f : 0.36f);
+        Group(g, r, rad);
+        var band = new RectangleF(r.X, r.Y, r.Width, bandH);
+        Bitmap intro = null;
+        Color tint = it.Region >= 0 ? RegionTheme(it.Region).Main : it.Theme != null ? it.Theme.Main : it.Sprite != null || it.Fold != 0 ? accent : RowTint(it);
+        using (var clip = Round(r, rad)) {
+            var st = g.Save();
+            g.SetClip(clip, System.Drawing.Drawing2D.CombineMode.Intersect);
+            using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(band.X, band.Y - 1, band.Width, band.Height + 2), Mix(tint, Color.White, 0.3f), Mix(tint, Color.Black, 0.12f), 90f)) g.FillRectangle(b, band);
+            if (it.Region >= 0) Motif(g, band, it.Region, Color.FromArgb(46, 255, 255, 255));
+            else using (var b = new SolidBrush(Color.FromArgb(34, 255, 255, 255))) {
+                g.FillEllipse(b, band.Right - bandH * 0.95f, band.Y - bandH * 0.35f, bandH * 1.25f, bandH * 1.25f);
+                g.FillEllipse(b, band.X - bandH * 0.35f, band.Bottom - bandH * 0.55f, bandH * 0.85f, bandH * 0.85f);
+            }
+            // A game: its title screen intro in the band, in place of the icon.
+            intro = gameId != null ? GameArt.Frame(gameId, t) : null;
+            if (intro != null) {
+                g.SetClip(band, System.Drawing.Drawing2D.CombineMode.Intersect);
+                GameArt.DrawFitted(g, intro, band, true);
+                panelIntro = true;
+            }
+            g.Restore(st);
+        }
+        float icon = bandH * 0.56f;
+        var ib = new RectangleF(band.X + (band.Width - icon) / 2, band.Y + (bandH - icon) / 2, icon, icon);
+        if (it.RegionTotal > 0) {
+            // A region: how much of it is caught, as a ring.
+            float ring = bandH * 0.62f, rw = Math.Max(6f, ring * 0.1f);
+            var rr = new RectangleF(band.X + (band.Width - ring) / 2, band.Y + (bandH - ring) / 2, ring, ring);
+            var mode = g.SmoothingMode; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var pen = new Pen(Color.FromArgb(70, 0, 0, 0), rw)) g.DrawEllipse(pen, rr);
+            float k = it.RegionCaught / (float)it.RegionTotal;
+            if (k > 0) using (var pen = new Pen(Color.White, rw) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round }) g.DrawArc(pen, rr, -90, Math.Max(2f, 360 * k));
+            g.SmoothingMode = mode;
+            Write(g, (int)Math.Round(k * 100) + "%", titleFont, Color.White, rr, StringAlignment.Center, StringAlignment.Center, false);
+        }
+        else if (it.DexNo > 0) {
+            // As big as the band allows, pixels kept sharp; a shiny one sparkles.
+            var sp = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
+            float size = bandH * 0.98f;
+            var at = new RectangleF(band.X + (band.Width - size) / 2, band.Y + (bandH - size) / 2, size, size);
+            if (sp != null) {
+                using (var b = new SolidBrush(Color.FromArgb(40, 0, 0, 0))) g.FillEllipse(b, at.X + size * 0.2f, at.Bottom - size * 0.2f, size * 0.6f, size * 0.1f);
+                DrawSprite(g, sp, at);
+                if (it.DexStar) { Sparkle(g, new PointF(at.Right - size * 0.18f, at.Y + size * 0.2f), size * 0.07f); Sparkle(g, new PointF(at.X + size * 0.2f, at.Y + size * 0.34f), size * 0.045f); }
+            }
+            else if (it.Sprite != null && Sprites.Loading(it.Sprite)) { SpinningBall(g, at.X + size / 2, at.Y + size / 2, size * 0.3f, t); spinning = true; }
+            else using (var pen = new Pen(Color.FromArgb(110, 255, 255, 255), Math.Max(2f, size * 0.02f))) {
+                // Not seen: an empty ball's outline, as the games show nothing yet.
+                float br = size * 0.2f, cx = at.X + size / 2, cy = at.Y + size / 2;
+                g.DrawEllipse(pen, cx - br, cy - br, br * 2, br * 2); g.DrawLine(pen, cx - br, cy, cx + br, cy);
+                g.DrawEllipse(pen, cx - br * 0.3f, cy - br * 0.3f, br * 0.6f, br * 0.6f);
+            }
+        }
+        else if (intro == null) {
+            using (var b = new SolidBrush(Color.FromArgb(50, 0, 0, 0))) using (var sh = Round(new RectangleF(ib.X, ib.Y + icon * 0.06f, icon, icon), icon * 0.24f)) if (it.Sprite == null && it.Theme == null) g.FillPath(b, sh);
+            using (var glyph = new Font(iconSmall.FontFamily, icon * 0.45f, GraphicsUnit.Pixel)) RowIcon(g, it, ib, glyph);
+        }
+        float pad = r.Width * 0.06f, y = band.Bottom + pad * 0.6f, tw = r.Width - 2 * pad, x = r.X + pad;
+        string title = it.Text.Replace("Pokemon ", ""), value = null;
+        int colon = title.IndexOf(": ");
+        if (colon > 0) { value = title.Substring(colon + 2); title = title.Substring(0, colon); }
+        if (it.DexNo > 0) { DexPanelName(g, it, title, x, y, tw, r.Bottom - pad * 0.5f); return; }
+        Write(g, title, titleFont, it.On ? PhoneText : Text3, new RectangleF(x, y, tw, titleFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Center, false);
+        y += titleFont.Height * 1.35f;
+        if (it.IsSlider) {
+            float k = it.Slider < 0 ? 0.5f : it.Slider / 100f, th = Math.Max(8f, h * 0.014f), knob = th * 1.5f, trackW = tw * 0.72f, cy = y + knob + 2;
+            var track = new RectangleF(x, cy - th / 2, trackW, th);
+            using (var path = Round(track, th / 2)) using (var b = new SolidBrush(Color.FromArgb(222, 222, 230))) g.FillPath(b, path);
+            if (it.Slider > 0) using (var path = Round(new RectangleF(x, cy - th / 2, Math.Max(th, trackW * k), th), th / 2)) using (var b = new SolidBrush(accent)) g.FillPath(b, path);
+            float kx = x + trackW * k;
+            using (var b = new SolidBrush(Color.FromArgb(40, 0, 0, 0))) g.FillEllipse(b, kx - knob, cy - knob + knob * 0.15f, knob * 2, knob * 2);
+            using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, kx - knob, cy - knob, knob * 2, knob * 2);
+            using (var pen = new Pen(it.Slider < 0 ? Color.FromArgb(196, 196, 204) : accent, Math.Max(2f, knob * 0.12f))) { if (it.Slider < 0) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dot; g.DrawEllipse(pen, kx - knob, cy - knob, knob * 2, knob * 2); }
+            value = it.Slider < 0 ? "Own" : it.Slider == 0 ? "Off" : it.Slider + "%";
+            Write(g, value, titleFont, accent, new RectangleF(x + trackW + pad * 0.5f, cy - titleFont.Height, tw - trackW - pad * 0.5f, titleFont.Height * 2), StringAlignment.Near, StringAlignment.Center, false);
+            y = cy + knob + pad * 0.5f;
+            if (it.SliderNote != "") { Write(g, it.SliderNote, smallFont, PhoneSub, new RectangleF(x, y, tw, smallFont.Height * 1.3f), StringAlignment.Near, StringAlignment.Near, false); y += smallFont.Height * 1.5f; }
+        } else if (value != null) {
+            Write(g, value, itemBold, accent, new RectangleF(x, y, tw, itemBold.Height * 1.3f), StringAlignment.Near, StringAlignment.Center, false);
+            y += itemBold.Height * 1.5f;
+        }
+        string info = it.Info != "" ? it.Info : it.Hint != "" ? it.Hint : it.TileHint;
+        float room = r.Bottom - pad * 0.6f - y;
+        if (info != "" && room > bodyFont.Height) {
+            float ih = Math.Min(room, g.MeasureString(info, bodyFont, (int)tw).Height + 2);
+            Write(g, info, bodyFont, PhoneSub, new RectangleF(x, y, tw, ih), StringAlignment.Near, StringAlignment.Near, true);
+            y += ih + pad * 0.3f;
+        }
+        foreach (var rec in it.Records) {
+            float rh = g.MeasureString(rec.Replace(": ", ":  "), smallFont, (int)tw).Height;
+            if (y + rh > r.Bottom - pad * 0.5f) break;
+            Write(g, rec.Replace(": ", ":  "), smallFont, PhoneSub, new RectangleF(x, y, tw, rh + 1), StringAlignment.Near, StringAlignment.Near, true);
+            y += rh + h * 0.002f;
+        }
+    }
+    static Color RowTint(Item it) { return !it.On ? Text3 : it.Tint != Color.Empty ? it.Tint : BrowseTints.ContainsKey(it.Icon) ? BrowseTints[it.Icon] : RowColors[it.Icon % RowColors.Length]; }
+    void ListRowText(Graphics g, Item it, bool sel, RectangleF r, bool line, int h, Color accent, float tx, float right) {
         if (it.IsSlider) { SliderRow(g, it, sel, r, tx, right, h, accent); if (line) using (var pen = new Pen(PhoneLine, 1)) g.DrawLine(pen, tx, r.Bottom - 1, r.Right, r.Bottom - 1); return; }
         string title = it.Text.Replace("Pokemon ", ""), value = null;
         int colon = title.IndexOf(": ");
@@ -11796,7 +12332,7 @@ class LauncherForm : Form {
         float tw = right - tx - valueW;
         string sub = it.TileHint != "" ? it.TileHint : (!it.On ? it.Hint : "");
         if (sub != "") {
-            float th1 = itemFont.Height * 1.2f, th2 = smallFont.Height * 1.25f, ty = r.Y + (r.Height - th1 - th2) / 2;
+            float th1 = itemFont.Height * 1.05f, th2 = smallFont.Height * 1.1f, ty = r.Y + (r.Height - th1 - th2) / 2;
             Write(g, title, itemFont, ink, new RectangleF(tx, ty, tw, th1), StringAlignment.Near, StringAlignment.Center, false);
             Write(g, sub, smallFont, PhoneSub, new RectangleF(tx, ty + th1, tw, th2), StringAlignment.Near, StringAlignment.Center, false);
         } else Write(g, title, itemFont, ink, new RectangleF(tx, r.Y, tw, r.Height), StringAlignment.Near, StringAlignment.Center, false);
@@ -11804,22 +12340,26 @@ class LauncherForm : Form {
     }
     // A slider row: its name (and where the value comes from) on the left, a track with a knob and the value on the right.
     void SliderRow(Graphics g, Item it, bool sel, RectangleF r, float tx, float right, int h, Color accent) {
-        float valueW = g.MeasureString("100%", itemFont).Width + 4, trackW = (right - tx) * 0.46f, trackX = right - valueW - trackW - r.Height * 0.15f;
-        float nameW = trackX - tx - r.Height * 0.2f;
+        // A short, thick track ending just before the value, so it reads as a control, not a divider.
+        float valueW = g.MeasureString("100%", itemFont).Width + 4, trackW = Math.Min((right - tx) * 0.42f, r.Height * 4.2f);
+        float trackX = right - valueW - trackW - r.Height * 0.3f, nameW = trackX - tx - r.Height * 0.2f;
         if (it.SliderNote != "") {
-            float th1 = itemFont.Height * 1.2f, th2 = smallFont.Height * 1.25f, ty = r.Y + (r.Height - th1 - th2) / 2;
+            float th1 = itemFont.Height * 1.05f, th2 = smallFont.Height * 1.1f, ty = r.Y + (r.Height - th1 - th2) / 2;
             Write(g, it.Text, itemFont, PhoneText, new RectangleF(tx, ty, nameW, th1), StringAlignment.Near, StringAlignment.Center, false);
             Write(g, it.SliderNote, smallFont, PhoneSub, new RectangleF(tx, ty + th1, nameW, th2), StringAlignment.Near, StringAlignment.Center, false);
         } else Write(g, it.Text, itemFont, PhoneText, new RectangleF(tx, r.Y, nameW, r.Height), StringAlignment.Near, StringAlignment.Center, false);
-        float cy = r.Y + r.Height / 2, th = Math.Max(4f, h * 0.007f), k = it.Slider < 0 ? 0 : it.Slider / 100f, knob = r.Height * 0.17f;
+        float cy = r.Y + r.Height / 2, th = Math.Max(5f, r.Height * 0.14f), k = it.Slider < 0 ? 0.5f : it.Slider / 100f, knob = r.Height * 0.22f;
         var track = new RectangleF(trackX, cy - th / 2, trackW, th);
-        using (var path = Round(track, th / 2)) using (var b = new SolidBrush(PhoneLine)) g.FillPath(b, path);
-        if (it.Slider >= 0) {
-            if (k > 0) using (var path = Round(new RectangleF(trackX, cy - th / 2, Math.Max(th, trackW * k), th), th / 2)) using (var b = new SolidBrush(accent)) g.FillPath(b, path);
-            float kx = trackX + trackW * k;
-            using (var b = new SolidBrush(Color.FromArgb(40, 0, 0, 0))) g.FillEllipse(b, kx - knob, cy - knob + knob * 0.15f, knob * 2, knob * 2);
-            using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, kx - knob, cy - knob, knob * 2, knob * 2);
-            using (var pen = new Pen(sel ? accent : Color.FromArgb(200, 200, 206), Math.Max(1.5f, h * 0.0025f))) g.DrawEllipse(pen, kx - knob, cy - knob, knob * 2, knob * 2);
+        using (var path = Round(track, th / 2)) using (var b = new SolidBrush(Color.FromArgb(222, 222, 230))) g.FillPath(b, path);
+        if (it.Slider > 0) using (var path = Round(new RectangleF(trackX, cy - th / 2, Math.Max(th, trackW * k), th), th / 2)) using (var b = new SolidBrush(accent)) g.FillPath(b, path);
+        // "Own" (the engine decides): a hollow knob in the middle, with no fill.
+        float kx = trackX + trackW * k;
+        bool own = it.Slider < 0;
+        using (var b = new SolidBrush(Color.FromArgb(own ? 18 : 45, 0, 0, 0))) g.FillEllipse(b, kx - knob, cy - knob + knob * 0.18f, knob * 2, knob * 2);
+        using (var b = new SolidBrush(own ? Color.FromArgb(246, 246, 250) : Color.White)) g.FillEllipse(b, kx - knob, cy - knob, knob * 2, knob * 2);
+        using (var pen = new Pen(own ? Color.FromArgb(196, 196, 204) : sel ? accent : Color.FromArgb(200, 200, 206), Math.Max(1.5f, knob * 0.14f))) {
+            if (own) pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dot;
+            g.DrawEllipse(pen, kx - knob, cy - knob, knob * 2, knob * 2);
         }
         string value = it.Slider < 0 ? "Own" : it.Slider == 0 ? "Off" : it.Slider + "%";
         Write(g, value, itemFont, sel ? accent : PhoneSub, new RectangleF(right - valueW, r.Y, valueW, r.Height), StringAlignment.Far, StringAlignment.Center, false);
@@ -11853,7 +12393,7 @@ class LauncherForm : Form {
         // Starting up: the same rainbow Poke Ball as the working screen, in its own colours on this dark screen.
         SpinningBall(g, cx, cy - h * 0.1f + rise, h * 0.104f, t, true);
         float size = h * 0.062f;
-        using (var bold = new Font("Segoe UI Semibold", size, GraphicsUnit.Pixel)) using (var light = new Font("Segoe UI Light", size, GraphicsUnit.Pixel)) {
+        using (var bold = UiFont.Get("Segoe UI Semibold", size, GraphicsUnit.Pixel)) using (var light = UiFont.Get("Segoe UI Light", size, GraphicsUnit.Pixel)) {
             var a1 = g.MeasureString("Native", bold); var a2 = g.MeasureString("Mons", light);
             float nudge = size * 0.28f, markW = a1.Width + a2.Width - nudge, mx = cx - markW / 2, my = cy + rise;
             Write(g, "Native", bold, Color.White, new RectangleF(mx, my, a1.Width + 8, a1.Height), StringAlignment.Near, StringAlignment.Near, false);

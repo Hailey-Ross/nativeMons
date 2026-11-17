@@ -2,6 +2,16 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
+## Next
+
+- My Collection looks more like the games: a Poké Ball by each Pokémon you've caught, dashes for names you haven't seen yet, and the shiny picture for one caught shiny. Each region has its own colors and pattern, with a bar of how much of it you've caught.
+- A caught Pokémon shows a badge for each game you have it in, in that game's colors, with a star where it's shiny.
+- Pokémon you got by trading, or moved in with Move Pokemon, count as caught even where the game's Pokédex never recorded them.
+- Wide layout, for landscape screens: the menu as a column on the left, with the chosen option shown large beside it (a game's title screen plays there). It turns on by itself on short screens, such as a Steam Deck's, and has a switch in Settings where it fits.
+- Menu options are separate rounded buttons, and the volume sliders are easier to read and use.
+- Links in Credits open in your browser.
+- Linux and Steam Deck, early and not ready for everyone: `nativemons.sh` runs the launcher under Proton or Wine. See `docs/linux.md`.
+
 ## 0.0.8
 
 - Share Zakuro findings sends your list straight to nativeMons' own submission service, submit.hails.app: no account needed, signed by your launcher, and checked before anything uses it. Sharing through a GitHub form is still there as the other way, with the list on your clipboard to paste.
