@@ -24,7 +24,7 @@ runs:
         LOVE_VERSION: "11.5"
         FULLDEX_RELEASE: "fulldex-2026-11-15"
         PLATINUM_RELEASE: "v0.2.2"
-        NATIVEPLAT_RELEASE: "windows-225167af2"
+        NATIVEPLAT_RELEASE: "windows-081055f41"
         ZAKURO_RELEASE: "windows-9c62c5590"
       run: |
         $dist = "dist\nativeMons"
