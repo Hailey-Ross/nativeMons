@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300   # gen4recomp's build, then Azahar's and AzaharPlus's, waited for in turn
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app
         with:
           app-id: ${{ vars.ENGINE_SYNC_APP_ID }}

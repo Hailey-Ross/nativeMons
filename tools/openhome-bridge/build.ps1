@@ -7,7 +7,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 # OpenHome comes from our fork, at the commit of the release tag (forks don't carry upstream's tags).
 $openHome = 'v1.19.1'; $openHomeCommit = '1b3a868195d673883f89bc389642059c5c3ee8eb'
-$node = '24.16.0'; $wasmPack = '0.13.1'; $esbuild = '0.25.0'
+$node = '24.16.0'; $wasmPack = '0.15.1'; $esbuild = '0.25.0'
+# wasm-pack's own release, not its npm wrapper (that pulls in deprecated glob, rimraf and tar to fetch the same file).
+$wasmPackSha = '80afe1f95aaa3f7442917c4457c8316bd1a383c1f27eb0e40601ff3ee3217583'
 $here = $PSScriptRoot
 $mark = Join-Path $Out '.nativemons-version'
 $version = "$openHome-$node"
@@ -34,12 +36,23 @@ $env:COREPACK_HOME = Join-Path $Work 'corepack'
 $env:npm_config_cache = Join-Path $Work 'npm-cache'
 $env:CI = '1'
 
+$wpName = "wasm-pack-v$wasmPack-x86_64-pc-windows-msvc"
+$wpExe = Join-Path $Work "$wpName\wasm-pack.exe"
+if (-not (Test-Path -LiteralPath $wpExe)) {
+    $wpTar = Join-Path $Work 'wasm-pack.tar.gz'
+    Invoke-WebRequest "https://github.com/wasm-bindgen/wasm-pack/releases/download/v$wasmPack/$wpName.tar.gz" -OutFile $wpTar -UseBasicParsing
+    if ((Get-FileHash -LiteralPath $wpTar -Algorithm SHA256).Hash -ne $wasmPackSha) { throw 'The wasm-pack download did not match its checksum.' }
+    # Windows' own tar (System32), which reads .tar.gz.
+    & "$env:SystemRoot\System32\tar.exe" -xzf $wpTar -C $Work
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $wpExe)) { throw 'wasm-pack did not unpack.' }
+}
+
 Push-Location $src
 try {
     Run rustup target add wasm32-unknown-unknown
     Run corepack pnpm install --frozen-lockfile --ignore-scripts --store-dir (Join-Path $Work 'pnpm-store')
     # Not through Run: PowerShell would swallow the -- on its way through a function.
-    & npx --yes "wasm-pack@$wasmPack" build --release ./pkm_rs --target web -- --features wasm
+    & $wpExe build --release ./pkm_rs --target web -- --features wasm
     if ($LASTEXITCODE -ne 0) { throw 'wasm-pack failed.' }
     Run node scripts/patch-types.mjs
     # It builds inside OpenHome's tree, which has the path names its code imports by.
