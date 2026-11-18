@@ -4,9 +4,7 @@ Each notable stable release raises the version, and its section here becomes its
 
 ## Next
 
-- Fulldex 17 November for the DS games: Settings work with the buttons you see, the mouse wheel and dragging scroll, clicking outside a dialog closes it, and menus are larger on small screens. In HeartGold and SoulSilver battles the Mega Evolution move list shows in white-background battles, and the Yes and No buttons sit below the battle.
-- Fulldex again treats a full-size DS dump that matches no known release as the game itself, not a ROM hack, as before its 1.6. A save it played as a hack since then is put back as the game's, with the other kept as `.before-1.6.1`.
-- Engines brought up to date with upstream: Gen1Recomp, nativeplat and both 3DS emulators.
+- Engines brought up to date with upstream: Gen1Recomp, Fulldex's source for our GBA player, nativeplat and both 3DS emulators. The DS games stay on Fulldex 15 November until Fulldex's next release.
 
 ## 0.0.8a
 
