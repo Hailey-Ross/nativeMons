@@ -205,7 +205,7 @@ check_releases() {
   fulldex_tag=$(grep -oP "fulldexRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
   platinum_tag=$(grep -oP "platinumRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
 
-  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq '[.[].tag_name | select(test("^(pc|fulldex)-"))][0]')
+  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq '[.[].tag_name | select(test("^(pc-|fulldex-[0-9]|v[0-9])"))][0]')
   [ -n "$newest" ] && [ "$newest" != "$fulldex_tag" ] && problem "Fulldex $newest released" "We pin \`$fulldex_tag\`. Test \`$newest\` on copies (skill engine-updates), then move the pin in build-all.ps1 and action.yml."
   digest=$(gh api "repos/mamesj/pokemon-fulldex/releases/tags/$fulldex_tag" --jq '.assets[] | select(.name == "pokemon-ds-wide-pc-windows-x86_64.zip") | .digest')
   if [ -n "$digest" ] && ! grep -qx "Fulldex $digest" "$pins"; then
