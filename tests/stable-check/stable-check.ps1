@@ -660,6 +660,9 @@ if (On 'window') {
     # Every row but the ones that download, open a file dialog or flip a setting (3DS games, Ask to share Zakuro findings,
     # 3DS build speed, Quick start, Discord).
     $rows = @(@('Fulldex settings','Fulldex$'), @('Gen1Recomp settings','Gen1Recomp$'), $null, $null, $null, $null, @('Export saves','Export saves'), $null, @('Game options','Game options$'), @('Wallpapers','Wallpapers$'), @('Controls','Controls$'), @('Screenshots','Screenshots$'), $null, $null, @('Updates','Updates$'), @('Credits','Credits$'), @('Last session','Last session$'))
+    # Wide layout has a row only on a screen that fits it (the launcher's WideFits).
+    $wa = [Windows.Forms.Screen]::FromHandle([IntPtr]$h).WorkingArea
+    if ($wa.Width -ge 1000 -and $wa.Width -gt $wa.Height * 1.2) { $rows = $rows[0..11] + @($null) + $rows[12..($rows.Count - 1)] }
     # Once a step has gone wrong, no more keys: a press on the wrong screen could start a game.
     for ($i = 0; $i -lt $rows.Count -and -not $script:lost; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1 -and -not $script:lost) { [StableWin]::Key($h,$D) } }
     [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
