@@ -205,7 +205,9 @@ check_releases() {
   fulldex_tag=$(grep -oP "fulldexRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
   platinum_tag=$(grep -oP "platinumRelease = '\K[^']+" "$REPO_DIR/launcher/build-all.ps1")
 
-  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq '[.[].tag_name | select(test("^(pc-|fulldex-[0-9]|v[0-9])"))][0]')
+  # Only releases with a Windows, Linux or macOS file: console- or phone-only builds are not updates for us.
+  local desktop='win(dows|32|64)|linux|appimage|mac|osx|darwin'
+  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq "[.[] | select((.tag_name | test(\"^(pc-|fulldex-[0-9]|v[0-9])\")) and any(.assets[]; .name | test(\"$desktop\"; \"i\"))) | .tag_name][0]")
   [ -n "$newest" ] && [ "$newest" != "$fulldex_tag" ] && problem "Fulldex $newest released" "We pin \`$fulldex_tag\`. Test \`$newest\` on copies (skill engine-updates), then move the pin in build-all.ps1 and action.yml."
   digest=$(gh api "repos/mamesj/pokemon-fulldex/releases/tags/$fulldex_tag" --jq '.assets[] | select(.name == "pokemon-ds-wide-pc-windows-x86_64.zip") | .digest')
   if [ -n "$digest" ] && ! grep -qx "Fulldex $digest" "$pins"; then
@@ -213,7 +215,7 @@ check_releases() {
     CHANGES+=("Fulldex $fulldex_tag re-uploaded upstream: rebuilding with it")
   fi
 
-  newest=$(gh api "repos/cybervisi0n/pokeplatinum/releases?per_page=20" --jq '[.[].tag_name | select(startswith("v"))][0]')
+  newest=$(gh api "repos/cybervisi0n/pokeplatinum/releases?per_page=20" --jq "[.[] | select((.tag_name | startswith(\"v\")) and any(.assets[]; .name | test(\"$desktop\"; \"i\"))) | .tag_name][0]")
   [ -n "$newest" ] && [ "$newest" != "$platinum_tag" ] && problem "Platinum port $newest released" "We pin \`$platinum_tag\`. A new port needs its save format checked (Continue on a DS save, its own save passes mon-bridge check) before the pin moves (skill upstream-sync)."
   digest=$(gh api "repos/cybervisi0n/pokeplatinum/releases/tags/$platinum_tag" --jq '[.assets[] | select(.name | test("win")) | .digest][0]')
   [ -n "$digest" ] && ! grep -qx "Platinum $digest" "$pins" && problem "Platinum port $platinum_tag re-uploaded" "Its files changed under the same tag. Check the save padding, then update .github/engine-sync/pins.txt."
