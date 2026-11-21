@@ -4,7 +4,8 @@ Each notable stable release raises the version, and its section here becomes its
 
 ## Next
 
-- Engines brought up to date with upstream: Gen1Recomp, Fulldex's source for our GBA player, nativeplat and both 3DS emulators. The DS games stay on Fulldex 15 November until Fulldex's next release.
+- Fulldex 1.7.0 for the DS games. The Hub shows your current boxes, party and Pokédex again. A full-size DS game from another region (such as a Spanish HeartGold) is the game itself, not a ROM hack. Also new: a much bigger Guide for Black, HeartGold, SoulSilver and Platinum, the pause menu and Pokédex in seven languages, each Pokémon's evolution family, Nintendo WFC through a community server, and Auto Save State (both off to start). Settings work with taps, clicks and the mouse wheel. In HeartGold and SoulSilver battles, the Yes and No buttons no longer cover your HP box.
+- Engines brought up to date with upstream: Gen1Recomp, Fulldex's source for our GBA player, nativeplat, 3DSrecomp+Zakuro and both 3DS emulators.
 
 ## 0.0.8a
 

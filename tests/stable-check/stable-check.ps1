@@ -475,6 +475,8 @@ if (On 'play') {
   function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillGames $l; $l.Busy = $false; $l.Shot = $null; $l.Closing = $null; $l.Game = $null }
   # A window titled with another game's name, and not this one's, is the wrong game.
   $names = @{}; foreach ($gm in (Get-Content (Join-Path $app 'games.json') -Raw -Encoding UTF8 | ConvertFrom-Json)) { $names[$gm.id] = ($gm.title -replace '^Pokemon ', '') }
+  # Fulldex 1.7 titles a DS game's window "FullDex", like its game list: started with a .nds, it's the game.
+  function DsInFulldex([int]$id) { return [bool]((Get-CimInstance Win32_Process -Filter "ProcessId=$id").CommandLine -match '(?i)\.nds"') }
   function WrongGame([string]$id, [string]$title) {
     $own = $names[$id]; if (-not $own) { return $false }
     if ($title -match ('(?i)\b' + [regex]::Escape($own) + '\b')) { return $false }
@@ -528,7 +530,7 @@ if (On 'play') {
         Done $l $false "the launcher exited $($l.P.ExitCode) before the game settled"
       } else {
         # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
-        $game = @([StableWin]::Windows([int[]]@($live | Where-Object { $_ -ne $l.P.Id })) | Where-Object { $_.MainWindowTitle -notmatch 'Fulldex' -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
+        $game = @([StableWin]::Windows([int[]]@($live | Where-Object { $_ -ne $l.P.Id })) | Where-Object { ($_.MainWindowTitle -notmatch 'Fulldex' -or (DsInFulldex $_.Id)) -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
         if ($game) {
           if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
           elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) {
@@ -536,7 +538,7 @@ if (On 'play') {
             # plain-named copy: for it, wrong only when the title names another game AND the ROM it got isn't this one's.
             $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").CommandLine
             $wrong = WrongGame $l.Id $game.MainWindowTitle
-            if ($wrong -and $l.En -eq 'fulldex') {
+            if (($wrong -or $game.MainWindowTitle -match 'Fulldex') -and $l.En -eq 'fulldex') {
               $want = (@(Get-Content "$Report\roms.txt" -Encoding UTF8) | Where-Object { $_ -match "^$($l.Id) " } | Select-Object -First 1) -replace '^.*\| fulldex=(.*?) \|.*$', '$1'
               $wrong = -not ($want -and $cmd -like "*$want*")
             }

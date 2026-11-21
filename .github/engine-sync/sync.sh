@@ -222,7 +222,8 @@ check_releases() {
 
   # OpenHome's converter is built from our fork at a release's commit (tools/openhome-bridge/build.ps1).
   local openhome_tag; openhome_tag=$(grep -oP "openHome = '\K[^']+" "$REPO_DIR/tools/openhome-bridge/build.ps1")
-  newest=$(gh api "repos/andrewbenington/OpenHome/releases?per_page=10" --jq '[.[].tag_name | select(test("^v[0-9]"))][0]')
+  # Upstream's test builds come as prereleases: only a full release counts.
+  newest=$(gh api "repos/andrewbenington/OpenHome/releases?per_page=10" --jq '[.[] | select(.prerelease | not) | .tag_name | select(test("^v[0-9]"))][0]')
   [ -n "$newest" ] && [ "$newest" != "$openhome_tag" ] && problem "OpenHome $newest released" "We build the converter from \`$openhome_tag\`. Move \`openHome\` and \`openHomeCommit\` in tools/openhome-bridge/build.ps1 to $newest, rebuild, and rerun the Move Pokemon conversions on save copies."
   return 0
 }
