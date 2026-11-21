@@ -47,7 +47,7 @@ runs:
         $title = if ($stable) { "nativeMons $version" } else { "nativeMons ($env:TAG)" }; $sync = @()
         if ((git log -1 --format=%s $sha) -eq 'Engine auto-sync with upstream') {
           $title += ": engine auto-sync with upstream"
-          $sync = @("**Engine auto-sync with upstream.** Built automatically from these upstream updates:", "", (git log -1 --format=%b $sha).Trim(), "")
+          $sync = @("**Engine auto-sync with upstream.** Built automatically from these upstream updates:", "", ((git log -1 --format=%b $sha) -join "`n").Trim(), "")
         }
         # A stable release's own section of CHANGELOG.md.
         $changes = @()
