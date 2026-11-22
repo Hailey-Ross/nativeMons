@@ -23,7 +23,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         LOVE_VERSION: "11.5"
         FULLDEX_RELEASE: "v1.7.0"
-        PLATINUM_RELEASE: "v0.2.2"
+        PLATINUM_RELEASE: "v0.2.3"
         NATIVEPLAT_RELEASE: "windows-081055f41"
         ZAKURO_RELEASE: "windows-99a92e092"
       run: |

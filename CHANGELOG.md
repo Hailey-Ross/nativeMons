@@ -6,6 +6,8 @@ Each notable stable release raises the version, and its section here becomes its
 
 - Fulldex 1.7.0 for the DS games. The Hub shows your current boxes, party and Pokédex again. A full-size DS game from another region (such as a Spanish HeartGold) is the game itself, not a ROM hack. Also new: a much bigger Guide for Black, HeartGold, SoulSilver and Platinum, the pause menu and Pokédex in seven languages, each Pokémon's evolution family, Nintendo WFC through a community server, and Auto Save State (both off to start). Settings work with taps, clicks and the mouse wheel. In HeartGold and SoulSilver battles, the Yes and No buttons no longer cover your HP box.
 - Engines brought up to date with upstream: Gen1Recomp, Fulldex's source for our GBA player, nativeplat, 3DSrecomp+Zakuro and both 3DS emulators.
+- Platinum PC port v0.2.3: a gamepad that disconnects can be reconnected, the left stick works as the D-pad, and the overlay menu can be opened and used entirely from a gamepad.
+- Move Pokemon: OpenHome's converter v1.19.2. Gen 1 and 2 Pokemon are no longer given the same personality value (which made them look like clones), and nicknames and trainer names are cut to fit games with shorter limits.
 
 ## 0.0.8a
 

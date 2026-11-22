@@ -6,7 +6,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # OpenHome comes from our fork, at the commit of the release tag (forks don't carry upstream's tags).
-$openHome = 'v1.19.1'; $openHomeCommit = '1b3a868195d673883f89bc389642059c5c3ee8eb'
+$openHome = 'v1.19.2'; $openHomeCommit = 'd5939596ebf67a1c9e63ceed9f846047e4efbedb'
 $node = '24.16.0'; $wasmPack = '0.15.1'; $esbuild = '0.25.0'
 # wasm-pack's own release, not its npm wrapper (that pulls in deprecated glob, rimraf and tar to fetch the same file).
 $wasmPackSha = '80afe1f95aaa3f7442917c4457c8316bd1a383c1f27eb0e40601ff3ee3217583'

@@ -6,7 +6,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $loveVersion = '11.5'
 $fulldexRelease = 'v1.7.0'
-$platinumRelease = 'v0.2.2'
+$platinumRelease = 'v0.2.3'
 $nativeplatRelease = 'windows-081055f41'
 $zakuroRelease = 'windows-99a92e092'
 
