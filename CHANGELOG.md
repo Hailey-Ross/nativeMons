@@ -2,7 +2,7 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
-## Next
+## 0.0.8c
 
 - Move Pokemon: a Game Boy Pokemon moved to a newer game and back comes home again as it was. Until now the trip home was refused ("The original copy couldn't be read").
 - Move Pokemon: names with an apostrophe, such as FireRed's traded Farfetch'd "CH'DING", arrive whole in Gold, Silver and Crystal instead of cut off at the apostrophe.
