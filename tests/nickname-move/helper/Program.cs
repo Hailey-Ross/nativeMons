@@ -1,8 +1,19 @@
 // Test helper for nickname-move.ps1: names a Pokemon in a save copy, or prints one's names.
-// nickname-helper rename <save> <box> <slot> <nickname> | show <save> <box> <slot>
+// nickname-helper rename <save> <box> <slot> <nickname> | show <save> <box> <slot> | dump ... <file> | nicknamed <save>
 using PKHeX.Core;
 
-if (args.Length < 4) { Console.Error.WriteLine("usage: rename <save> <box> <slot> <nickname> | show <save> <box> <slot>"); return 1; }
+if (args.Length == 2 && args[0] == "nicknamed")
+{
+    var all = SaveUtil.GetSaveFile(args[1]) ?? throw new InvalidDataException("Not a save: " + args[1]);
+    for (int b = 0; b < all.BoxCount; b++)
+        for (int s = 0; s < all.BoxSlotCount; s++)
+        {
+            var m = all.GetBoxSlotAtIndex(b, s);
+            if (m.Species != 0 && m.IsNicknamed && !m.IsEgg) Console.WriteLine(string.Join('\t', b, s, GameInfo.Strings.Species[m.Species], m.Nickname, m.OriginalTrainerName));
+        }
+    return 0;
+}
+if (args.Length < 4) { Console.Error.WriteLine("usage: rename <save> <box> <slot> <nickname> | show <save> <box> <slot> | dump <save> <box> <slot> <file> | nicknamed <save>"); return 1; }
 var sav = SaveUtil.GetSaveFile(args[1]) ?? throw new InvalidDataException("Not a save: " + args[1]);
 int box = int.Parse(args[2]), slot = int.Parse(args[3]);
 var pk = sav.GetBoxSlotAtIndex(box, slot);

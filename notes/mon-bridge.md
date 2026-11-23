@@ -29,6 +29,11 @@ Exit codes: 0 done, 1 usage or unreadable save, 2 the move isn't possible (saves
   converting from Gen 1/2, mon-bridge writes the real trainer name and nickname back (`KeepNames`). Into Gen 1/2,
   OpenHome's 69/73-byte output has empty names and a zero catch rate, which PKHeX doesn't read, so those moves use the
   hand copy, which keeps the names and comes out legal. Test: `tests/nickname-move/nickname-move.ps1`.
+- Game Boy text has only the curly apostrophe (’): names going to Gen 1/2 swap the straight one, or Gen 2 stops writing
+  there ("CH'DING" became "CH").
+- A kept Game Boy original (`pokemon-originals\*.pk1|pk2`) is the 44/48-byte record, then the trainer name and nickname
+  buffers of equal length. Files kept before 2026-11-23 are the bare record, which couldn't be read back (the move home
+  was refused); they're read now, with the names of the Pokemon coming home.
 
 ## FireRed saves
 

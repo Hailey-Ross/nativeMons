@@ -357,11 +357,11 @@ static class Program
         e.Form = 0;
         e.CurrentLevel = pk.CurrentLevel;
         e.Language = pk.Language == 0 ? 2 : pk.Language;
-        e.OriginalTrainerName = pk.OriginalTrainerName.Length > e.MaxStringLengthTrainer ? pk.OriginalTrainerName[..e.MaxStringLengthTrainer] : pk.OriginalTrainerName;
+        e.OriginalTrainerName = Fit(pk.OriginalTrainerName, e.MaxStringLengthTrainer, e);
         e.OriginalTrainerGender = pk.OriginalTrainerGender;
         e.TID16 = pk.TID16;
         if (to.Generation >= 3) e.SID16 = pk.SID16;
-        e.Nickname = pk.Nickname.Length > e.MaxStringLengthNickname ? pk.Nickname[..e.MaxStringLengthNickname] : pk.Nickname;
+        e.Nickname = Fit(pk.Nickname, e.MaxStringLengthNickname, e);
         e.IsNicknamed = pk.IsNicknamed;
         // Each era has its own range for these, and the DV and IV scales differ by 2 either way.
         int Iv(int v) => from2(pk) == from2(e) ? Math.Min(v, e.MaxIV) : from2(pk) ? Math.Min(v * 2 + 1, e.MaxIV) : Math.Min(v / 2, e.MaxIV);
@@ -386,17 +386,24 @@ static class Program
     }
     static bool from2(PKM p) => p.Format <= 2;
 
+    // Cut to the game's length. Game Boy text has only the curly apostrophe: Gen 2 stops writing at a straight one.
+    static string Fit(string s, int max, PKM e)
+    {
+        if (e.Format <= 2) s = s.Replace('\'', '’');
+        return s.Length > max ? s[..max] : s;
+    }
+
     static void KeepNames(PKM pk, PKM e)
     {
         if (e.Language == 0) e.Language = pk.Language == 0 ? 2 : pk.Language;
         // Gen 3 games pad the unused name bytes with 0xFF.
         if (e is PK3) e.OriginalTrainerTrash.Fill(0xFF);
-        e.OriginalTrainerName = pk.OriginalTrainerName.Length > e.MaxStringLengthTrainer ? pk.OriginalTrainerName[..e.MaxStringLengthTrainer] : pk.OriginalTrainerName;
+        e.OriginalTrainerName = Fit(pk.OriginalTrainerName, e.MaxStringLengthTrainer, e);
         e.OriginalTrainerGender = pk.OriginalTrainerGender;
         if (pk.IsNicknamed)
         {
             if (e is PK3) e.NicknameTrash.Fill(0xFF);
-            e.Nickname = pk.Nickname.Length > e.MaxStringLengthNickname ? pk.Nickname[..e.MaxStringLengthNickname] : pk.Nickname;
+            e.Nickname = Fit(pk.Nickname, e.MaxStringLengthNickname, e);
             e.IsNicknamed = true;
         }
         else e.ClearNickname();
@@ -531,7 +538,9 @@ static class Program
     {
         Directory.CreateDirectory(folder);
         string file = Path.Combine(folder, Identity(copy) + "." + original.Extension);
-        File.WriteAllBytes(file + ".part", original.Data.ToArray());
+        // Game Boy records hold no names, so theirs follow the record: trainer, then nickname.
+        byte[] data = original is GBPKM gb ? [.. gb.Data, .. gb.OriginalTrainerTrash, .. gb.NicknameTrash] : original.Data.ToArray();
+        File.WriteAllBytes(file + ".part", data);
         File.Move(file + ".part", file, true);
     }
 
@@ -543,9 +552,26 @@ static class Program
         return File.Exists(file) ? file : null;
     }
 
+    // Kept Game Boy files: the record, then trainer and nickname of equal length (none in files kept before 2026-11-23).
+    static PKM? ReadOriginal(byte[] b, SaveFile to, PKM back)
+    {
+        if (to.Generation > 2) return EntityFormat.GetFromBytes(b, to.Context);
+        int record = to.BlankPKM.Data.Length;
+        int rest = b.Length - record;
+        if (rest < 0 || rest % 2 != 0) return null;
+        if (rest == 0)
+        {
+            PKM bare = to.Generation == 1 ? new PK1(b) : new PK2(b);
+            KeepNames(back, bare);
+            return bare;
+        }
+        var data = b.AsSpan(0, record); var ot = b.AsSpan(record, rest / 2); var nick = b.AsSpan(record + rest / 2, rest / 2);
+        return to.Generation == 1 ? new PK1(data, ot, nick) : new PK2(data, ot, nick);
+    }
+
     static int MoveHome(SaveFile from, SaveFile to, PKM pk, int box, int slot, string fromPath, string toPath, string backups, string file, string name, string[] options)
     {
-        var original = EntityFormat.GetFromBytes(File.ReadAllBytes(file), to.Context);
+        var original = ReadOriginal(File.ReadAllBytes(file), to, pk);
         if (original is null || original.GetType() != to.PKMType) return Refuse("The original copy of " + name + " couldn't be read.");
         // What happened while it was away still counts: it may have evolved or gained levels.
         if (pk.Species != original.Species && SpeciesFits(pk.Species, to)) original.Species = pk.Species;

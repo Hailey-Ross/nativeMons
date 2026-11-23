@@ -2,6 +2,11 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
+## Next
+
+- Move Pokemon: a Game Boy Pokemon moved to a newer game and back comes home again as it was. Until now the trip home was refused ("The original copy couldn't be read").
+- Move Pokemon: names with an apostrophe, such as FireRed's traded Farfetch'd "CH'DING", arrive whole in Gold, Silver and Crystal instead of cut off at the apostrophe.
+
 ## 0.0.8b
 
 - Fulldex 1.7.0 for the DS games. The Hub shows your current boxes, party and Pokédex again. A full-size DS game from another region (such as a Spanish HeartGold) is the game itself, not a ROM hack. Also new: a much bigger Guide for Black, HeartGold, SoulSilver and Platinum, the pause menu and Pokédex in seven languages, each Pokémon's evolution family, Nintendo WFC through a community server, and Auto Save State (both off to start). Settings work with taps, clicks and the mouse wheel. In HeartGold and SoulSilver battles, the Yes and No buttons no longer cover your HP box.
