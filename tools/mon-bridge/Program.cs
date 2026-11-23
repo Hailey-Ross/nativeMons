@@ -395,6 +395,7 @@ static class Program
         e.OriginalTrainerGender = pk.OriginalTrainerGender;
         if (pk.IsNicknamed)
         {
+            if (e is PK3) e.NicknameTrash.Fill(0xFF);
             e.Nickname = pk.Nickname.Length > e.MaxStringLengthNickname ? pk.Nickname[..e.MaxStringLengthNickname] : pk.Nickname;
             e.IsNicknamed = true;
         }

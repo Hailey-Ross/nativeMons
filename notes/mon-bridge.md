@@ -25,6 +25,10 @@ Exit codes: 0 done, 1 usage or unreadable save, 2 the move isn't possible (saves
 
 - The destination is written first, so if anything fails after that, the Pokemon is duplicated, never lost.
 - PKHeX has no route between some eras, and its converter never returns if asked, so those moves are copied field by field. The OpenHome converter (`tools/openhome-bridge`) keeps more when it's there. A hand copy loses what the older game can't hold, so the Pokemon's full data is kept for the trip back.
+- Gen 1/2 and OpenHome: PKHeX's Gen 1/2 record carries no names, so OpenHome would call the trainer "TRAINER"; after
+  converting from Gen 1/2, mon-bridge writes the real trainer name and nickname back (`KeepNames`). Into Gen 1/2,
+  OpenHome's 69/73-byte output has empty names and a zero catch rate, which PKHeX doesn't read, so those moves use the
+  hand copy, which keeps the names and comes out legal. Test: `tests/nickname-move/nickname-move.ps1`.
 
 ## FireRed saves
 
