@@ -8,6 +8,7 @@ Each notable stable release raises the version, and its section here becomes its
 - Engines brought up to date with upstream: Gen1Recomp, Fulldex's source for our GBA player, nativeplat, 3DSrecomp+Zakuro and both 3DS emulators.
 - Platinum PC port v0.2.3: a gamepad that disconnects can be reconnected, the left stick works as the D-pad, and the overlay menu can be opened and used entirely from a gamepad.
 - Move Pokemon: OpenHome's converter v1.19.2. Gen 1 and 2 Pokemon are no longer given the same personality value (which made them look like clones), and nicknames and trainer names are cut to fit games with shorter limits.
+- Move Pokemon: a Gen 1 or 2 Pokemon moved to a newer game keeps its trainer name and nickname, instead of arriving as trainer "TRAINER".
 
 ## 0.0.8a
 

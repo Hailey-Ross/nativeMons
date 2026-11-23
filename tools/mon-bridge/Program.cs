@@ -386,6 +386,21 @@ static class Program
     }
     static bool from2(PKM p) => p.Format <= 2;
 
+    static void KeepNames(PKM pk, PKM e)
+    {
+        if (e.Language == 0) e.Language = pk.Language == 0 ? 2 : pk.Language;
+        // Gen 3 games pad the unused name bytes with 0xFF.
+        if (e is PK3) e.OriginalTrainerTrash.Fill(0xFF);
+        e.OriginalTrainerName = pk.OriginalTrainerName.Length > e.MaxStringLengthTrainer ? pk.OriginalTrainerName[..e.MaxStringLengthTrainer] : pk.OriginalTrainerName;
+        e.OriginalTrainerGender = pk.OriginalTrainerGender;
+        if (pk.IsNicknamed)
+        {
+            e.Nickname = pk.Nickname.Length > e.MaxStringLengthNickname ? pk.Nickname[..e.MaxStringLengthNickname] : pk.Nickname;
+            e.IsNicknamed = true;
+        }
+        else e.ClearNickname();
+    }
+
     // OpenHome's converter, when present. Null makes the caller fall back to ForceCopy.
     static PKM? OpenHomeCopy(PKM pk, SaveFile to)
     {
@@ -403,6 +418,8 @@ static class Program
             if (p.ExitCode != 0) return null;
             var made = EntityFormat.GetFromBytes(File.ReadAllBytes(output), to.Context);
             if (made is null || made.GetType() != to.PKMType || made.Species != pk.Species) return null;
+            // PKHeX's Gen 1/2 bytes carry no names, so OpenHome made them up ("TRAINER"): put the real ones back.
+            if (from2(pk)) KeepNames(pk, made);
             return made;
         }
         catch { return null; }
