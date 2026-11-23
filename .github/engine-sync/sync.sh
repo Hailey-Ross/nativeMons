@@ -22,7 +22,8 @@ problem() {
   PROBLEMS=$((PROBLEMS + 1))
   echo "PROBLEM: $title"; echo "$body"
   [ "$DRY" = 1 ] && return 0
-  if [ -z "$(gh issue list -R "$MAIN" --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then
+  # An open issue, or one closed as not planned (a release we chose to skip), stops a repeat.
+  if [ -z "$(gh issue list -R "$MAIN" --state all --search "in:title \"$title\"" --json title,state,stateReason --jq ".[] | select(.title == \"$title\" and (.state == \"OPEN\" or .stateReason == \"NOT_PLANNED\")) | .title")" ]; then
     gh issue create -R "$MAIN" --title "$title" --body "$body" >/dev/null
   fi
 }

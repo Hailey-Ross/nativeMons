@@ -1,6 +1,6 @@
 # Engine sync
 
-`.github/workflows/engine-sync.yml` runs `.github/engine-sync/sync.sh` twice a day, at about midnight and noon MST (GitHub can start scheduled runs late; runs never overlap), and from the Actions tab. It brings upstream engine updates into the forks, moves nativeMons' pins on `dev`, and that push builds a new bleeding-edge release. Anything that isn't clean stops that engine and opens an issue in nativeMons titled "Engine sync: ...". The same problem never gets a second issue while the first is open.
+`.github/workflows/engine-sync.yml` runs `.github/engine-sync/sync.sh` twice a day, at about midnight and noon MST (GitHub can start scheduled runs late; runs never overlap), and from the Actions tab. It brings upstream engine updates into the forks, moves nativeMons' pins on `dev`, and that push builds a new bleeding-edge release. Anything that isn't clean stops that engine and opens an issue in nativeMons titled "Engine sync: ...". The same problem never gets a second issue while the first is open, or after it was closed as not planned (a release we chose to skip).
 
 It runs as the sync GitHub App, so its commits show as the App's bot, with the subject "Engine auto-sync with upstream". The bleeding-edge release built from one says so in its title and lists what moved. Its ID is the `ENGINE_SYNC_APP_ID` variable and its private key is the `ENGINE_SYNC_APP_KEY` secret.
 
