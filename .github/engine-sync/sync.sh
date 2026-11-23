@@ -62,7 +62,7 @@ sync_fork() {
   fi
   if git -C "$dir" merge-base --is-ancestor "$theirs" HEAD; then git -C "$dir" rev-parse HEAD > "$WORK/$name.head"; return 0; fi
   git -C "$dir" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" \
-    merge -q --no-ff --no-edit -m "Merge upstream $liaison (${theirs:0:9})" "$theirs" >/dev/null 2>&1 || true
+    merge -q --no-ff --no-edit -m "Merge upstream $liaison (${theirs:0:9})" "$theirs" > "$WORK/$name.merge" 2>&1 || true
   if [ -f "$dir/.git/MERGE_HEAD" ]; then
     # Gen1Recomp only: upstream changing a file we removed for the licence keeps it removed. Anything else stops.
     local left=""
@@ -82,7 +82,7 @@ sync_fork() {
     git -C "$dir" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q --no-edit
   fi
   if ! git -C "$dir" merge-base --is-ancestor "$theirs" HEAD; then
-    problem "$name merge failed" "Merging \`$liaison\` (${theirs:0:9}) into \`hails-additions\` in \`$fork\` didn't complete. Nothing was pushed."
+    problem "$name merge failed" "Merging \`$liaison\` (${theirs:0:9}) into \`hails-additions\` in \`$fork\` didn't complete. Nothing was pushed."$'\n```\n'"$(tail -n 15 "$WORK/$name.merge")"$'\n```'
     return 0
   fi
   # A licence change, or a removed file back, always needs a person. The emulators' own licence files only: their
