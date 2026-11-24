@@ -103,7 +103,8 @@ sync_fork() {
   if [ -n "$release" ]; then
     local wf=.github/workflows/nativemons-windows-release.yml
     git -C "$dir" checkout -q HEAD -- "$wf"
-    sed -i "s/^\(      UPSTREAM_TAG: \).*/\1$release/" "$dir/$wf"
+    # Quoted: YAML reads a bare 2127.0 as the number 2127.
+    sed -i "s/^\(      UPSTREAM_TAG: \).*/\1\"$release\"/" "$dir/$wf"
     if ! git -C "$dir" diff --quiet -- "$wf"; then
       git -C "$dir" add -- "$wf"
       git -C "$dir" -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" commit -q -m "Windows release: based on $release"
