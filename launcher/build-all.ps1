@@ -8,7 +8,7 @@ $loveVersion = '11.5'
 $fulldexRelease = 'v1.7.0'
 $platinumRelease = 'v0.2.3'
 $nativeplatRelease = 'windows-081055f41'
-$zakuroRelease = 'windows-99a92e092'
+$zakuroRelease = 'windows-4ba3ca725'
 
 $here = $PSScriptRoot
 $repo = Split-Path $here -Parent
