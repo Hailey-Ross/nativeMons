@@ -2,6 +2,12 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
+## 0.0.8d
+
+- Importing a Red, Blue or Yellow save from an emulator that added extra bytes after the game's 32 KB: the launcher now asks, then imports it without them. Until now the import failed. Your file isn't changed.
+- Azahar 2127.0 for the 3DS games: lower input lag, MSAA anti-aliasing, more accurate graphics and audio, and many Vulkan fixes.
+- 3DSrecomp+Zakuro brought up to date with upstream: smoother frame interpolation, sharper scaled-up textures, and texture copies done on the GPU.
+
 ## 0.0.8c
 
 - Move Pokemon: a Game Boy Pokemon moved to a newer game and back comes home again as it was. Until now the trip home was refused ("The original copy couldn't be read").

@@ -15,6 +15,8 @@ param(
   [string]$App, [string]$Work, [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
+# The tools print UTF-8 (’, é); with output redirected, 5.1 would read it in the ANSI code page.
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $Gen3 = @($Gen3 | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 if (-not $App) {

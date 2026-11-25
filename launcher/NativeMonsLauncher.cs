@@ -5794,11 +5794,15 @@ class LauncherForm : Form {
         }
         if (g.Engine() == "gen1" && !Shares(g)) {
             // A new save slot: anything already there is kept.
-            Action run = delegate {
-                string problem = null;
-                Busy("Importing " + g.Title, delegate { problem = ImportBack(g, one.File); return null; }, delegate(string e) { ImportDone(g, e ?? problem); });
+            Action<bool> run = null;
+            run = trim => {
+                string problem = null; bool footer = false;
+                Busy("Importing " + g.Title, delegate { problem = ImportBack(g, one.File, trim, out footer); return null; }, delegate(string e) {
+                    if (e == null && footer) { AskTrim(g, one.File, delegate { run(true); }); return; }
+                    ImportDone(g, e ?? problem);
+                });
             };
-            if (!g.Imported) Import(g, run); else run();
+            if (!g.Imported) Import(g, delegate { run(false); }); else run(false);
             return;
         }
         string target = Path.Combine(Config.FulldexDir, "saves", g.Save);
@@ -5806,6 +5810,15 @@ class LauncherForm : Form {
         var p = new Page { Title = "Replace your " + g.Title + " save?", Body = "There's already a Fulldex save for this game. It'll be copied to save-backups first, so it can be restored.\n\n" + (one.Note ?? ""), Theme = g.Theme };
         p.Items.Add(new Item("Keep it", "", true, delegate { pages.Pop(); }) { Icon = '\uE711' });
         p.Items.Add(new Item("Replace it", "", true, delegate { pages.Pop(); CopyInSave(g, one.File, target); }) { Icon = '\uE896' });
+        pages.Push(p);
+    }
+    // A Gen 1 save bigger than 32 KB: the extra bytes are an emulator's footer (a clock these games don't have).
+    void AskTrim(GameEntry g, string file, Action trim) {
+        long size = 0; try { size = new FileInfo(file).Length; } catch { }
+        var p = new Page { Title = "This save has extra bytes", Theme = g.Theme,
+            Body = "This " + g.Title + " save is " + size.ToString("N0") + " bytes. A Game Boy save is 32,768 bytes; the rest is usually a footer an emulator added, which " + g.Title + " doesn't use.\n\nIt can be imported without the extra bytes. Your file isn't changed." };
+        p.Items.Add(new Item("Import without the extra bytes", "", true, delegate { pages.Pop(); trim(); }) { Icon = '' });
+        p.Items.Add(new Item("Don't import", "", true, delegate { pages.Pop(); }) { Icon = '' });
         pages.Push(p);
     }
     void CopyInSave(GameEntry g, string file, string target) {
@@ -5830,7 +5843,7 @@ class LauncherForm : Form {
     }
     class DexGame { public HashSet<int> Caught = new HashSet<int>(), Seen = new HashSet<int>(), Shiny = new HashSet<int>(); public int FusionsCaught = -1, FusionsSeen = -1, LaterCaught, LaterSeen; }
     // Games whose Pokedex is read: those with save tools, and Infinite Fusion, read from its own saves.
-    // 3DS games are read too (only read: Move Pokemon stays off for them), once one of their saves exists.
+    // 3DS games are read too, once one of their saves exists (Move Pokemon takes them then as well: MoveTools).
     static bool ReadsDex(GameEntry g) { return g.SaveTools || (PcGames.IsFusion(g) && g.OnPc) || (g.Ctr != null && Ctr3dsSaveIn(g) != null); }
     static string ParkedCtrSave(GameEntry g, string set) { return Path.Combine(SaveSets.Dir(g, set), "3ds", "data", "main"); }
     static string Ctr3dsSaveIn(GameEntry g) {
@@ -7752,16 +7765,21 @@ class LauncherForm : Form {
         why = o != "" ? o : "No save yet for " + g.Title + ". Play and save once first.";
         return null;
     }
-    static string ImportBack(GameEntry g, string file) {
+    public static string ImportBack(GameEntry g, string file) { bool footer; return ImportBack(g, file, false, out footer); }
+    // footer: a Gen 1 save with extra bytes after its 32 KB (an emulator's footer). Nothing was imported; the player is
+    // asked, then trim imports it without them.
+    public static string ImportBack(GameEntry g, string file, bool trim, out bool footer) {
+        footer = false;
         // A 3DS save the launcher just changed: its slot's states go to the backups, so an old one can't undo it.
         if (g.Ctr != null) { try { Ctr3dsSaves.StashStates(g, "after-move"); } catch { } return null; }
         if (g.Engine() != "gen1") return null;
         var psi = Gen1Start("");
         int code; string o;
         using (var plain = new PlainPath(file)) {
-            psi.EnvironmentVariables["NATIVEMONS_CLI"] = "import " + g.Gen1 + " " + plain.Path_;
+            psi.EnvironmentVariables["NATIVEMONS_CLI"] = (trim ? "import-trim " : "import ") + g.Gen1 + " " + plain.Path_;
             o = RunCapture(psi, 60, out code);
         }
+        if (code == 3) { footer = true; return "This save has extra bytes after the game's 32 KB, so it wasn't imported."; }
         return code == 0 ? null : (o.Trim() != "" ? o.Trim() : "Gen1Recomp could not take the save back.");
     }
     // ---------- Move Pokemon: the box screen ----------
@@ -8288,7 +8306,7 @@ class LauncherForm : Form {
         }
         if (first != null) { GameArt.Frame(first.Id, 0); GameArt.Town(first.Id); }
     }
-    static bool PrepareNow(GameEntry g, int workers) {
+    public static bool PrepareNow(GameEntry g, int workers) {
         var psi = Gen1Start("");
         psi.EnvironmentVariables["POKEPORT_EXTRACT_WORKERS"] = workers.ToString();
         psi.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
@@ -12647,7 +12665,7 @@ static class NativeMonsLauncher {
             File.WriteAllText(argv[1], line + "\nresult " + (problem ?? "ok") + "\nnow " + Updater.Build + "\n");
             return;
         }
-        // For tests: --saves <game> <result file> list | new [name] | use <n> | copy <n> | delete <n> | recover
+        // For tests: --saves <game> <result file> list | new [name] | use <n> | copy <n> | delete <n> | recover | prepare | import|import-trim <file>
         if (argv.Length >= 4 && argv[0] == "--saves") {
             Library.Scan(LauncherForm.Gen1Cli);
             var saved = Library.Games.Find(x => x.Id == argv[1]);
@@ -12657,6 +12675,8 @@ static class NativeMonsLauncher {
             else if (verb == "copy") outcome = LauncherForm.DuplicateSave(saved, arg);
             else if (verb == "delete") outcome = LauncherForm.DeleteSave(saved, arg);
             else if (verb == "adopt") outcome = LauncherForm.AdoptSlot(saved, arg, argv.Length > 5 ? argv[5] : null);
+            else if (verb == "prepare") { if (saved.Gen1Rom == null) outcome = "no Gen1Recomp ROM"; else if (LauncherForm.PrepareNow(saved, 2)) saved.Imported = true; else outcome = "prepare failed"; }
+            else if (verb == "import" || verb == "import-trim") { bool footer; outcome = LauncherForm.ImportBack(saved, arg, verb == "import-trim", out footer); if (footer) outcome = "footer: " + outcome; }
             else if (verb == "recover") LauncherForm.RecoverSwitches();
             else if (verb == "art") outcome = GameArt.Capture(saved);
             else if (verb == "town") outcome = GameArt.CaptureTown(saved);
