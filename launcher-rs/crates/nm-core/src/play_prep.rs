@@ -36,6 +36,17 @@ pub fn write_fulldex(key: &str, value: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(parent(&fulldex_cfg()))?;
     config::write_all_lines(&fulldex_cfg(), &lines)
 }
+/// Fulldex's first-start questions (1.8), answered as we play it, so its own list never asks: only keys it lacks.
+pub const FULLDEX_SETUP: [(&str, &str); 4] = [("view", "merged"), ("aspect", "auto"), ("pad_touch", "0"), ("setup_done", "1")];
+pub fn answer_fulldex_setup() -> std::io::Result<()> {
+    let text = std::fs::read_to_string(fulldex_cfg()).unwrap_or_default();
+    let mut lines: Vec<String> = config::lines(&text).iter().map(|l| l.to_string()).collect();
+    let had = lines.len();
+    for (k, v) in FULLDEX_SETUP { if !lines.iter().any(|l| l.starts_with(&format!("{}=", k))) { lines.push(format!("{}={}", k, v)); } }
+    if lines.len() == had { return Ok(()); }
+    std::fs::create_dir_all(parent(&fulldex_cfg()))?;
+    config::write_all_lines(&fulldex_cfg(), &lines)
+}
 /// Each engine's own settings file. Gen1Recomp's come in with NATIVEMONS_OPTIONS.
 pub fn apply_engine_options(g: &GameEntry, w: &HashMap<String, String>) -> std::io::Result<()> {
     let engine = g.engine();

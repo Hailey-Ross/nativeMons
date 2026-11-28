@@ -368,6 +368,7 @@ impl Launcher {
         let dir = config::fulldex_dir();
         let saves_dir = dir.join("saves");
         let _ = std::fs::create_dir_all(&saves_dir);
+        let _ = pp::answer_fulldex_setup();
         let mut psi;
         if g.is_ds() {
             let (p, note) = pp::fulldex_ds_start(&g, self.quick_start());

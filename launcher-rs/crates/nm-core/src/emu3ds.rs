@@ -22,7 +22,7 @@ pub struct Emu3ds {
 pub const ZAKURO: Emu3ds = Emu3ds { id: "zakuro", name: "3DSrecomp+Zakuro (native, recommended)", short: "3DSrecomp+Zakuro", exe: "zakuro.exe", native: true, repo: None, asset: None, tag: None, sha256: None };
 pub const ALL: [Emu3ds; 2] = [
     Emu3ds { id: "azaharplus", name: "AzaharPlus-modified (nativeMons)", short: "AzaharPlus", exe: "azahar.exe", native: false, repo: Some("Hailey-Ross/AzaharPlus"), asset: Some("azaharplus-nativemons-windows-x64.zip"), tag: Some("windows-26d3e5994"), sha256: Some("3482a402a5847cedd70c053b3e0bfe7d4f3fff27cfaef8d46c51468df01c754e") },
-    Emu3ds { id: "azahar", name: "Azahar-modified (nativeMons)", short: "Azahar", exe: "azahar.exe", native: false, repo: Some("Hailey-Ross/azahar"), asset: Some("azahar-nativemons-windows-x64.zip"), tag: Some("windows-e4420feea"), sha256: Some("bfdbe9df25b9d7b76c5002007619a2ff37533647544d4b5e5347f30c15a16d10") },
+    Emu3ds { id: "azahar", name: "Azahar-modified (nativeMons)", short: "Azahar", exe: "azahar.exe", native: false, repo: Some("Hailey-Ross/azahar"), asset: Some("azahar-nativemons-windows-x64.zip"), tag: Some("windows-15891deba"), sha256: Some("1ad8a4efa932e51692a734f456450f3f2c11a342580bf963a12e5914671326b4") },
 ];
 
 impl Emu3ds {
@@ -108,5 +108,20 @@ pub fn for_game(g: Option<&GameEntry>) -> Option<Emu3ds> {
     match g {
         Some(g) if g.ctr_encrypted && d != Some(plus()) => if plus().installed() { Some(plus()) } else { None },
         _ => d,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The engine sync bot moves the C#'s pins: the Rust launcher must offer the same builds.
+    #[test]
+    fn pins_match_the_csharp_launcher() {
+        let cs = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../launcher/NativeMonsLauncher.cs")).unwrap();
+        for e in super::ALL.iter() {
+            let at = cs.find(&format!("Id = \"{}\"", e.id)).unwrap();
+            let line = &cs[at..at + cs[at..].find("Notes =").unwrap()];
+            assert!(line.contains(&format!("Tag = \"{}\"", e.tag.unwrap())), "{}: tag differs from the C#", e.id);
+            assert!(line.contains(&format!("Sha256 = \"{}\"", e.sha256.unwrap())), "{}: sha256 differs from the C#", e.id);
+        }
     }
 }

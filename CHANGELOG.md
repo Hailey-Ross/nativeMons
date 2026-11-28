@@ -2,6 +2,10 @@
 
 Each notable stable release raises the version, and its section here becomes its release notes. Minor updates, such as engine updates, keep the number. Dev builds never change it.
 
+## Next
+
+- Fulldex 1.8.0 for the DS games: Free Flight in every DS game, DexNav and level caps in the Companion, a Repel prompt, damage ranges in Battle Info, Memory Link for Black 2 and White 2 without a second DS, HG-Engine hacks such as Heartfelt Gold fully read by the Companion, and smoother fast forward with music at its normal speed.
+
 ## 0.0.8d
 
 - Importing a Red, Blue or Yellow save from an emulator that added extra bytes after the game's 32 KB: the launcher now asks, then imports it without them. Until now the import failed. Your file isn't changed.

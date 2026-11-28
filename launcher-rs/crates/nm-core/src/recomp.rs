@@ -195,7 +195,11 @@ fn build_into(g: &GameEntry, library: &Path, work: &Path) -> std::io::Result<Sta
     std::fs::create_dir_all(dir())?;
     if work.is_dir() { std::fs::remove_dir_all(work)?; }
     let shared = hints_dir();
-    let _ = std::fs::write(plus(library, ".shared"), shared_key(g));
+    // A first build doesn't know the dump's code id yet, but the tool still takes in its shared list: "?" has the
+    // key worked out once the build is done, or the next play would rebuild for a list it already covers.
+    let key = shared_key(g);
+    let key = if key.is_empty() && has_list_for(g, &shared) { "?".to_string() } else { key };
+    let _ = std::fs::write(plus(library, ".shared"), key);
     let mut args = format!("build \"{}\" \"{}\" \"{}\" --cache \"{}\"", plain(g), s(work), s(library), s(&cache()));
     if shared.is_dir() { args += &format!(" --shared-hints \"{}\"", s(&shared)); }
     let mut psi = StartInfo::new(tool(), &args);
@@ -230,6 +234,7 @@ pub fn finish(g: &GameEntry, code: i32) -> bool {
     // The linker's debug file (about 750 MB) and import library aren't needed to play.
     delete_leftovers();
     let used = used_shared(&library_of(g));
+    let used = if ok { settle_key(g, used) } else { used };
     if ok { let _ = config::write_all_lines(&stamp_of(g), &[rom_key(g), hint_count(g).to_string(), used]); }
     else if library_of(g).is_file() && code != 0 { let _ = std::fs::remove_file(library_of(g)); }
     prune_cache(3 << 30);
@@ -240,6 +245,16 @@ fn used_shared(library: &Path) -> String {
     let k = if f.is_file() { match std::fs::read_to_string(&f) { Ok(t) => t.trim().to_string(), Err(_) => return String::new() } } else { String::new() };
     if std::fs::remove_file(&f).is_err() && f.exists() { return String::new(); }
     k
+}
+fn has_list_for(g: &GameEntry, dir: &Path) -> bool {
+    let pre = format!("{}-", ctr(g));
+    hints_files(dir).iter().any(|p| p.file_name().map_or(false, |n| n.to_string_lossy().to_uppercase().starts_with(&pre)))
+}
+/// A "?" left by a first build becomes the key of the list it took in (the code id is read now, once).
+fn settle_key(g: &GameEntry, used: String) -> String {
+    if used != "?" { return used; }
+    learn_code_id(g);
+    shared_key(g)
 }
 
 // ---------- quiet builds in the background ----------
@@ -385,6 +400,7 @@ pub fn swap_in(g: &GameEntry) {
         std::fs::create_dir_all(dir())?;
         std::fs::copy(&n, library_of(g))?;
         std::fs::remove_file(&n)?;
+        let used = settle_key(g, used);
         if covers_f.exists() { std::fs::remove_file(&covers_f)?; }
         config::write_all_lines(&stamp_of(g), &[rom_key(g), covers, used])
     })();
@@ -434,6 +450,33 @@ mod tests {
         let mut psi = StartInfo::new("tool.exe", "build \"a\"");
         psi.idle = Some(mask_of(14));
         assert_eq!(proc::dry_line("Building Pokemon X", &psi, false), "Building Pokemon X | tool.exe | build \"a\" |  |  | idle 3FFF");
+    }
+    /// A first build (code id not known yet) that took in a shared list stamps that list's key, so it isn't "old".
+    #[test]
+    fn a_first_build_keeps_the_key_of_the_list_it_took_in() {
+        // The same state folder as submit's test: both set it, so it must be the same value.
+        std::env::set_var("NATIVEMONS_STATE", std::env::temp_dir().join(format!("nm-submit-{}", std::process::id())));
+        let _ = std::fs::remove_dir_all(crate::ctr3ds_saves::root());
+        let mut g = GameEntry::default();
+        g.id = "y".into();
+        g.ctr = Some("0004000000055E00".into());
+        let list = shared_dir().join("0004000000055E00-44AAED65F8BC70C9.hints");
+        std::fs::create_dir_all(shared_dir()).unwrap();
+        std::fs::write(&list, "00100000\n").unwrap();
+        let lib = dir().join("0004000000055E00.dll");
+        build_into(&g, &lib, &dir().join("work-test")).unwrap();
+        assert_eq!(std::fs::read_to_string(plus(&lib, ".shared")).unwrap(), "?");
+        // Once built, the code id is read (here as learn_code_id writes it) and the key is the list's.
+        std::fs::write(code_id_file(&g), "0004000000055E00-44AAED65F8BC70C9").unwrap();
+        let key = settle_key(&g, used_shared(&lib));
+        assert!(!key.is_empty());
+        assert_eq!(key, crate::save_guard::hash_of(&list));
+        // A game with no shared list keeps an empty key, as before.
+        g.id = "x".into();
+        g.ctr = Some("0004000000055D00".into());
+        build_into(&g, &dir().join("0004000000055D00.dll"), &dir().join("work-test")).unwrap();
+        assert_eq!(settle_key(&g, used_shared(&dir().join("0004000000055D00.dll"))), "");
+        let _ = std::fs::remove_dir_all(crate::ctr3ds_saves::root());
     }
 }
 

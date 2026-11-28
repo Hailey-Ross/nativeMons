@@ -14,7 +14,11 @@ param(
   [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full, [int]$Jobs = 2,
   [ValidateSet('Idle','BelowNormal','Normal')][string]$Priority = 'Idle',   # what the launchers and games it starts run at
   [string[]]$Only = @(),   # play only these games (ids), on every engine they have
-  [string[]]$Engines = @()   # play only on these engines (gen1, fulldex, nativeplat, port)
+  [string[]]$Engines = @(),   # play only on these engines (gen1, fulldex, nativeplat, port, recomp, azahar, azaharplus, pc)
+  # Optional extras the package doesn't carry, copied in (originals only read): an emulators folder (azahar, azaharplus),
+  # a games folder (infinitefusion...), built 3DS libraries (a state\3ds\recomp folder), 3DS saves (<game>.main) and
+  # PC game saves (<game>\*.rxdata).
+  [string]$EmulatorFolder, [string]$PcGameFolder, [string]$RecompFolder, [string]$CtrSaveFolder, [string]$PcSaveFolder
 )
 $ErrorActionPreference = 'Continue'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -47,11 +51,11 @@ $Stages = @($Groups)
 # Settings from the last run, unless given again.
 $remember = Join-Path $Report 'last-run.json'
 $was = if (Test-Path $remember) { Get-Content $remember -Raw | ConvertFrom-Json } else { $null }
-foreach ($k in 'Package','Work','RomFolder','SaveFolder','ArtFolder','LauncherOverride') {
+foreach ($k in 'Package','Work','RomFolder','SaveFolder','ArtFolder','LauncherOverride','EmulatorFolder','PcGameFolder','RecompFolder','CtrSaveFolder','PcSaveFolder') {
   if (-not $PSBoundParameters.ContainsKey($k) -and -not (Get-Variable $k -ValueOnly) -and $was -and $was.$k) { Set-Variable $k $was.$k }
 }
 foreach ($k in 'Package','Work','RomFolder') { if (-not (Get-Variable $k -ValueOnly)) { throw "-$k is needed the first time." } }
-@{ Package = $Package; Work = $Work; RomFolder = $RomFolder; SaveFolder = $SaveFolder; ArtFolder = $ArtFolder; LauncherOverride = $LauncherOverride } | ConvertTo-Json | Set-Content $remember
+@{ Package = $Package; Work = $Work; RomFolder = $RomFolder; SaveFolder = $SaveFolder; ArtFolder = $ArtFolder; LauncherOverride = $LauncherOverride; EmulatorFolder = $EmulatorFolder; PcGameFolder = $PcGameFolder; RecompFolder = $RecompFolder; CtrSaveFolder = $CtrSaveFolder; PcSaveFolder = $PcSaveFolder } | ConvertTo-Json | Set-Content $remember
 if (Test-Path $Work) { if (Get-ChildItem $Work -Force | Select-Object -First 1) { throw "Work folder isn't empty: $Work" } }
 New-Item -ItemType Directory -Force $Work | Out-Null
 $Work = (Resolve-Path $Work).Path
@@ -123,6 +127,9 @@ function ToTestScreen([int[]]$ids, [int]$half) {
     $key = [string]$w.MainWindowHandle
     if ($script:movedWins.ContainsKey($key)) { continue }
     $script:movedWins[$key] = 1
+    # One already there stays where it opened (Zakuro opens on the launcher's screen; moved, a wide one hangs off it).
+    $r = New-Object StableWin+RECT; [void][StableWin]::GetWindowRect($w.MainWindowHandle, [ref]$r)
+    if ($r.L -ge $script:testArea.X -and $r.L -lt $script:testArea.X + $script:testArea.Width) { continue }
     [StableWin]::MoveTo($w.MainWindowHandle, $script:testArea.X + 40 + ($half % 2) * [int]($script:testArea.Width / 2), $script:testArea.Y + 40)
   }
 }
@@ -149,7 +156,9 @@ public static class StableWin {
   public static void MoveTo(IntPtr h, int x, int y) { SetWindowPos(h, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010); }
   public static void Key(IntPtr h, int k) { PostMessage(h, 0x100, (IntPtr)k, IntPtr.Zero); PostMessage(h, 0x101, (IntPtr)k, IntPtr.Zero); System.Threading.Thread.Sleep(350); }
   // How many colours in a sample of the picture: a blank or failed drawing has one.
-  public static int Colours(string f) { using (var b = new Bitmap(f)) { var seen = new System.Collections.Generic.HashSet<int>(); for (int y = 0; y < b.Height; y += Math.Max(1, b.Height / 40)) for (int x = 0; x < b.Width; x += Math.Max(1, b.Width / 40)) seen.Add(b.GetPixel(x, y).ToArgb()); return seen.Count; } }
+  public static int Colours(string f) { return Colours(f, 0); }
+  // The same, leaving out a margin of the picture (an emulator's menu and status bars).
+  public static int Colours(string f, int marginPercent) { using (var b = new Bitmap(f)) { var seen = new System.Collections.Generic.HashSet<int>(); int my = b.Height * marginPercent / 100, mx = b.Width * marginPercent / 100; for (int y = my; y < b.Height - my; y += Math.Max(1, b.Height / 40)) for (int x = mx; x < b.Width - mx; x += Math.Max(1, b.Width / 40)) seen.Add(b.GetPixel(x, y).ToArgb()); return seen.Count; } }
   // A process's visible, titled windows: .NET's MainWindowHandle can pick an untitled helper window instead.
   public delegate bool EnumCb(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumCb cb, IntPtr l);
@@ -157,6 +166,14 @@ public static class StableWin {
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint c);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+  [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumCb cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  // A window's size and the text of its controls (what a message box says).
+  public static string Describe(IntPtr h) {
+    RECT r; GetWindowRect(h, out r); var t = new System.Collections.Generic.List<string>();
+    EnumChildWindows(h, (c, l) => { var s = new System.Text.StringBuilder(512); GetWindowText(c, s, 512); if (s.Length > 0) t.Add(s.ToString().Replace("\r", " ").Replace("\n", " ")); return true; }, IntPtr.Zero);
+    return (r.R - r.L) + "x" + (r.B - r.T) + (t.Count > 0 ? ": " + string.Join(" / ", t.ToArray()) : "");
+  }
   public class Win { public int Id; public IntPtr MainWindowHandle; public string MainWindowTitle; public bool CloseMainWindow() { return PostMessage(MainWindowHandle, 0x10, IntPtr.Zero, IntPtr.Zero); } }
   public static Win[] Windows(int[] ids) {
     var r = new System.Collections.Generic.List<Win>();
@@ -166,10 +183,12 @@ public static class StableWin {
   }
 }
 '@
-function RomList { Get-ChildItem -LiteralPath $RomFolder -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(gb|gbc|gba|nds)$' } | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object }
+function RomList { Get-ChildItem -LiteralPath $RomFolder -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(gb|gbc|gba|nds|3ds|cci)$' } | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object }
 
 $script:played = @(); $oldAppData = $env:APPDATA; $romsBefore = RomList; $saveHashes = @{}
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | ForEach-Object { $saveHashes[$_.FullName] = Sha $_.FullName } }
+if ($CtrSaveFolder) { Get-ChildItem -LiteralPath $CtrSaveFolder -Filter *.main -File | ForEach-Object { $saveHashes[$_.FullName] = Sha $_.FullName } }
+if ($PcSaveFolder) { Get-ChildItem -LiteralPath $PcSaveFolder -Filter *.rxdata -File -Recurse | ForEach-Object { $saveHashes[$_.FullName] = Sha $_.FullName } }
 # The keeper, for the whole run and every group: whatever runs from the test folder is held at -Priority (Idle by default; the launcher raises
 # its games), and its windows go to the test monitor, so the PC stays usable.
 $area = $script:testArea
@@ -292,6 +311,44 @@ Set-Content "$st\wallpaper.txt" 'play'
 Set-Content "$st\recomp-asked.txt" @('0004000000055D00','0004000000055E00','000400000011C400','000400000011C500','0004000000164800','0004000000175E00','00040000001B5000','00040000001B5100')
 $saves = Join-Path $app 'engines\fulldex\saves'; New-Item -ItemType Directory -Force $saves | Out-Null
 if ($SaveFolder) { Get-ChildItem -LiteralPath $SaveFolder -Filter *.sav -File | Copy-Item -Destination $saves }
+# What a player adds after installing (3DS emulators, PC games, 3DS builds) and their saves, all as copies.
+function CopyIn([string]$from, [string]$to, [string[]]$skip) { $a = @($from, $to, '/E', '/XJ', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'); if ($skip) { $a += '/XD'; $a += $skip }; robocopy @a | Out-Null }
+# Qt's saved window place (QWidget::saveGeometry, version 3), so an emulator opens on the test monitor.
+function QtGeometry([Drawing.Rectangle]$r, [int]$screen, [int]$screenWidth) {
+  $b = New-Object Collections.Generic.List[byte]
+  function Be([long]$v, [int]$n) { for ($i = $n - 1; $i -ge 0; $i--) { $b.Add([byte](($v -shr (8 * $i)) -band 0xFF)) } }
+  Be 0x01D9D0CB 4; Be 3 2; Be 0 2
+  foreach ($k in 1..2) { Be $r.Left 4; Be $r.Top 4; Be ($r.Right - 1) 4; Be ($r.Bottom - 1) 4 }
+  Be $screen 4; Be 0 1; Be 0 1; Be $screenWidth 4
+  Be $r.Left 4; Be $r.Top 4; Be ($r.Right - 1) 4; Be ($r.Bottom - 1) 4
+  '@ByteArray(' + (($b | ForEach-Object { '\x{0:x2}' -f $_ }) -join '') + ')'
+}
+$OnlyIds = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($EmulatorFolder) {
+  foreach ($d in @(Get-ChildItem -LiteralPath $EmulatorFolder -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'azahar.exe') })) {
+    CopyIn $d.FullName (Join-Path $app "emulators\$($d.Name)") @('user')
+    $ini = "$st\3ds\emu\$($d.Name)\config\qt-config.ini"; New-Item -ItemType Directory -Force (Split-Path $ini) | Out-Null
+    $qt = @('[UI]', 'firstStart\default=false', 'firstStart=false')
+    if ($script:testArea) {
+      $all = [Windows.Forms.Screen]::AllScreens; $at = [array]::IndexOf(@($all | ForEach-Object { $_.DeviceName -like "*$script:testScreen" }), $true)
+      $qt += 'UILayout\geometry=' + (QtGeometry (New-Object Drawing.Rectangle ($script:testArea.X + 60), ($script:testArea.Y + 60), 800, 700) $at $all[$at].Bounds.Width)
+    }
+    Set-Content $ini $qt
+  }
+  Set-Content "$st\3ds-games.txt" 'on'
+  # "Update <emulator>?" never shows: the pinned update is marked "Do not remind me", as the launcher stores it.
+  $src = [IO.File]::ReadAllText((Join-Path $repo 'launcher\NativeMonsLauncher.cs'))
+  foreach ($m in [regex]::Matches($src, 'Id = "(azahar\w*)"[^}]*?Tag = "([^"]+)"')) { Set-Content "$st\emu-update-skipped-$($m.Groups[1].Value).txt" $m.Groups[2].Value }
+}
+if ($PcGameFolder) { foreach ($d in Get-ChildItem -LiteralPath $PcGameFolder -Directory) { if (-not $OnlyIds.Count -or $OnlyIds -contains $d.Name) { CopyIn $d.FullName (Join-Path $app "games\$($d.Name)") @('.git') } } }
+if ($RecompFolder) { CopyIn $RecompFolder "$st\3ds\recomp" @('cache', 'work', 'work-quiet', 'zig-cache') }
+if ($CtrSaveFolder) {
+  foreach ($f in Get-ChildItem -LiteralPath $CtrSaveFolder -Filter *.main -File) {
+    $m = "$st\3ds\saves\$($f.BaseName)"; New-Item -ItemType Directory -Force "$m\data" | Out-Null
+    Copy-Item -LiteralPath $f.FullName "$m\data\main"; [IO.File]::WriteAllBytes("$m\metadata", [byte[]](0, 0, 4, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0))
+  }
+}
+if ($PcSaveFolder) { foreach ($d in Get-ChildItem -LiteralPath $PcSaveFolder -Directory) { CopyIn $d.FullName "$st\saves\$($d.Name)" @() } }
 # ---------- scan ----------
 $found = @(); $romLines = @()
 if ((On 'scan') -or (On 'play') -or (On 'window') -or (On 'snapshots') -or (On 'saves') -or (On 'sync')) {
@@ -434,7 +491,16 @@ if (On 'saves') {
 # ---------- play: every game, on every engine it has ----------
 if (On 'play') {
   $matrix = @()
+  $gameInfo = [ordered]@{}; foreach ($gm in (Get-Content (Join-Path $app 'games.json') -Raw -Encoding UTF8 | ConvertFrom-Json)) { $gameInfo[$gm.id] = $gm }
   foreach ($l in $romLines) {
+    # A 3DS game: on 3DSrecomp+Zakuro once built, and on each 3DS emulator there (Azahar opens decrypted dumps only).
+    $c = [regex]::Match($l, '^(\S+) .* \| 3ds=(.+?) enc=(\w+) emu=')
+    if ($c.Success) {
+      $id = $c.Groups[1].Value; $ctr = "$($gameInfo[$id].ctr)".ToUpper()
+      if ($ctr -and (Test-Path "$st\3ds\recomp\$ctr.dll")) { $matrix += ,@($id, 'recomp', $false) }
+      foreach ($e in 'azaharplus', 'azahar') { if ((Test-Path (Join-Path $app "emulators\$e\azahar.exe")) -and -not ($e -eq 'azahar' -and $c.Groups[3].Value -eq 'True')) { $matrix += ,@($id, $e, $false) } }
+      continue
+    }
     if ($l -notmatch '^(\S+) found=[1-9]') { continue }
     $id = $Matches[1]
     $m = [regex]::Match($l, 'fulldex=(.*?) \| gen1=(.*?) \| nativeplat=(.*?) \|')
@@ -445,6 +511,8 @@ if (On 'play') {
     if ($m.Groups[3].Value) { $matrix += ,@($id, 'nativeplat', $false) }
     if ($id -eq 'platinum' -and $m.Groups[1].Value) { $matrix += ,@($id, 'port', $false) }
   }
+  # PC games the launcher keeps in its games folder.
+  foreach ($gm in $gameInfo.Values) { if ($gm.pc -and (Test-Path (Join-Path $app "games\$($gm.pc)"))) { $matrix += ,@($gm.id, 'pc', $false) } }
   # From the command line "-Only a,b" arrives as one string.
   $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   if ($Only.Count) {
@@ -459,10 +527,9 @@ if (On 'play') {
   }
   $Engines = @($Engines | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   if ($Engines.Count) { $matrix = @($matrix | Where-Object { $Engines -contains $_[1] }) }
-  # ONE launcher kept open for the whole list (user, 2026-11-15: not a launcher per game; a second lane only waited, as a
-  # launcher won't start a game while another of the same app folder runs). The check
-  # hands it each game the way a shortcut started while the launcher is open does: --play to a second start in the same
-  # state folder, which passes it on (request.txt and a message) and exits. Never one game twice at once: its engines
+  # One lane: a second only waited, as a launcher won't start a game while another of the same app folder runs. Each row
+  # gets a fresh launcher, closed after its check (user, 2026-11-27), and is handed its game the way a shortcut started
+  # while the launcher is open does: --play to a second start in the same state folder, which passes it on and exits. Never one game twice at once: its engines
   # share a save.
   ClearGames
   $todo = New-Object Collections.ArrayList; foreach ($row in $matrix) { [void]$todo.Add($row) }
@@ -475,13 +542,64 @@ if (On 'play') {
     # Quick start keeps the last game waiting in the background: in a launcher kept open, that window would pass for
     # the game asked for (SoulSilver for Platinum, 2026-11-15).
     Set-Content "$dir\state\quick-start.txt" 'off'
-    $l = [pscustomobject]@{ N = $n; Dir = $dir; P = $null; Born = @{}; Seen = $false; Busy = $false; Id = ''; En = ''; Name = ''; T = $null; Limit = 0; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null }
+    $l = [pscustomobject]@{ N = $n; Dir = $dir; P = $null; Born = @{}; Seen = $false; Busy = $false; Id = ''; En = ''; Name = ''; T = $null; Limit = 0; Steady = $null; Took = 0; Game = $null; Title = ''; Shot = $null; Picture = 0; Closing = $null; Before = $null; Asked = $false; Note = '' }
     $l.P = Spawn '' $dir
     $t0 = Get-Date; while (-not (LaneIdle $l) -and -not $l.P.HasExited -and ((Get-Date) - $t0).TotalSeconds -lt 600) { Start-Sleep 1 }
     $l
   }
   function KillGames([object]$l) { foreach ($i in @($l.Born.Keys)) { if ([int]$i -eq $l.P.Id) { continue }; try { $q = Get-Process -Id $i -ErrorAction Stop; if (-not $q.HasExited) { $q.Kill() } } catch { } } }
-  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillGames $l; $l.Busy = $false; $l.Shot = $null; $l.Closing = $null; $l.Game = $null }
+  # Each row's launcher closes with its check: nothing stays on screen between rows (user, 2026-11-27).
+  function CloseLane([object]$l) { try { if (-not $l.P.HasExited) { [void]$l.P.CloseMainWindow(); if (-not $l.P.WaitForExit(15000)) { $l.P.Kill() } } } catch { }; KillGames $l }
+  function Done([object]$l, $ok, [string]$detail) { T play $l.Name $ok $detail; KillGames $l; CloseLane $l; $l.Busy = $false; $l.Shot = $null; $l.Closing = $null; $l.Game = $null }
+  # The save hand-off of a 3DS game (copied into its emulator, collected after) and a PC game (backed up before).
+  function EmuId([string]$en) { if ($en -eq 'recomp') { 'zakuro' } else { $en } }
+  function EmuCopy([object]$l, [string]$id, [string]$en) {
+    $ctr = "$($gameInfo[$id].ctr)"; if (-not $ctr) { return $null }
+    if ($en -eq 'recomp') { return "$($l.Dir)\state\3ds\emu\zakuro\user\savedata\$($ctr.ToUpper())\main" }
+    $z = '0' * 32; "$($l.Dir)\state\3ds\emu\$en\sdmc\Nintendo 3DS\$z\$z\title\$($ctr.Substring(0, 8).ToLower())\$($ctr.Substring(8).ToLower())\data\00000001\main"
+  }
+  function Notices([object]$l) { @(Get-Content "$($l.Dir)\test.log" -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+\|About your save$' }).Count }
+  function SaveState([object]$l, [string]$id, [string]$en) {
+    $s = @{ Kind = ''; Hash = $null; Files = @{}; Notices = (Notices $l); Hurt = $false }
+    if ($en -in 'recomp','azahar','azaharplus') { $s.Kind = '3ds'; $f = "$($l.Dir)\state\3ds\saves\$id\data\main"; if (Test-Path -LiteralPath $f) { $s.Hash = Sha $f } }
+    elseif ($en -eq 'pc') { $s.Kind = 'pc'; Get-ChildItem "$($l.Dir)\state\saves\$id" -Filter *.rxdata -File -ErrorAction SilentlyContinue | ForEach-Object { $s.Files[$_.Name] = Sha $_.FullName } }
+    $s
+  }
+  # While the game runs, its emulator's copy of the save is damaged, as a bad write would: it must never come back into use.
+  function HurtCopy([object]$l) {
+    if ($l.Before.Kind -ne '3ds' -or -not $l.Before.Hash) { return }
+    $f = EmuCopy $l $l.Id $l.En; if (-not $f -or -not (Test-Path -LiteralPath $f)) { return }
+    $d = [IO.File]::ReadAllBytes($f); for ($i = 0x100; $i -lt 0x1100; $i++) { $d[$i] = $d[$i] -bxor 0x5A }; [IO.File]::WriteAllBytes($f, $d); $l.Before.Hurt = $true
+  }
+  # The update question is marked answered beforehand; if it still shows, the row ends at once with no key pressed:
+  # "Update, then play" would download and run a build.
+  function UpdateAsked([object]$l) {
+    $page = @(Get-Content "$($l.Dir)\test.log" -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(\d+\||job$)' }) | Select-Object -Last 1
+    if ("$page" -notmatch '^\d+\|Update (AzaharPlus|Azahar)\?$') { return $false }
+    Done $l $false "stopped on ""$($page -replace '^\d+\|')"": the do-not-remind state wasn't taken"; return $true
+  }
+  function AfterChecks([object]$l, [Collections.ArrayList]$out) {
+    $b = $l.Before; $name = $l.Name; $id = $l.Id; $bk = "$($l.Dir)\state\save-backups\$id"
+    if ($b.Kind -eq '3ds' -and $b.Hash) {
+      $main = "$($l.Dir)\state\3ds\saves\$id\data\main"; $now = if (Test-Path -LiteralPath $main) { Sha $main } else { 'gone' }
+      [void]$out.Add(@("${name}: the save in use is still the one from before", ($now -eq $b.Hash), $(if ($now -ne $b.Hash) { "changed: $now" })))
+      $e = EmuId $l.En; $files = @(Get-ChildItem $bk -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object Name)
+      if ($b.Hurt) {
+        $kept = @($files | Where-Object { $_ -like "*from-$e*damaged*" }); $copy = EmuCopy $l $id $l.En; $told = (Notices $l) -gt $b.Notices
+        [void]$out.Add(@("${name}: the damaged save it wrote went to the backups, not into use", ($kept.Count -gt 0 -and $now -eq $b.Hash -and -not (Test-Path -LiteralPath $copy)), "$($kept.Count) marked damaged, emulator copy $(if (Test-Path -LiteralPath $copy) { 'left' } else { 'removed' })"))
+        [void]$out.Add(@("${name}: the player is told about the refused save", $told, ''))
+      } else { [void]$out.Add(@("${name}: damaged save test", 'skip', 'the emulator had no copy of the save to damage')) }
+      $session = "$($l.Dir)\state\3ds\emu\$e\nativemons-session.txt"; $link = if ($l.En -eq 'recomp') { $null } else { Join-Path $app "emulators\$($l.En)\user" }
+      $linked = $link -and (Test-Path -LiteralPath $link)
+      [void]$out.Add(@("${name}: backed up before play, hand-off cleaned up", (@($files | Where-Object { $_ -like '*before-play*' }).Count -gt 0 -and -not (Test-Path -LiteralPath $session) -and -not $linked), "session marker $(if (Test-Path -LiteralPath $session) { 'left' } else { 'gone' }), link $(if ($linked) { 'left' } else { 'gone' })"))
+    } elseif ($b.Kind -eq 'pc' -and $b.Files.Count) {
+      $copied = @(Get-ChildItem $bk -Recurse -Filter *.rxdata -File -ErrorAction SilentlyContinue | ForEach-Object Name | Select-Object -Unique)
+      [void]$out.Add(@("${name}: its saves were backed up before the session", (@($b.Files.Keys | Where-Object { $copied -notcontains $_ }).Count -eq 0), "$($copied.Count) of $($b.Files.Count)"))
+      $changed = @($b.Files.Keys | Where-Object { $f = "$($l.Dir)\state\saves\$id\$_"; -not (Test-Path -LiteralPath $f) -or (Sha $f) -ne $b.Files[$_] })
+      $stray = @(Get-ChildItem "$($l.Dir)\appdata" -Recurse -Filter *.rxdata -File -ErrorAction SilentlyContinue)
+      [void]$out.Add(@("${name}: saves unchanged, and none outside the launcher's folder", ($changed.Count -eq 0 -and $stray.Count -eq 0), "$(if ($changed) { 'changed: ' + ($changed -join ', ') + '; ' })$($stray.Count) in APPDATA"))
+    }
+  }
   # A window titled with another game's name, and not this one's, is the wrong game.
   $names = @{}; foreach ($gm in (Get-Content (Join-Path $app 'games.json') -Raw -Encoding UTF8 | ConvertFrom-Json)) { $names[$gm.id] = ($gm.title -replace '^Pokemon ', '') }
   # Fulldex 1.7 titles a DS game's window "FullDex", like its game list: started with a .nds, it's the game.
@@ -494,16 +612,18 @@ if (On 'play') {
   [void]$lanes.Add((NewLane 1))
   while ($todo.Count -or @($lanes | Where-Object { $_.Busy }).Count) {
     foreach ($l in @($lanes | Where-Object { -not $_.Busy })) {
-      if ($l.P.HasExited) { $fresh = NewLane $l.N; $at = $lanes.IndexOf($l); $lanes[$at] = $fresh; $l = $fresh }
+      if ($l.P.HasExited) { $script:lanesGone++; Copy-Item -LiteralPath "$($l.Dir)\test.log" "$Report\play-lane$($l.N)-ended$($script:lanesGone).log" -ErrorAction SilentlyContinue; $fresh = NewLane $l.N; $at = $lanes.IndexOf($l); $lanes[$at] = $fresh; $l = $fresh }
       if (-not (LaneIdle $l)) { continue }
       $row = $todo | Where-Object { $r = $_; -not ($lanes | Where-Object { $_.Busy -and $_.Id -eq $r[0] }) } | Select-Object -First 1
       if (-not $row) { continue }
       $todo.Remove($row); $id = $row[0]; $en = $row[1]; $name = "$id on $en"; $script:played += @($name)
       if ($row[2]) { T play $name 'skip' 'ROM is encrypted: this needs the patch prompt'; continue }
-      Set-Content "$($l.Dir)\state\engine-$id.txt" $en
+      # 3DS emulators are one engine ("3ds"); the one used is the player's pick.
+      if ($en -in 'azahar','azaharplus') { Set-Content "$($l.Dir)\state\engine-$id.txt" '3ds'; Set-Content "$($l.Dir)\state\3ds-emulator.txt" $en } else { Set-Content "$($l.Dir)\state\engine-$id.txt" $en }
+      $l.Before = SaveState $l $id $en; $l.Note = ''
       $hand = Spawn "--play $id" $l.Dir; [void]$hand.WaitForExit(20000)
       $l.Busy = $true; $l.Id = $id; $l.En = $en; $l.Name = $name; $l.T = Get-Date; $l.Took = 0; $l.Title = ''; $l.Picture = 0; $l.Steady = $null; $l.Game = $null; $l.Shot = $null; $l.Closing = $null
-      $l.Limit = if ($en -eq 'gen1') { 420 } elseif ($en -eq 'port') { 240 } else { 120 }
+      $l.Limit = if ($en -eq 'gen1') { 420 } elseif ($en -in 'port','recomp','azahar','azaharplus','pc') { 240 } else { 120 }
     }
     Start-Sleep -Milliseconds 500
     # Each lane's own processes: everything started from its launcher, even after a parent has gone.
@@ -529,17 +649,28 @@ if (On 'play') {
         if ($clean -or ((Get-Date) - $l.Closing).TotalSeconds -gt 40) {
           $blind = $env:STABLE_HIDDEN -eq '1' -and $l.Picture -lt 8
           if ($blind) { $l.Title += ' (picture unreadable on the hidden desktop)' }
-          Done $l ($clean -and ($l.Picture -ge 8 -or $blind)) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { if ($l.P.HasExited) { '; the launcher ended' } else { '; the launcher did not come back to its menu after the game closed' } })"
+          $after = New-Object Collections.ArrayList; if ($clean) { AfterChecks $l $after }
+          $what = if (-not $clean -and $left.Count) { '; still open: ' + (@($left | ForEach-Object { "'$($_.MainWindowTitle)' " + [StableWin]::Describe($_.MainWindowHandle) }) -join ', ') } else { '' }
+          Done $l ($clean -and ($l.Picture -ge 8 -or $blind)) "started in $($l.Took)s, '$($l.Title)'$(if (-not $clean) { if ($l.P.HasExited) { '; the launcher ended' } else { '; the launcher did not come back to its menu after the game closed' } })$what"
+          foreach ($x in $after) { T play $x[0] $x[1] $x[2] }
         }
       } elseif ($l.Shot) {
-        try { [void][StableWin]::Shot($l.Game.MainWindowHandle, $png); $l.Picture = [StableWin]::Colours($png) } catch { $l.Picture = 0 }
+        # An emulator's own menu and status bars are no picture of the game.
+        $margin = if ($l.En -in 'azahar','azaharplus') { 15 } else { 0 }
+        try { [void][StableWin]::Shot($l.Game.MainWindowHandle, $png); $l.Picture = [StableWin]::Colours($png, $margin) } catch { $l.Picture = 0 }
+        # A Vulkan window (the 3DS emulators) can print black: then what the test monitor shows of it.
+        if ($l.Picture -lt 8 -and $l.En -in 'azahar','azaharplus','recomp') { try { [void][StableWin]::ScreenShot($l.Game.MainWindowHandle, $png); $l.Picture = [StableWin]::Colours($png, $margin) } catch { } }
         $secs = [int]((Get-Date) - $l.Shot).TotalSeconds
-        if ($l.Picture -ge 8 -or $secs -ge 45) { $l.Title += ", $($l.Picture) colours after ${secs}s"; [void]$l.Game.CloseMainWindow(); $l.Closing = Get-Date }
+        # Infinite Fusion swallows a close while it still loads (its loaders rescue every exception): a PC game gets 30 s first.
+        $settle = if ($l.En -eq 'pc') { 30 } else { 0 }
+        if (($l.Picture -ge 8 -and $secs -ge $settle) -or $secs -ge 45) { $l.Title += ", $($l.Picture) colours after ${secs}s"; HurtCopy $l; [void]$l.Game.CloseMainWindow(); $l.Closing = Get-Date }
       } elseif ($l.P.HasExited) {
         Done $l $false "the launcher exited $($l.P.ExitCode) before the game settled"
       } else {
         # (Fulldex's game list, and Gen1Recomp's window while it prepares a game, aren't the game.)
         $game = @([StableWin]::Windows([int[]]@($live | Where-Object { $_ -ne $l.P.Id })) | Where-Object { ($_.MainWindowTitle -notmatch 'Fulldex' -or (DsInFulldex $_.Id)) -and $_.MainWindowTitle -notmatch '^gen1recomp v' }) | Select-Object -First 1
+        # An emulator's window is the game once its title names it (before that it is still loading).
+        if ($game -and $l.En -in 'azahar','azaharplus' -and $game.MainWindowTitle -notmatch ('(?i)\b' + [regex]::Escape($names[$l.Id]) + '\b')) { $game = $null }
         if ($game) {
           if (-not $l.Steady -or $l.Game.Id -ne $game.Id) { $l.Steady = Get-Date; $l.Game = $game }
           elseif (((Get-Date) - $l.Steady).TotalSeconds -ge 4) {
@@ -556,13 +687,13 @@ if (On 'play') {
               $par = (Get-CimInstance Win32_Process -Filter "ProcessId=$((Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").ParentProcessId)").CommandLine -replace '"[^"]*\\([^\\"]+)"', '"$1"'
               Done $l $false "the window is another game: '$($game.MainWindowTitle)', started as: $cl; by: $par"; continue
             }
-            $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle; $l.Shot = Get-Date
+            $l.Took = [int]((Get-Date) - $l.T).TotalSeconds; $l.Title = $game.MainWindowTitle + $(if ($l.Note) { " ($($l.Note))" }); $l.Shot = Get-Date
           }
-        } else { $l.Steady = $null }
+        } else { $l.Steady = $null; if (UpdateAsked $l) { continue } }
         if (-not $l.Shot -and ((Get-Date) - $l.T).TotalSeconds -gt $l.Limit) {
           $l.P.Refresh(); [void][StableWin]::Shot($l.P.MainWindowHandle, "$Report\shots\failed-$($l.Id)-$($l.En).png")
           $seen = @($live | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | ForEach-Object { $t = @([StableWin]::Windows([int[]]@($_.Id)) | ForEach-Object { $_.MainWindowTitle }) -join ' / '; "$($_.ProcessName)='$t'" }) -join ', '
-          Done $l $false "no steady game window in $($l.Limit)s; running: $seen"
+          Done $l $false "no steady game window in $($l.Limit)s; running: $seen$(if ($l.Note) { '; ' + $l.Note })"
         }
       }
     }
