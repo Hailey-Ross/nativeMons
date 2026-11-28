@@ -64,3 +64,7 @@ Most of the launcher is ported: every screen, the page flow, the command-line mo
 ## How it will ship
 
 When it does everything the C# launcher does, it replaces it in place through the normal update: it takes the C# exe's name in the package, so the updater installs it like any other update, with the same folders, state, saves and settings. Players have nothing to download or set up.
+
+The switch is ready and off: `launcher\build-all.ps1 -RustLauncher`, or `rust-launcher: "true"` on `.github/actions/build-package`, builds `--features shipped` (the window, no console, the C# launcher's icon and manifest) with `launcher-rs\tools\package-rust.ps1`, which puts it in the package as `NativeMonsLauncher.exe`, adds Noto Sans Symbols 2 to `fonts` and writes `licenses\rust-crates.txt`. `launcher-rs\tools\switchover-test.ps1` checks the whole path without a window: a C# install updates itself to such a package with its own `--update`, then both launchers read the updated install and their results are compared byte for byte.
+
+The Rust launcher's Credits page names its own libraries and font as well, so that screen differs from the C# on purpose (`launcher-rs\tools\deliberate-screens.txt`, which `run-goldens.ps1` marks).

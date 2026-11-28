@@ -1,5 +1,7 @@
 # Builds all of nativeMons into one ready-to-run folder: the one named in build-output.txt, else build\nativeMons.
 # The versions below match .github\actions\build-package\action.yml: change them together.
+# -RustLauncher: the Rust launcher (launcher-rs) replaces the C# one as NativeMonsLauncher.exe. Off by default.
+param([switch]$RustLauncher)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -9,6 +11,7 @@ $fulldexRelease = 'v1.8.0'
 $platinumRelease = 'v0.2.3'
 $nativeplatRelease = 'windows-081055f41'
 $zakuroRelease = 'windows-048ec618b'
+$useRustLauncher = [bool]$RustLauncher
 
 $here = $PSScriptRoot
 $repo = Split-Path $here -Parent
@@ -44,6 +47,10 @@ Write-Host 'Present.'
 Step 'Launcher'
 & (Join-Path $here 'build.bat') $out
 if ($LASTEXITCODE -ne 0) { throw 'The launcher did not build.' }
+if ($useRustLauncher) {
+    Step 'Rust launcher, as NativeMonsLauncher.exe'
+    & (Join-Path $repo 'launcher-rs\tools\package-rust.ps1') -Out $out
+}
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE'), (Join-Path $repo 'README.md') -Destination $out
 New-Item -ItemType Directory -Force (Join-Path $out 'docs') | Out-Null
 Copy-Item -Path (Join-Path $repo 'docs\*') -Destination (Join-Path $out 'docs') -Recurse -Force
@@ -222,6 +229,11 @@ Step 'Checking the result\'
 if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
 foreach ($needed in 'NativeMonsLauncher.exe', 'games.json', 'love\lovec.exe', 'engines\gen1recomp\main.lua', 'engines\fulldex\Pokemon Fulldex.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'engines\zakuro\zakuro.exe', 'engines\zakuro\nativemons-recomp.exe', 'tools\nds-patcher\hails_patcher.py', 'tools\mon-bridge\mon-bridge.exe') {
     if (-not (Test-Path -LiteralPath (Join-Path $out $needed))) { throw "Missing from the build: $needed" }
+}
+if ($useRustLauncher) {
+    foreach ($needed in 'fonts\NotoSansSymbols2-Regular.ttf', 'fonts\NotoSansSymbols2-OFL.txt', 'licenses\rust-crates.txt') {
+        if (-not (Test-Path -LiteralPath (Join-Path $out $needed))) { throw "Missing from the build: $needed" }
+    }
 }
 foreach ($removed in 'assets\launcher', 'assets\labels', 'src\import\LauncherView.lua', 'src\import\RomImporter.lua', 'src\mods\LauncherMods.lua') {
     if (Test-Path -LiteralPath (Join-Path $gen1 $removed)) { throw "Removed launcher file came back: $removed" }

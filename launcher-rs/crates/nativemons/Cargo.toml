@@ -13,4 +13,6 @@ nm-platform = { path = "../nm-platform" }
 [features]
 # The windowed launcher on SDL3 (built from source: needs CMake and a C compiler).
 window = ["nm-platform/sdl"]
+# The exe packages ship as NativeMonsLauncher.exe: the window, and no console (Windows subsystem, as the C# winexe).
+shipped = ["window"]
 prof = ["nm-draw/prof"]

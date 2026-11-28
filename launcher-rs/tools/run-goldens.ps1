@@ -39,10 +39,15 @@ Copy-Item "$target\nativemons.exe", "$cs\games.json" $rs -Force
 # The Rust side's fonts: the bundled Noto set plus launcher-rs\fonts (the Noto Sans Symbols 2 fallback).
 Copy-Item "$cs\fonts\*", "$PSScriptRoot\..\fonts\*" "$rs\fonts" -Force
 $env:NATIVEMONS_STATE = "$rs\state"; $env:APPDATA = "$rs\appdata"; $env:NATIVEMONS_FONTS_DIR = "$rs\fonts"
+# Screens the user decided may differ (deliberate-screens.txt) are compared as usual, and their line says so.
+$deliberate = @{}
+foreach ($l in Get-Content "$PSScriptRoot\deliberate-screens.txt" -ErrorAction SilentlyContinue) { if ($l -and -not $l.StartsWith('#')) { $f = $l -split "`t", 2; $deliberate[$f[0]] = $f[1] } }
 foreach ($s in $screenList) {
     $n = Safe $s
     & "$rs\nativemons.exe" --snapshot "$rs\out\$n.png" $s $Size
-    & "$target\golden-diff.exe" "$cs\out\$n.png" "$rs\out\$n.png" $s "$rs\heat\$n.png"
+    $line = & "$target\golden-diff.exe" "$cs\out\$n.png" "$rs\out\$n.png" $s "$rs\heat\$n.png"
+    if ($deliberate.ContainsKey($s)) { $line = @($line | ForEach-Object { "$_ [deliberate difference, not a parity failure: $($deliberate[$s])]" }) }
+    $line
 }
 $span = $AnimSpan -split ' '
 foreach ($s in $animList) {

@@ -181,6 +181,9 @@ pub fn credits_page() -> Page {
         "\n\n3DSrecomp+Zakuro: Zakuro and 3dsrecomp by fearkov (github.com/fearkov/zakuro, github.com/fearkov/3dsrecomp, both MIT), built from our fork (github.com/Hailey-Ross/zakuro) with a small build tool of ours; Zig (ziglang.org, MIT) compiles each game on your PC. Not affiliated with nativeMons.",
         "\n\nOptional 3DS emulators, downloaded only when you choose one, each built from our fork with small changes for nativeMons: Azahar by the Azahar team, from Citra (github.com/azahar-emu/azahar, GPL-2.0-or-later; ours: github.com/Hailey-Ross/azahar); AzaharPlus by its contributors, from Azahar (github.com/AzaharPlus/AzaharPlus, GPL-3.0; ours, without its system-file downloader: github.com/Hailey-Ross/AzaharPlus). Not the official builds, and not affiliated with nativeMons.",
         "\n\nNoto Sans by Google (notofonts.github.io, SIL Open Font License 1.1), for where Windows' own fonts aren't installed.",
+        // Rust only (deliberately unlike the C#): the Rust launcher's own libraries and the Symbols 2 font.
+        "\n\nNoto Sans Symbols 2 by Google (notofonts.github.io, SIL Open Font License 1.1), for symbols such as ▶ ◀ ★.",
+        "\n\nDrawn with tiny-skia (BSD-3-Clause) and cosmic-text (MIT); window and input by SDL 3 (Zlib); JPEG by mozjpeg/libjpeg-turbo: this software is based in part on the work of the Independent JPEG Group; HTTPS by rustls with Mozilla's root certificates (webpki-roots, CDLA-Permissive-2.0); Unicode data (Unicode-3.0). The other Rust crates' licenses are in the licenses folder (rust-crates.txt).",
         "\n\nhails.nds-Patcher by Hails. Launcher design from the hails-additions branch of the Skate 3 Rust Engine (SK8-ENGINE), github.com/Hailey-Ross/rusty-trucks.",
         "\n\n",
         GEN1_CREDIT,

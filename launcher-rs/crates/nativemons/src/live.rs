@@ -41,6 +41,14 @@ pub fn single_instance(argv: &[String]) -> Result<instance::Instance, i32> {
     let test_state = std::env::var_os("NATIVEMONS_STATE").map(|_| state.clone());
     let name = instance::mutex_name(&nm_core::config::here(), test_state.as_deref());
     if let Some(i) = instance::acquire(&name, &state) { return Ok(i); }
+    // Right after an update (the old exe still beside us) the launcher that started us may still be closing: wait for it.
+    let old = std::env::current_exe().map(|e| std::path::PathBuf::from(format!("{}.old", e.display())));
+    if old.map_or(false, |o| o.is_file()) {
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if let Some(i) = instance::acquire(&name, &state) { return Ok(i); }
+        }
+    }
     let f = flags(argv);
     if let Some(g) = &f.game { let _ = instance::write_request(&state, f.menu, g, f.slot.as_deref()); }
     instance::ring_others(f.game.is_some(), test_state.is_none(), &state);

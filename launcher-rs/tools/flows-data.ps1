@@ -31,7 +31,9 @@ $png = [Drawing.Imaging.ImageFormat]::Png; $jpg = [Drawing.Imaging.ImageFormat]:
 $e = "$d\tmp\emu"; New-Item -ItemType Directory -Force "$e\azahar" | Out-Null
 Set-Content "$e\azahar\azahar.exe" "fake" -NoNewline; Set-Content "$e\azahar\readme.txt" "a fake emulator for the flows replays" -NoNewline
 Zip $e "$d\emu.zip"
-Copy-Item "$d\emu.zip" "$d\fetch\$(Name 'https://github.com/Hailey-Ross/AzaharPlus/releases/download/windows-26d3e5994/azaharplus-nativemons-windows-x64.zip')"
+# The pinned tag from nm-core (engine sync moves it).
+$plusTag = [regex]::Match((Get-Content -Raw "$PSScriptRoot\..\crates\nm-core\src\emu3ds.rs"), 'id: "azaharplus",[^\n]*?tag: Some\("([^"]+)"\)').Groups[1].Value
+Copy-Item "$d\emu.zip" "$d\fetch\$(Name "https://github.com/Hailey-Ross/AzaharPlus/releases/download/$plusTag/azaharplus-nativemons-windows-x64.zip")"
 # python.org's embeddable package, as far as the install reads it.
 $p = "$d\tmp\py"; New-Item -ItemType Directory -Force $p | Out-Null
 Set-Content "$p\python.exe" "fake" -NoNewline; Set-Content "$p\python314._pth" "python314.zip`r`n." -NoNewline

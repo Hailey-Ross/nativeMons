@@ -41,12 +41,19 @@ how it's checked against the C# launcher.
 - **Builds:**
   - `cargo build --release -p nativemons` builds it without a window: the command-line modes and `--snapshot`.
   - `cargo build --release -p nativemons --features window` builds the launcher with its window.
+  - `cargo build --release -p nativemons --features shipped` is the build a package would ship: the window, the C#
+    launcher's icon, and no console window (so its command-line modes print nothing, as the C# exe's don't).
   - `cargo build -p golden-diff` builds the picture comparer the parity scripts use.
+- **In a package (off for now):** `launcher\build-all.ps1 -RustLauncher` (or the build-package action's
+  `rust-launcher: "true"`) puts the Rust launcher in the C# one's place as `NativeMonsLauncher.exe`, with its fonts
+  and `licenses\rust-crates.txt` (the crates' licenses, from `launcher-rs\tools\crate-licenses.ps1`). Packages
+  still ship the C# launcher until the switchover.
 - **To run it,** put `nativemons.exe` in a folder with `launcher\games.json` beside it and a `fonts` folder holding
   `launcher\fonts` and `launcher-rs\fonts` (or point `NATIVEMONS_FONTS_DIR` at such a folder). Like the C# exe, it
   needs a built nativeMons folder's engines to run games. Don't use it on a folder with saves you care about yet.
-- **Tests:** `cargo test -p nm-core -p nm-ui -p nm-platform --lib`, with `NATIVEMONS_FONTS_DIR` set for the drawing
-  tests. The parity scripts are in `launcher-rs\tools` (see the notes).
+- **Tests:** `cargo test --workspace` (CI runs it on every push to `dev` that touches the launcher, with the window
+  build), with `NATIVEMONS_FONTS_DIR` set for the drawing tests. The parity scripts are in `launcher-rs\tools` (see
+  the notes).
 
 So far it has been built and tested on Windows only; its Linux side hasn't been built yet.
 

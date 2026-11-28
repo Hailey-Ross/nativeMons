@@ -1,0 +1,3 @@
+# Screens that differ from the C# on purpose (user decisions): <screen>	<why>. run-goldens.ps1 still compares them
+# and marks their line, so a FAIL there isn't a parity failure.
+credits	Rust only: Noto Sans Symbols 2 and the Rust launcher's libraries and crate licenses (user, 2026-11-27)

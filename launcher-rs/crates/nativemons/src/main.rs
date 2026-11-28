@@ -1,5 +1,6 @@
 //! nativeMons launcher (Rust). So far the windowless modes: `--snapshot` and the CLI modes Main checks first
 //! (same arguments, outputs and exit codes as the C# Main; see cli()).
+#![cfg_attr(all(windows, feature = "shipped"), windows_subsystem = "windows")]
 
 #[cfg(windows)]
 fn work_area() -> (i32, i32) {

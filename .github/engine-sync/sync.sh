@@ -177,8 +177,14 @@ pin_zakuro() {
 }
 
 # Azahar and AzaharPlus publish windows-<sha9> from each push to hails-additions. The launcher downloads it when a
-# player installs the emulator, checked against the sha256 pinned beside its tag in Emu3ds.All.
+# player installs the emulator, checked against the sha256 pinned beside its tag in Emu3ds.All. The Rust launcher's
+# copy of that pin (nm-core emu3ds.rs) then follows the C#'s.
 pin_emulator() {
+  pin_emulator_cs "$@"
+  rust_emulator_pin "$1" "$3"
+}
+
+pin_emulator_cs() {
   local name=$1 repo=$2 id=$3 asset=$4 head=$5 waited=0
   [ -z "$head" ] && return 0
   local cs=$REPO_DIR/launcher/NativeMonsLauncher.cs tag="windows-${head:0:9}" now old
@@ -198,6 +204,25 @@ pin_emulator() {
   if [ -z "$digest" ] || [ -z "$now" ] || [ -z "$old" ]; then say "$name: release $tag or its pin not found, pin stays $now"; return 0; fi
   sed -i "s/$now/$tag/; s/$old/$digest/" "$cs"
   CHANGES+=("$name pin: $now -> $tag")
+}
+
+# Sets the emulator's tag and sha256 in launcher-rs/crates/nm-core/src/emu3ds.rs to the C#'s, when they differ.
+rust_emulator_pin() {
+  local name=$1 id=$2 rs=$REPO_DIR/launcher-rs/crates/nm-core/src/emu3ds.rs cs=$REPO_DIR/launcher/NativeMonsLauncher.cs
+  [ -f "$rs" ] || return 0
+  local tag sha line rtag rsha
+  tag=$(grep -A1 "Id = \"$id\"," "$cs" | grep -oE 'windows-[0-9a-f]{9}' | head -1 || true)
+  sha=$(grep -A1 "Id = \"$id\"," "$cs" | grep -oP 'Sha256 = "\K[0-9a-f]{64}' | head -1 || true)
+  line=$(grep "id: \"$id\"," "$rs" || true)
+  rtag=$(echo "$line" | grep -oE 'windows-[0-9a-f]{9}' | head -1 || true)
+  rsha=$(echo "$line" | grep -oP 'sha256: Some\("\K[0-9a-f]{64}' | head -1 || true)
+  if [ -z "$tag" ] || [ -z "$sha" ] || [ -z "$rtag" ] || [ -z "$rsha" ]; then
+    problem "$name pin not found in the Rust launcher" "\`launcher-rs/crates/nm-core/src/emu3ds.rs\` or the C# launcher has no tag and sha256 for \`$id\`, so the Rust launcher's pin can't follow the C#'s. Move it by hand."
+    return 0
+  fi
+  [ "$rtag" = "$tag" ] && [ "$rsha" = "$sha" ] && return 0
+  sed -i "/id: \"$id\",/ { s/$rtag/$tag/; s/$rsha/$sha/ }" "$rs"
+  CHANGES+=("$name pin in the Rust launcher: $rtag -> $tag")
 }
 
 # Pinned releases: a re-upload under the same tag just needs a rebuild; a new tag needs testing by hand first.
@@ -261,7 +286,7 @@ else
   if [ "$DRY" = 1 ]; then
     git -C "$REPO_DIR" diff HEAD --stat
   else
-    git -C "$REPO_DIR" add launcher/build-all.ps1 .github/actions/build-package/action.yml .github/engine-sync/pins.txt launcher/NativeMonsLauncher.cs
+    git -C "$REPO_DIR" add launcher/build-all.ps1 .github/actions/build-package/action.yml .github/engine-sync/pins.txt launcher/NativeMonsLauncher.cs launcher-rs/crates/nm-core/src/emu3ds.rs
     # A fork's liaison branch can move with no pin change here: nothing to commit then.
     if ! git -C "$REPO_DIR" diff --cached --quiet; then
       msg="Engine auto-sync with upstream"$'\n\n'"$(printf -- '- %s\n' "${CHANGES[@]}")"

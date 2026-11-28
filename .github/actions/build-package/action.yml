@@ -5,6 +5,10 @@ inputs:
   github-token:
     description: Token for downloading Fulldex's release
     required: true
+  rust-launcher:
+    description: "true: the Rust launcher (launcher-rs) ships as NativeMonsLauncher.exe in the C# launcher's place"
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -16,6 +20,30 @@ runs:
     - name: Build the launcher
       shell: cmd
       run: launcher\build.bat "%GITHUB_WORKSPACE%\dist\nativeMons"
+
+    # Off by default: packages ship the C# launcher until the switchover (rust-launcher: "true").
+    - name: Rust toolchain
+      if: inputs.rust-launcher == 'true'
+      shell: pwsh
+      run: |
+        rustup toolchain install 1.98.1 --profile minimal --no-self-update
+        rustup default 1.98.1
+
+    - uses: actions/cache/restore@v6
+      if: inputs.rust-launcher == 'true'
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          launcher-rs/target
+        key: launcher-rs-${{ runner.os }}-1.98.1-${{ hashFiles('launcher-rs/Cargo.lock') }}
+        restore-keys: launcher-rs-${{ runner.os }}-1.98.1-
+
+    - name: Build the Rust launcher in the C# launcher's place
+      if: inputs.rust-launcher == 'true'
+      shell: pwsh
+      run: launcher-rs\tools\package-rust.ps1 -Out dist\nativeMons
 
     - name: Stage the engines
       shell: pwsh
@@ -113,6 +141,8 @@ runs:
 
     - name: Check the package
       shell: pwsh
+      env:
+        RUST_LAUNCHER: ${{ inputs.rust-launcher }}
       run: |
         $bad = Get-ChildItem dist -Recurse -File | Where-Object { $_.Extension -in '.gb', '.gbc', '.gba', '.nds', '.3ds', '.cci', '.cia', '.cxi', '.sav' -or $_.Name -eq 'key1.bin' }
         if ($bad) { $bad.FullName; throw "Game data in the package" }
@@ -124,4 +154,12 @@ runs:
         }
         foreach ($p in 'tools\mgba\mgba_libretro.dll', 'tools\mgba\LICENSE-mGBA.txt', 'tools\openhome\convert.cjs', 'tools\openhome\pkm_rs_bg.wasm', 'tools\openhome\node.exe', 'engines\pokeplatinum\main.exe', 'engines\nativeplat\nativeplat.exe', 'engines\gbawide\gbawide.exe', 'engines\zakuro\zakuro.exe', 'engines\zakuro\nativemons-recomp.exe') {
           if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
+        }
+        if ($env:RUST_LAUNCHER -eq 'true') {
+          foreach ($p in 'fonts\NotoSansSymbols2-Regular.ttf', 'fonts\NotoSansSymbols2-OFL.txt', 'licenses\rust-crates.txt') {
+            if (-not (Test-Path "dist\nativeMons\$p")) { throw "Missing from the package: $p" }
+          }
+          # A window program (PE subsystem 2), as the C# winexe: no console opens with it.
+          $pe = [IO.File]::ReadAllBytes("dist\nativeMons\NativeMonsLauncher.exe")
+          if ([BitConverter]::ToUInt16($pe, [BitConverter]::ToInt32($pe, 0x3C) + 0x5C) -ne 2) { throw "NativeMonsLauncher.exe is not a window program" }
         }

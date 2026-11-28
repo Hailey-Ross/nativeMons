@@ -1,0 +1,62 @@
+# Builds and tests the Rust launcher (launcher-rs) on pushes to dev. Packages still ship the C# launcher.
+name: Rust launcher
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "launcher-rs/**"
+      - "launcher/NativeMonsLauncher.cs"
+      - "launcher/games.json"
+      - "launcher/fonts/**"
+      - ".github/workflows/rust-launcher.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-launcher
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      RUST_VERSION: "1.98.1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: launcher-rs
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal --no-self-update
+          rustup default $env:RUST_VERSION
+          rustc --version
+
+      # Crates and build output, keyed by the lock file: only our own crates rebuild on a hit.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            launcher-rs/target
+          key: launcher-rs-${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('launcher-rs/Cargo.lock') }}
+          restore-keys: launcher-rs-${{ runner.os }}-${{ env.RUST_VERSION }}-
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      # The window build compiles SDL3 from source (CMake and MSVC come with the runner).
+      - name: Release build with the window
+        run: cargo build --release --locked -p nativemons --features window
+
+      - name: Crate licenses
+        run: ./tools/crate-licenses.ps1 -Out target/rust-crates.txt
