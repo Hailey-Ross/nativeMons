@@ -24,6 +24,8 @@ static OVERLAY_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicI
 
 fn err() -> String { unsafe { CStr::from_ptr(SDL_GetError()).to_string_lossy().into_owned() } }
 
+pub use crate::quiet;
+
 /// SDL_Init for video and gamepads, after the hints. Windows: DPI unaware, as the C# exe (Windows stretches it).
 pub fn init() -> Result<(), String> {
     #[cfg(windows)]
@@ -34,6 +36,7 @@ pub fn init() -> Result<(), String> {
         #[cfg(unix)]
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, c"x11,wayland".as_ptr());
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, c"0".as_ptr());
+        if quiet() { SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, c"0".as_ptr()); }
         if !SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD) { return Err(err()); }
         #[cfg(windows)]
         SDL_SetWindowsMessageHook(Some(hook), std::ptr::null_mut());
@@ -158,7 +161,7 @@ pub fn screen_of(_w: isize) -> Option<Rect> { None }
 #[cfg(windows)]
 pub fn close_window(w: isize) { unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(w, 0x10, 0, 0); } }
 #[cfg(windows)]
-pub fn front_window(w: isize) { unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(w); } }
+pub fn front_window(w: isize) { if quiet() { return; } unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(w); } }
 #[cfg(not(windows))]
 pub fn close_window(_w: isize) {}
 #[cfg(not(windows))]
@@ -286,7 +289,7 @@ impl Window {
         }
     }
 
-    pub fn show(&self) { unsafe { SDL_ShowWindow(self.win); SDL_RaiseWindow(self.win); } }
+    pub fn show(&self) { unsafe { SDL_ShowWindow(self.win); if !quiet() { SDL_RaiseWindow(self.win); } } }
     pub fn hide(&self) { unsafe { SDL_HideWindow(self.win); } }
     pub fn minimize(&self) { unsafe { SDL_MinimizeWindow(self.win); } }
     pub fn raise(&self) { unsafe { SDL_RaiseWindow(self.win); } }

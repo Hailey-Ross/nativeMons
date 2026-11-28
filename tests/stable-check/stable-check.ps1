@@ -13,7 +13,8 @@ param(
   [string[]]$Skip = @(),
   [switch]$Retest, [switch]$List, [switch]$Keep, [switch]$Full, [int]$Jobs = 2,
   [ValidateSet('Idle','BelowNormal','Normal')][string]$Priority = 'Idle',   # what the launchers and games it starts run at
-  [string[]]$Only = @()   # play only these games (ids), on every engine they have
+  [string[]]$Only = @(),   # play only these games (ids), on every engine they have
+  [string[]]$Engines = @()   # play only on these engines (gen1, fulldex, nativeplat, port)
 )
 $ErrorActionPreference = 'Continue'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -92,6 +93,8 @@ function Spawn([string]$argline, [string]$dir) {
   foreach ($k in 'SDL_AUDIODRIVER','SDL_AUDIO_DRIVER') { $psi.EnvironmentVariables[$k] = 'dummy' }; $psi.EnvironmentVariables['ALSOFT_DRIVERS'] = 'null'
   $psi.EnvironmentVariables['NATIVEMONS_TEST_PARALLEL'] = '1'
   $psi.EnvironmentVariables['NATIVEMONS_TEST_LOG'] = "$dir\test.log"
+  # A console launcher (the Rust one) must not open a console window over the user's screen.
+  $psi.CreateNoWindow = $true
   # Test windows on the test monitor (the user's monitor 3), not over what the user is doing.
   if ($script:testArea) { $psi.EnvironmentVariables['NATIVEMONS_TEST_SCREEN'] = $script:testScreen }
   $sp = [Diagnostics.Process]::Start($psi)
@@ -103,11 +106,15 @@ function Lower([int[]]$ids) { foreach ($i in $ids) { try { $q = Get-Process -Id 
 Add-Type -AssemblyName System.Windows.Forms
 $script:testScreen = 'DISPLAY3'
 $script:testArea = @([Windows.Forms.Screen]::AllScreens | Where-Object { $_.DeviceName -like "*$script:testScreen" }) | ForEach-Object { $_.WorkingArea } | Select-Object -First 1
+# A windowed launcher started with no console window (the Rust launcher is a console program).
+function NoConsole([string]$argline) { $psi = New-Object Diagnostics.ProcessStartInfo $exe, $argline; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true; [Diagnostics.Process]::Start($psi) }
 # Every launcher started from here, by any route, opens on the test monitor.
 if ($script:testArea) { $env:NATIVEMONS_TEST_SCREEN = $script:testScreen }
 # No launcher here captures title screens or towns in the background: no group tests that, and it plays games out of
 # sight (which "nothing was started by accident" can't tell from a stray start) and loads the PC.
 $env:NATIVEMONS_TEST_NO_CAPTURE = '1'
+# Discord presence goes to a file, never to the user's Discord.
+$env:NATIVEMONS_TEST_DISCORD = Join-Path $Report 'discord-frames.txt'
 # Any window of these processes still on another monitor goes to the test monitor's left or right half.
 $script:movedWins = @{}
 function ToTestScreen([int[]]$ids, [int]$half) {
@@ -450,6 +457,8 @@ if (On 'play') {
     foreach ($row in $matrix) { $k = $row[1] + $(if ($row[1] -eq 'fulldex') { if ($ds -contains $row[0]) { '-ds' } else { '-gba' } }); if (-not $kinds.ContainsKey($k) -and -not $row[2]) { $kinds[$k] = 1; $pickRows += ,$row } }
     $matrix = $pickRows
   }
+  $Engines = @($Engines | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+  if ($Engines.Count) { $matrix = @($matrix | Where-Object { $Engines -contains $_[1] }) }
   # ONE launcher kept open for the whole list (user, 2026-11-15: not a launcher per game; a second lane only waited, as a
   # launcher won't start a game while another of the same app folder runs). The check
   # hands it each game the way a shortcut started while the launcher is open does: --play to a second start in the same
@@ -559,8 +568,11 @@ if (On 'play') {
     }
   }
   foreach ($l in $lanes) { KillGames $l; try { if (-not $l.P.HasExited) { [void]$l.P.CloseMainWindow(); if (-not $l.P.WaitForExit(15000)) { $l.P.Kill() } } } catch { } }
+  # The lanes' page logs stay with the report, to read a failure from.
+  foreach ($l in $lanes) { Copy-Item -LiteralPath "$($l.Dir)\test.log" "$Report\play-lane$($l.N).log" -ErrorAction SilentlyContinue }
   ClearGames
-  if ($SaveFolder) {
+  # (Only once Fulldex itself ran: -Engines or -Only may leave it out.)
+  if ($SaveFolder -and @($script:played | Where-Object { $_ -match ' on fulldex$' }).Count) {
     $cfg = Join-Path $app 'engines\fulldex\settings.cfg'
     T play 'global options reach the engine: windowed' ((Test-Path $cfg) -and ((Get-Content $cfg) -contains 'fullscreen=0'))
     T play 'global options reach the engine: volume' ((Test-Path $cfg) -and ((Get-Content $cfg) -contains 'volume=0'))
@@ -576,7 +588,7 @@ if (On 'sync') {
     # Play runs each game in its own state, so only a sync record in the shared state shows the game is shared there.
     if (-not (Test-Path $record)) {
       Set-Content "$st\engine-$g.txt" 'gen1'
-      $q = Start-Process $exe -ArgumentList "--play $g" -PassThru; $w = Get-Date; $shown = $null
+      $q = NoConsole "--play $g"; $w = Get-Date; $shown = $null
       try { $q.PriorityClass = $Priority } catch { }
       while (((Get-Date) - $w).TotalSeconds -lt 420 -and -not $q.HasExited -and -not $shown) { Start-Sleep 1; $gp = @(GameProcs | ForEach-Object { $_.Id }); Lower $gp; ToTestScreen $gp 0; $shown = @([StableWin]::Windows([int[]]$gp)) | Select-Object -First 1 }
       T sync "${g}: prepared for Gen1Recomp" ([bool]$shown)
@@ -628,7 +640,7 @@ if (On 'window') {
   # The log also carries other lines (quick-start, morph): the page is the last "depth|title" line.
   # The launcher logs a page when it draws it: ask it to draw first. Before the first page there is no log yet.
   function Now { if ($h) { [void][StableWin]::RedrawWindow($h, [IntPtr]::Zero, [IntPtr]::Zero, 0x181) }; Get-Content -LiteralPath $pagesLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+\|' } | Select-Object -Last 1 }
-  $p = Start-Process $exe -PassThru
+  $p = NoConsole ''
   $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 120); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
   $w = Get-Date; do { Start-Sleep -Milliseconds 250 } while ("$(Now)" -notmatch '^1\|nativeMons' -and ((Get-Date) - $w).TotalSeconds -lt 300); Start-Sleep 2
   $U=0x26;$D=0x28;$L=0x25;$R=0x27;$E=0x0D;$B=0x1B
@@ -665,6 +677,8 @@ if (On 'window') {
     # Wide layout has a row only on a screen that fits it (the launcher's WideFits).
     $wa = [Windows.Forms.Screen]::FromHandle([IntPtr]$h).WorkingArea
     if ($wa.Width -ge 1000 -and $wa.Width -gt $wa.Height * 1.2) { $rows = $rows[0..11] + @($null) + $rows[12..($rows.Count - 1)] }
+    # The Rust launcher has a Light mode row after Quick start (it logs each page's rows; the C# doesn't).
+    if (Select-String -LiteralPath $pagesLog -SimpleMatch 'Light mode:' -Quiet) { $rows = $rows[0..11] + @($null) + $rows[12..($rows.Count - 1)] }
     # Once a step has gone wrong, no more keys: a press on the wrong screen could start a game.
     for ($i = 0; $i -lt $rows.Count -and -not $script:lost; $i++) { if ($rows[$i]) { Visit $rows[$i][0] $rows[$i][1] 3 }; if ($i -lt $rows.Count - 1 -and -not $script:lost) { [StableWin]::Key($h,$D) } }
     [StableWin]::Key($h,$B); T window 'back on the home screen' (WaitPage '^1\|nativeMons' 10) "$(Now)"
@@ -675,7 +689,7 @@ if (On 'window') {
   $pick = "$st\rom-platinum.txt"
   if ($two -and $idx -ge 0 -and (Alive)) {
     [void]$p.CloseMainWindow(); [void]$p.WaitForExit(8000)
-    $p = Start-Process $exe -ArgumentList '--game','platinum','--launcher' -PassThru
+    $p = NoConsole '--game platinum --launcher'
     Copy-Item -LiteralPath $pagesLog (Join-Path $Report 'window-pages.log') -ErrorAction SilentlyContinue; Remove-Item $pagesLog -ErrorAction SilentlyContinue
     $t = Get-Date; do { Start-Sleep -Milliseconds 400; $lw = @([StableWin]::Windows([int[]]@($p.Id))) | Select-Object -First 1 } while (-not $lw -and ((Get-Date) - $t).TotalSeconds -lt 120); $h = if ($lw) { $lw.MainWindowHandle } else { [IntPtr]::Zero }
     [void](WaitPage 'Platinum$' 300); Start-Sleep 1
@@ -700,6 +714,7 @@ if (On 'window') {
   T window 'nothing was started by accident' ($games.Count -eq 0) (($games | ForEach-Object ProcessName) -join ',')
   ClearGames
   if (-not $p.HasExited) { [void]$p.CloseMainWindow(); if (-not $p.WaitForExit(8000)) { T window 'closes cleanly' $false; $p.Kill() } else { T window 'closes cleanly' $true } }
+  if (Test-Path -LiteralPath $pagesLog) { Copy-Item -LiteralPath $pagesLog (Join-Path $Report 'window-pages.log') -Force }
 }
 # ---------- updater: a fake old install, updated from local releases on both channels ----------
 if (On 'updater') {

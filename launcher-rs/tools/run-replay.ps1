@@ -52,6 +52,7 @@ foreach ($s in @($Scripts -split ';' | Where-Object { $_ })) {
     $out = "$rs\replay\$s"
     $deliberate = @(Get-Content "$PSScriptRoot\replays\deliberate.txt" -ErrorAction SilentlyContinue | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $f = $_ -split "`t"; if ($f[0] -eq $s) { [pscustomobject]@{ Step = $f[1]; From = [int]$f[2]; To = [int]$f[3] } } })
     $inWindow = { param($n) if ($n -match '^f-(\d+)-') { $ms = [int]$Matches[1]; foreach ($d in $deliberate) { if ($ms -ge $d.From -and $ms -le $d.To) { return $true } } }; $false }
+    $left = @(foreach ($d in $deliberate) { $p = $d.Step -split '-'; [int]$p[0]..[int]$p[-1] })
     if (Test-Path $out) { Remove-Item -Recurse -Force $out }
     Reset-State $rs
     Write-Output "=== $s"
@@ -74,7 +75,9 @@ foreach ($s in @($Scripts -split ';' | Where-Object { $_ })) {
         Write-Output ("c#:   " + (Get-Content "$cout\replay.log" -Tail 1))
         $a = Log-Steps "$out\replay.log" $rs; $b = Log-Steps "$cout\replay.log" $cr
         # A deliberate difference's step (replays\deliberate.txt) is left out.
-        foreach ($d in $deliberate) { $a = @($a | Where-Object { -not $_.StartsWith("$($d.Step): ") }); $b = @($b | Where-Object { -not $_.StartsWith("$($d.Step): ") }) }
+        # A step is "6" or a range "6-27"; the indented effect lines under a left-out step go with it.
+        $drop = { param($lines) $skip = $false; @(foreach ($l in $lines) { if ($l -match '^(\d+): ') { $skip = $left -contains [int]$Matches[1] } elseif (-not $l.StartsWith('  ')) { $skip = $false }; if (-not $skip) { $l } }) }
+        $a = & $drop $a; $b = & $drop $b
         $steps = @(Compare-Object $a $b -SyncWindow 0)
         if ($steps.Count -eq 0) { Write-Output "log: every step's page, selection and effects match" }
         else { Write-Output "log: $($steps.Count) lines differ"; $steps | Select-Object -First 12 | ForEach-Object { Write-Output ("  " + $_.SideIndicator + " " + $_.InputObject) } }
@@ -95,6 +98,8 @@ foreach ($s in @($Scripts -split ';' | Where-Object { $_ })) {
         if (Test-Path $golden) { $r = Diff-Pair $golden $_.FullName "$s/$n vs golden"; $r; $summary += $r } else { Write-Output "$s/$n`: no C# golden" }
         if ($CSharp) {
             $c = "$cr\replay\$s\$n.png"
+            $snapStep = (Get-Content "$out\replay.log" | Select-String "^(\d+): snap $n( |$)" | Select-Object -First 1)
+            if ($snapStep -and $left -contains [int]$snapStep.Matches[0].Groups[1].Value) { Write-Output "$s/$n`: a deliberate difference (replays\deliberate.txt), not compared"; return }
             if (Test-Path $c) { $r = Diff-Pair $c $_.FullName "$s/$n vs C# replay"; $r; $summary += $r } else { Write-Output "$s/$n`: no C# replay snap" }
         }
     }

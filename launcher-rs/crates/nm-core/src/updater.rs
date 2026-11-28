@@ -31,7 +31,7 @@ pub fn upper(s: &str) -> String { let mut c = s.chars(); match c.next() { Some(f
 fn base() -> String { std::env::var("NATIVEMONS_UPDATE_URL").unwrap_or_else(|_| SITE.into()) }
 fn version() -> HashMap<String, String> {
     let mut d = HashMap::new();
-    if let Ok(t) = std::fs::read_to_string(config::here().join("version.txt")) {
+    if let Ok(t) = std::fs::read(config::here().join("version.txt")).map(|b| String::from_utf8_lossy(&b).into_owned()) {
         for l in config::lines(&t) { if let Some(e) = l.find('=') { if e > 0 { d.insert(l[..e].to_string(), l[e + 1..].trim().to_string()); } } }
     }
     d
@@ -161,5 +161,17 @@ pub fn apply(report: &mut dyn FnMut(&str, f32)) -> Option<String> {
     match r {
         Ok(x) => x,
         Err(x) => Some(format!("The update stopped partway: {} Your saves and settings weren't touched. Run it again to finish.", x)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn labels_as_the_csharp() {
+        // A bare dev exe (no version.txt): "nativeMons build 0", as Updater.InstalledLabel gives.
+        assert_eq!(super::label("", 0, None), "build 0");
+        assert_eq!(super::label("stable", 12, Some("0.0.8d")), "version 0.0.8d, build 12");
+        assert_eq!(super::label("stable", 12, Some("")), "build 12");
+        assert_eq!(super::label("bleeding-edge", 40, Some("0.0.8d")), "build 40, after version 0.0.8d");
     }
 }

@@ -718,6 +718,14 @@ impl Launcher {
     }
 
     fn render_screen(&mut self, g: &mut Graphics, w: i32, h: i32, th: &Theme, t: f32) {
+        /// The C#'s TestLog line: which screen is showing ("depth|title" or "job"), so a script knows where its keys landed.
+        fn test_log_screen(key: &str) {
+            static LOG: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+            if let Some(f) = LOG.get_or_init(|| std::env::var("NATIVEMONS_TEST_LOG").ok()) {
+                use std::io::Write;
+                if let Ok(mut o) = std::fs::OpenOptions::new().create(true).append(true).open(f) { let _ = write!(o, "{}\r\n", key); }
+            }
+        }
         let (wf, hf) = (w as f32, h as f32);
         let home = !self.job && self.pages.last().map_or(false, |p| p.main);
         let all = RectangleF::new(0.0, 0.0, wf, hf);
@@ -731,6 +739,7 @@ impl Launcher {
         }
         let key = if self.job { "job".to_string() } else { format!("{}|{}", self.pages.len(), self.pages.last().map_or(String::new(), |p| p.title.clone())) };
         if key != self.screen_key {
+            test_log_screen(&key);
             let depth = self.pages.len() as i32 + if self.job { 1 } else { 0 };
             self.screen_dir = if depth >= self.screen_depth { 1 } else { -1 };
             self.screen_key = key;

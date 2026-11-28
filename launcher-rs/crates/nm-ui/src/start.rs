@@ -181,10 +181,11 @@ impl Launcher {
         self.read_clashes();
         if let Some(id) = self.jobs.play_direct.clone() {
             match self.game(&id) {
-                Some(g) if g.playable() => { self.play(&id); return; }
+                Some(g) if g.playable() => { let slot = self.jobs.direct_slot.clone(); self.play_with_slot(&id, slot.as_deref(), Some(crate::model::Act::new(|l| l.request_close()))); return; }
                 _ => { self.show_text(&format!("Can't start {}", id), "That game is not in the list, or its ROM was not found."); if let Some(p) = self.pages.last_mut() { p.on_back = Some(crate::model::Act::new(|l| l.request_close())); } return; }
             }
         }
+        if let Some(id) = self.jobs.choose.take() { let slot = self.jobs.direct_slot.clone(); self.request("show", &id, slot.as_deref()); }
         // The Rust-only test pages open as on a set-up install: no guided setup or start questions over them.
         let test_open = std::env::var("NATIVEMONS_TEST_OPEN").map_or(false, |v| ["emu", "settings", "wallpapers"].contains(&v.as_str()) || v.starts_with("game:") || v.starts_with("boxes:"));
         match std::env::var("NATIVEMONS_TEST_OPEN").as_deref() {

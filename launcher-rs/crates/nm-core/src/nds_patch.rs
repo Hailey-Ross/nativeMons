@@ -26,10 +26,15 @@ pub struct Args {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line { pub err: bool, pub text: String }
 
+/// Gets a key table when none is found (get_key1.download_table), printing through the given sink.
+pub type Download<'a> = &'a mut dyn FnMut(&mut dyn FnMut(Line)) -> Result<Vec<u8>, String>;
+/// read_area's result: game code, game code as number, ARM9 offset, area.
+pub type Area = (String, u32, u64, Vec<u8>);
+
 /// Where the patcher keeps key1.bin and backups (the script's folder), plus how it gets a table it lacks.
 pub struct Patcher<'a> {
     pub here: PathBuf,
-    pub download: &'a mut dyn FnMut(&mut dyn FnMut(Line)) -> Result<Vec<u8>, String>,
+    pub download: Download<'a>,
 }
 
 fn sha1_hex(d: &[u8]) -> String { Sha1::digest(d).iter().map(|b| format!("{:02x}", b)).collect() }
@@ -46,7 +51,7 @@ pub fn find_in_bytes(data: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-fn words(table: &[u8]) -> Vec<u32> { table.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect() }
+fn words(table: &[u8]) -> Vec<u32> { (0..table.len() / 4).map(|i| u32::from_le_bytes([table[4 * i], table[4 * i + 1], table[4 * i + 2], table[4 * i + 3]])).collect() }
 
 fn round_f(kb: &[u32], z: u32) -> u32 {
     let mut x = kb[0x12 + ((z >> 24) & 0xFF) as usize];
@@ -110,7 +115,7 @@ pub fn decrypt_area(table: &[u32], area: &[u8], idcode: u32) -> Vec<u8> {
 }
 
 /// read_area: (game code, game code as number, ARM9 offset, area), or None if not a usable ROM.
-pub fn read_area(path: &Path) -> std::io::Result<Option<(String, u32, u64, Vec<u8>)>> {
+pub fn read_area(path: &Path) -> std::io::Result<Option<Area>> {
     let mut f = std::fs::File::open(path)?;
     let mut head = Vec::new();
     (&mut f).take(0x200).read_to_end(&mut head)?;

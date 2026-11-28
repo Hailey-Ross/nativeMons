@@ -14,29 +14,33 @@ impl Transport for Stubbed {
     fn post(&self, _: &str, _: &str, _: &[u8], _: Option<&str>) -> Result<String, String> { Err("a replay sends nothing".into()) }
 }
 
-/// The C#'s Post: HTTPS (rustls) to NATIVEMONS_SUBMIT_URL or submit.hails.app, 30 s, no redirects.
+/// The C#'s Post: HTTPS to NATIVEMONS_SUBMIT_URL or submit.hails.app, 30 s, no redirects, system proxy and store.
 pub struct Https { pub base: String }
 impl Https {
     pub fn from_env() -> Https { Https { base: std::env::var("NATIVEMONS_SUBMIT_URL").unwrap_or_else(|_| "https://submit.hails.app".into()).trim_end_matches('/').to_string() } }
 }
 impl Transport for Https {
-    fn post(&self, path: &str, content_type: &str, body: &[u8], signature: Option<&str>) -> Result<String, String> {
-        let agent = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(30)).build();
-        let mut req = agent.post(&format!("{}{}", self.base, path)).set("Content-Type", content_type).set("User-Agent", "nativeMons");
-        if let Some(s) = signature { req = req.set("X-NM-Signature", s); }
-        match req.send_bytes(body) {
-            Ok(r) => r.into_string().map_err(|e| e.to_string()),
-            Err(ureq::Error::Status(code, r)) => {
-                let text = r.status_text().to_string();
-                let why = r.into_string().ok().and_then(|b| regex::Regex::new("\"error\":\"([a-z ]{1,40})\"").unwrap().captures(&b).map(|m| m[1].to_string()));
-                Err(match why { Some(w) => format!("the server said: {}", w), None => format!("The remote server returned an error: ({}) {}.", code, text) })
-            }
-            Err(ureq::Error::Transport(t)) => Err(transport_message(&t)),
+    fn post(&self, path: &str, content_type: &str, body: &[u8], signature: Option<&str>) -> Result<String, String> { post_on(&self.base, path, content_type, body, signature, &crate::net::route) }
+}
+/// Post on the routes `routes` picks (the system's proxy and trust store in the launcher).
+pub fn post_on(base: &str, path: &str, content_type: &str, body: &[u8], signature: Option<&str>, routes: &dyn Fn(&url::Url) -> crate::net::Route) -> Result<String, String> {
+    let url = url::Url::parse(&format!("{}{}", base, path)).map_err(|e| e.to_string())?;
+    let agent = crate::net::agent(&url, &routes(&url), ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(30)));
+    let mut req = agent.request_url("POST", &url).set("Content-Type", content_type).set("User-Agent", "nativeMons");
+    if let Some(s) = signature { req = req.set("X-NM-Signature", s); }
+    match req.send_bytes(body) {
+        Ok(r) => r.into_string().map_err(|e| e.to_string()),
+        Err(ureq::Error::Status(code, r)) => {
+            let text = r.status_text().to_string();
+            let why = r.into_string().ok().and_then(|b| regex::Regex::new("\"error\":\"([a-z ]{1,40})\"").unwrap().captures(&b).map(|m| m[1].to_string()));
+            Err(match why { Some(w) => format!("the server said: {}", w), None => format!("The remote server returned an error: ({}) {}.", code, text) })
         }
+        Err(ureq::Error::Transport(t)) => Err(transport_message(&t)),
     }
 }
 /// WebException's wording for the common failures.
 fn transport_message(t: &ureq::Transport) -> String {
+    if let Some(r) = crate::net::proxy_refusal(t) { return r; }
     let io = std::error::Error::source(t).and_then(|e| e.downcast_ref::<std::io::Error>()).map(|e| e.kind());
     match (t.kind(), io) {
         (_, Some(std::io::ErrorKind::TimedOut)) | (_, Some(std::io::ErrorKind::WouldBlock)) => "The operation has timed out".into(),
@@ -118,7 +122,7 @@ pub fn clean(s: &str, max: usize) -> String {
 }
 fn zakuro_build() -> String {
     let f = crate::config::zakuro().parent().map(|d| d.join("NATIVEMONS-BUILD.txt")).unwrap_or_default();
-    std::fs::read_to_string(f).ok().and_then(|t| regex::Regex::new(r"/tree/([0-9a-f]{9})").unwrap().captures(&t).map(|m| m[1].to_string())).unwrap_or_else(|| "unknown".into())
+    std::fs::read(f).ok().map(|b| String::from_utf8_lossy(&b).into_owned()).and_then(|t| regex::Regex::new(r"/tree/([0-9a-f]{9})").unwrap().captures(&t).map(|m| m[1].to_string())).unwrap_or_else(|| "unknown".into())
 }
 
 /// The addresses a list holds (hex, 0x optional), in the range Zakuro's code covers, sorted, at most 65,536.

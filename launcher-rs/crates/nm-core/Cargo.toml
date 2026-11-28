@@ -12,9 +12,14 @@ regex = "1"
 sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 ureq = "2"
+url = "2"
+rustls-platform-verifier = "0.7"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.52.0", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows-sys = { version = "=0.52.0", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Networking_WinHttp"] }
+
+[dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring"] }

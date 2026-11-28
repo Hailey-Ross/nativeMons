@@ -1,0 +1,10 @@
+# Rust only, not a dry run: Patch it runs the built-in patcher on the fixture's Black copy (already decrypted, so it
+# reports OK and changes nothing), then the game's page comes back. Seed tools/nds-patcher/key1.bin, or it downloads one.
+screen main 3.0
+page PatchPage black
+wait 0.3
+key enter
+wait 1.0
+expect Pokemon Black
+snap patch-native-done
+until 4.5

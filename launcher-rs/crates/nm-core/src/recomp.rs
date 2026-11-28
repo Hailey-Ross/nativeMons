@@ -93,7 +93,7 @@ pub fn code_id(g: &GameEntry) -> Option<String> {
 }
 /// Which launcher and Zakuro made a shared list, so a bad Zakuro build's lists can be found again.
 pub fn share_versions() -> String {
-    let zakuro = std::fs::read_to_string(zakuro_dir().join("NATIVEMONS-BUILD.txt")).ok()
+    let zakuro = std::fs::read(zakuro_dir().join("NATIVEMONS-BUILD.txt")).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
         .and_then(|t| regex::Regex::new(r"/tree/([0-9a-f]{9})").unwrap().captures(&t).map(|m| m[1].to_string())).unwrap_or_default();
     format!("nativeMons {}, Zakuro {}", crate::updater::installed_label(), if zakuro.is_empty() { "unknown" } else { &zakuro })
 }

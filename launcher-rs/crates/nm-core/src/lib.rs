@@ -25,6 +25,7 @@ pub mod places;
 pub mod platinum_save;
 pub mod play_prep;
 pub mod proc;
+pub mod proxy;
 pub mod recomp;
 pub mod save_guard;
 pub mod save_info;

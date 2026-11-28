@@ -275,7 +275,8 @@ pub fn run(argv: &[String]) -> i32 {
     let mut l = start(w, h, host);
     // A shortcut straight to a game (--play/--game without --launcher): it starts once the start is done.
     let f = flags(argv);
-    if !f.menu { l.jobs.play_direct = f.game.clone(); }
+    if !f.menu { l.jobs.play_direct = f.game.clone(); } else { l.jobs.choose = f.game.clone(); }
+    l.jobs.direct_slot = f.slot.clone();
     let mut win = match Window::create((w, h), pos) { Ok(x) => x, Err(e) => { eprintln!("nativemons: {}", e); return 1 } };
     let mut tlog = LiveLog::from_env();
     tlog.line(&format!("hwnd {}", win.hwnd()));
@@ -385,6 +386,8 @@ pub fn run_loop<S: Surface>(l: &mut nm_ui::launcher::Launcher, win: &mut S, plac
     let mut want = false;
     let mut scan = ProcScan::default();
     let mut guide: Option<GuideShown> = None;
+    // RequestTick: a request waits for the start to finish; one that comes while a game or task runs is dropped.
+    let mut pending: Option<instance::Request> = None;
     let b = |b: MouseButton| match b { MouseButton::Left => Button::Left, MouseButton::Right => Button::Right, MouseButton::Middle => Button::Middle };
     loop {
         let started = Instant::now();
@@ -436,13 +439,14 @@ pub fn run_loop<S: Surface>(l: &mut nm_ui::launcher::Launcher, win: &mut S, plac
                 Event::MouseUp { x, y, b: k } => l.mouse_up(x, y, b(k)),
                 Event::Click { x, y, b: k } => l.mouse_click(x, y, b(k)),
                 Event::Wheel(d) => l.mouse_wheel(d),
-                Event::Request => { if let Some(r) = instance::take_request(&state) { request(l, &r); } }
+                Event::Request => { if let Some(r) = instance::take_request(&state) { pending = Some(r); } }
                 Event::Focus(_) => l.dirty = true,
                 Event::Exposed => { l.dirty = true; exposed = true; }
                 Event::Drop(paths) => l.take_drop(paths),
             }
         }
-        if instance.map_or(false, |i| i.rang()) { if let Some(r) = instance::take_request(&state) { request(l, &r); } }
+        if instance.map_or(false, |i| i.rang()) { if let Some(r) = instance::take_request(&state) { pending = Some(r); } }
+        if !l.starting { if let Some(r) = pending.take() { if !l.job { l.request(&r.what, &r.id, r.slot.as_deref()); } } }
         // Light mode follows the Settings switch, read every 2 s instead of every tick.
         if light_read.elapsed() >= Duration::from_secs(2) {
             light_read = Instant::now();
@@ -474,12 +478,12 @@ pub fn run_loop<S: Surface>(l: &mut nm_ui::launcher::Launcher, win: &mut S, plac
             let (y, gone) = nm_ui::input::power_drop(k, top, area.bottom(), screen.bottom(), ch);
             let x = win.position().0;
             win.set_position(x, y);
-            if gone { l.powered_off = true; tlog.line("exit powered off"); return Exit::PoweredOff; }
+            if gone { l.powered_off = true; l.form_closing(); tlog.line("exit powered off"); return Exit::PoweredOff; }
         }
         for e in std::mem::take(&mut l.effects) {
             if !matches!(e, Effect::HandCursor(_)) { tlog.line(&format!("effect {:?}", e)); }
             match e {
-                Effect::Close => { tlog.save(&bmp, "last"); tlog.line("exit close"); return Exit::Close; }
+                Effect::Close => { tlog.save(&bmp, "last"); win.hide(); l.form_closing(); tlog.line("exit close"); return Exit::Close; }
                 Effect::Minimize => win.minimize(),
                 Effect::DragWindow => win.begin_drag(),
                 Effect::HandCursor(on) => win.set_hand(on),
@@ -499,7 +503,7 @@ pub fn run_loop<S: Surface>(l: &mut nm_ui::launcher::Launcher, win: &mut S, plac
                 Effect::AskText { title, prompt, start } => { let a = win.ask_text(&title, &prompt, &start); tlog.line(&format!("asktext {:?}", a)); l.dialog_done(a); }
                 Effect::Fetch(_) | Effect::Gen1Cli(_) => {}
                 // The updated copy starts, then this one closes (the C#'s Process.Start, then Close).
-                Effect::Restart => { if let (false, Ok(exe)) = (place.headless, std::env::current_exe()) { let _ = std::process::Command::new(exe).spawn(); } tlog.line("exit restart"); return Exit::Close; }
+                Effect::Restart => { if let (false, Ok(exe)) = (place.headless, std::env::current_exe()) { let _ = std::process::Command::new(exe).spawn(); } l.form_closing(); tlog.line("exit restart"); return Exit::Close; }
             }
         }
         if may_draw(want, visible, l.light, Duration::from_secs_f64((clock(win) - last_frame).max(0.0))) {
@@ -529,21 +533,6 @@ fn start(w: i32, h: i32, host: nm_ui::launcher::Host) -> nm_ui::launcher::Launch
     l.light = nm_ui::light::effective(nm_ui::light::read(), host.light_auto);
     l.start_up();
     l
-}
-
-/// Request(): back to the home screen, then play the game or show its page.
-fn request(l: &mut nm_ui::launcher::Launcher, r: &instance::Request) {
-    if l.starting || l.job { return; }
-    while l.pages.len() > 1 && !l.pages.last().map_or(false, |p| p.main) { l.pages.pop(); }
-    let Some(i) = l.game_index(&r.id).filter(|&i| l.ctx().lib.games[i].playable()) else {
-        l.show_text(&format!("Can't start {}", r.id), "That game is not in the list, or its ROM was not found.");
-        return;
-    };
-    if r.what == "play" { l.todo(&format!("PlayWithSlot {} {}", r.id, r.slot.clone().unwrap_or_default())); return; }
-    l.ctx.as_mut().unwrap().current = Some(i);
-    l.current_theme = Some(nm_ui::pages::theme_of(&l.ctx().lib.games[i]));
-    l.replace_main();
-    l.push_with(|c| nm_ui::pages::game_page(c, &c.lib.games[i]));
 }
 
 fn open_folder(p: &str) {
@@ -735,6 +724,8 @@ mod tests {
         f.hidden = true;
         assert_eq!(run(&mut l, &mut f, None), Exit::Close);
         assert!(l.power_off < 0.0 && f.t - 10.2 < 0.05);
+        // FormClosing's stops ran on the way out, as for a power-off.
+        assert!(l.closing && l.jobs.quick.stopped_for_close);
     }
 
     #[test]
@@ -811,6 +802,23 @@ mod tests {
         assert!(open.windows(2).all(|w| w[1] >= w[0]) && (18..=26).contains(&open.len()), "{:?}", open);
         assert!(f.outlines.iter().any(|o| *o == (0, 1500, 1000)));
         assert_eq!(f.outlines.last(), Some(&(0, 600, 1000)));
+    }
+    #[test]
+    fn requests_show_a_page_or_say_why_not() {
+        let Some(mut l) = home() else { return };
+        let g = nm_core::game_entry::GameEntry { id: "nm-request-test".into(), title: "Pokemon Request Test".into(), gen1: Some("red".into()), imported: true, ..Default::default() };
+        l.ctx.as_mut().unwrap().lib.games.push(g);
+        l.push(nm_ui::pages::show_text("Somewhere", "else"));
+        l.request("show", "nm-request-test", None);
+        assert_eq!(l.pages.len(), 2);
+        assert_eq!(l.pages.last().unwrap().title, "Pokemon Request Test");
+        assert!(l.effects.contains(&nm_ui::input::Effect::ShowWindow));
+        l.request("play", "no-such-game", None);
+        assert_eq!(l.pages.last().unwrap().title, "Can't start no-such-game");
+        // A save that isn't there is named, and nothing starts.
+        l.play_with_slot("nm-request-test", Some("Nowhere"), None);
+        assert_eq!(l.pages.last().unwrap().title, "No save called Nowhere");
+        assert!(!l.job);
     }
     #[test]
     fn shortcut_flags() {

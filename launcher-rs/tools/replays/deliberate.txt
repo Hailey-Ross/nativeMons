@@ -3,3 +3,7 @@
 # UpdatePc shows its result over the rebuilt game page (user, 2026-11-25); the C# pops it at once.
 pc-update	6	3032	3300	UpdatePc shows Updated over the game page
 pc-download	14	3592	3900	UpdatePc shows Not updated over the game page
+# hails.nds-Patcher is built into the Rust launcher (user, 2026-11-27): no Python. Rust's Patch it notes the built-in
+# patcher's plan where the C# runs python; flows-patch's Python pages (step 6 on) exist in the C# only. A step may be a range.
+flows-patch-run	5	0	-1	the built-in patcher's plan, not python's (no frames differ)
+flows-patch	6-27	3304	7250	C# only: Python 3 needed, Get Python, I'll install it

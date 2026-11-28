@@ -100,6 +100,7 @@ fn main_window(pid: u32) -> Option<isize> {
 #[cfg(windows)]
 fn front(w: isize) {
     use windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+    if crate::quiet() { return; }
     unsafe { SetForegroundWindow(w) };
 }
 /// Linux: X11 window watching (XWayland under Wayland).

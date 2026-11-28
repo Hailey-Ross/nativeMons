@@ -256,6 +256,18 @@ impl Launcher {
         self.jobs.quick.snapping = Some(Snapping { rx, stop, id: g.id.clone(), fail_key });
     }
     /// Closing: the waiting game and the snapshot go with the launcher (FormClosing).
+    /// FormClosing's end: background engines stopped (waiting game, snapshot, capture, quiet build), and the waiting
+    /// game's stop waited for (at most 18 s), so nothing outlives the launcher.
+    pub fn form_closing(&mut self) {
+        self.closing = true;
+        if !self.jobs.quick.stopped_for_close { self.jobs.quick.stopped_for_close = true; self.quick_stop_all(false); }
+        nm_core::art_jobs::stop_now();
+        nm_core::recomp::stop_quiet();
+        if let Some(d) = self.jobs.quick.dropping.take() {
+            let t = std::time::Instant::now();
+            while !d.is_finished() && t.elapsed() < std::time::Duration::from_secs(18) { std::thread::sleep(std::time::Duration::from_millis(50)); }
+        }
+    }
     pub fn quick_stop_all(&mut self, wait: bool) {
         self.drop_ready(false);
         self.stop_snapshot();

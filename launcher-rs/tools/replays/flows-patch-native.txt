@@ -1,0 +1,10 @@
+# Rust only (hails.nds-Patcher is built in, no Python): dry run with NATIVEMONS_TEST_FLOWS=1. Patch it goes straight to
+# the patcher's plan; no Python 3 needed page.
+screen main 3.0
+page PatchPage black
+wait 0.3
+key enter
+wait 0.3
+effect hails.nds-Patcher (built in)
+expect nativeMons
+until 4.0

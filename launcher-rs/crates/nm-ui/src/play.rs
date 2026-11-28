@@ -33,6 +33,9 @@ pub struct Jobs {
     pub scanned_at: Option<std::time::Instant>,
     /// last-session's direct play (playDirect): closes after the game.
     pub play_direct: Option<String>,
+    /// --slot (directSlot) and --launcher's game (chooseId), used once the start is done.
+    pub direct_slot: Option<String>,
+    pub choose: Option<String>,
     /// Sprites.Arrived when last seen: a picture that arrived redraws the window.
     pub sprites_seen: u32,
     /// Start's work off the UI thread, and the splash's last frame for the Outro.
@@ -265,6 +268,42 @@ impl Launcher {
             _ if !g.imported => self.import(&g, Some(Box::new(move |l: &mut Launcher| { let id2 = id.clone(); let g = l.game(&id); if let Some(g) = g { l.before_game(&g, Box::new(move |l| l.play_gen1(&id2))); } }))),
             _ => self.before_game(&g, Box::new(move |l| l.play_gen1(&id))),
         }
+    }
+    /// Request: back to the home screen, then play the game (a shortcut while open) or show its page.
+    pub fn request(&mut self, what: &str, id: &str, slot: Option<&str>) {
+        while self.pages.len() > 1 && !self.pages.last().map_or(false, |p| p.main) { self.pages.pop(); }
+        if !self.game(id).map_or(false, |g| g.playable()) {
+            self.show_text(&format!("Can't start {}", id), "That game is not in the list, or its ROM was not found.");
+            return;
+        }
+        self.effects.push(Effect::ShowWindow);
+        if what == "play" { self.play_with_slot(id, slot, None); return; }
+        let i = self.game_index(id).unwrap();
+        self.ctx.as_mut().unwrap().current = Some(i);
+        self.current_theme = Some(crate::pages::theme_of(&self.ctx().lib.games[i]));
+        self.replace_main();
+        self.push_with(|c| crate::pages::game_page(c, &c.lib.games[i]));
+        self.dirty = true;
+    }
+    /// PlayWithSlot: a save named by its number or its name, switched to first as the Saves page does.
+    pub fn play_with_slot(&mut self, id: &str, slot: Option<&str>, failed: Option<Act>) {
+        use nm_core::save_sets;
+        let Some(g) = self.game(id) else { return };
+        let Some(slot) = slot else { self.play(id); return };
+        if !g.save_tools() { self.show_text_back("Can't pick a save", &format!("{} keeps its saves itself.", g.title), failed, None); return; }
+        let all = save_sets::all(&g);
+        let Some(set) = all.iter().find(|x| x.as_str() == slot).or_else(|| all.iter().find(|x| save_sets::name(&g, x).to_lowercase() == slot.to_lowercase())).cloned() else {
+            let has: Vec<String> = all.iter().map(|x| format!("{} ({})", save_sets::name(&g, x), x)).collect();
+            self.show_text_back(&format!("No save called {}", slot), &format!("{} has: {}.", g.title, has.join(", ")), failed, None);
+            return;
+        };
+        if set == save_sets::active(&g) { self.play(id); return; }
+        let games = self.games().to_vec();
+        let id = id.to_string();
+        self.busy("Switching saves", move || Ok(saves::switch_save(&games, &g, &set)), move |l, r| {
+            l.replace_main();
+            match r { Err(e) | Ok(Some(e)) => l.show_text_back("Couldn't switch saves", &e, failed, None), Ok(None) => l.play(&id) }
+        });
     }
     fn before_game(&mut self, g: &GameEntry, start: Box<dyn FnOnce(&mut Launcher)>) {
         let gw = g.clone();

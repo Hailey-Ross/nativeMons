@@ -285,7 +285,9 @@ impl Launcher {
 
     /// Close(): a user close powers the device down first (FormClosing), then closes for real.
     pub fn request_close(&mut self) {
-        if self.power_off < 0.0 && !self.closing {
+        // FormClosing: a direct play's launcher, or a quiet test's, closes without powering down.
+        let quiet = std::env::var("NATIVEMONS_TEST_QUIET").as_deref() == Ok("1");
+        if self.power_off < 0.0 && !self.closing && self.jobs.play_direct.is_none() && !quiet {
             self.power_off = self.now();
             return;
         }
