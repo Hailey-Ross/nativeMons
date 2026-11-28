@@ -104,6 +104,13 @@ impl LiveLog {
     }
 }
 
+/// Pad() bits by name, for the log (the controller check reads them).
+pub fn pad_names(b: u16) -> String {
+    use nm_platform::input::*;
+    let all = [(UP, "up"), (DOWN, "down"), (LEFT, "left"), (RIGHT, "right"), (A, "a"), (B, "b"), (X, "x"), (Y, "y"), (LB, "lb"), (RB, "rb"), (START, "start"), (BACK, "back")];
+    all.iter().filter(|(bit, _)| b & bit != 0).map(|(_, n)| *n).collect::<Vec<_>>().join(",")
+}
+
 /// What the tick loop needs from the window: SDL's (the `window` feature), or a fake in the headless tests.
 pub trait Surface {
     fn events(&mut self) -> Vec<nm_platform::input::Event>;
@@ -241,7 +248,7 @@ impl Surface for nm_platform::window::Window {
     fn position(&self) -> (i32, i32) { nm_platform::window::Window::position(self) }
     fn set_position(&mut self, x: i32, y: i32) { nm_platform::window::Window::set_position(self, x, y) }
     fn set_bounds(&mut self, x: i32, y: i32, w: i32, h: i32) { nm_platform::window::Window::set_bounds(self, x, y, w, h) }
-    fn set_outline(&mut self, x: i32, w: i32, h: i32, radius: f32) { nm_platform::window::Window::set_outline(self, x, w, h, radius) }
+    fn set_outline(&mut self, x: i32, w: i32, h: i32, radius: f32) { nm_platform::window::Window::set_outline(self, x, h, &nm_ui::art::outline_spans(w, h, radius)) }
     fn present(&mut self, pixels: &[u32], w: i32, h: i32) { nm_platform::window::Window::present(self, pixels, w, h) }
     fn show(&mut self) { nm_platform::window::Window::show(self) }
     fn hide(&mut self) { nm_platform::window::Window::hide(self) }
@@ -396,6 +403,7 @@ pub fn run_loop<S: Surface>(l: &mut nm_ui::launcher::Launcher, win: &mut S, plac
     let mut guide: Option<GuideShown> = None;
     // RequestTick: a request waits for the start to finish; one that comes while a game or task runs is dropped.
     let mut pending: Option<instance::Request> = None;
+    let (mut pad_seen, mut sel_seen) = ((0u16, false, false, usize::MAX), (usize::MAX, -2));
     let b = |b: MouseButton| match b { MouseButton::Left => Button::Left, MouseButton::Right => Button::Right, MouseButton::Middle => Button::Middle };
     loop {
         let started = Instant::now();
@@ -465,7 +473,16 @@ pub fn run_loop<S: Surface>(l: &mut nm_ui::launcher::Launcher, win: &mut S, plac
         let (wx, wy) = win.position();
         l.morph.window = (wx, wy, cw, ch);
         l.start_tick(cw, ch);
+        // With the test log on: the pad as read, the guide button, focus and controllers, and the top page's selection.
+        if tlog.on() {
+            let now = (win.pad(), win.guide_down(), win.focused(), win.pad_count());
+            if now != pad_seen { pad_seen = now; tlog.line(&format!("pad {:#06x} [{}] guide {} focused {} pads {}", now.0, pad_names(now.0), now.1, now.2, now.3)); }
+        }
         want |= l.poll(if visible { win.pad() } else { 0 }, win.focused());
+        if tlog.on() {
+            let s = (l.pages.len(), l.pages.last().map_or(-1, |p| p.sel));
+            if s != sel_seen { sel_seen = s; tlog.line(&format!("sel {}:{}", s.0, s.1)); }
+        }
         guide_tick(l, win, &mut guide, tlog);
         // Window test only (NATIVEMONS_TEST_DIALOG="<ms> folder|file|text"): one dialog, its answer logged.
         if !l.starting {
@@ -837,6 +854,13 @@ mod tests {
         let f = flags(&a);
         assert_eq!((f.game.as_deref(), f.slot, f.menu), (Some("crystal"), None, true));
         assert!(flags(&["--game".to_string()]).game.is_none());
+    }
+    #[test]
+    fn pad_bits_by_name() {
+        use nm_platform::input::*;
+        assert_eq!(pad_names(0), "");
+        assert_eq!(pad_names(UP | A | START), "up,a,start");
+        assert_eq!(pad_names(LB | RB | BACK | Y), "y,lb,rb,back");
     }
     #[test]
     fn frame_pacing() {

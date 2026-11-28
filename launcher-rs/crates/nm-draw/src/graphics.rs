@@ -850,6 +850,8 @@ impl Graphics {
         self.set_clip_path(&p);
     }
     pub fn reset_clip(&mut self) { self.clip = None; }
+    /// Whether device pixel (x, y) is inside the clip (true with none).
+    pub fn clip_at(&self, x: i32, y: i32) -> bool { self.clip.as_ref().map_or(true, |c| c.at(x, y)) }
 
     /// VisibleClipBounds, in world coordinates.
     pub fn visible_clip_bounds(&self) -> RectangleF {
@@ -1192,11 +1194,12 @@ impl Graphics {
         self.draw_image_bilinear(&faded, r);
     }
 
-    /// DrawImageUnscaled: a straight copy blended at its own alpha, no transform scale.
+    /// DrawImageUnscaled: a straight copy at a whole-pixel offset; scaled or at a fractional offset GDI+ samples it
+    /// bilinearly at each device pixel's integer point (probed, t54).
     pub fn draw_image_unscaled(&mut self, img: &Bitmap, x: i32, y: i32) {
         if self.rec.is_some() { self.draw_image_unscaled_shared(&std::sync::Arc::new(img.clone()), x, y); return; }
         let t = self.transform.0;
-        if t.sx != 1.0 || t.sy != 1.0 || t.kx != 0.0 || t.ky != 0.0 {
+        if t.sx != 1.0 || t.sy != 1.0 || t.kx != 0.0 || t.ky != 0.0 || t.tx.fract() != 0.0 || t.ty.fract() != 0.0 {
             self.draw_image_bilinear(img, RectangleF::new(x as f32, y as f32, img.width as f32, img.height as f32));
             return;
         }
@@ -1205,7 +1208,7 @@ impl Graphics {
     pub fn draw_image_unscaled_shared(&mut self, img: &std::sync::Arc<Bitmap>, x: i32, y: i32) {
         let _p = crate::prof::span("image unscaled");
         let t = self.transform.0;
-        if t.sx != 1.0 || t.sy != 1.0 || t.kx != 0.0 || t.ky != 0.0 {
+        if t.sx != 1.0 || t.sy != 1.0 || t.kx != 0.0 || t.ky != 0.0 || t.tx.fract() != 0.0 || t.ty.fract() != 0.0 {
             self.draw_image_bilinear_shared(img, RectangleF::new(x as f32, y as f32, img.width as f32, img.height as f32));
             return;
         }
@@ -1465,4 +1468,31 @@ fn ray_ratio(poly: &[(f64, f64)], c: (f64, f64), p: (f64, f64)) -> f64 {
         if s > 0.0 && (-1e-9..=1.0 + 1e-9).contains(&u) && s < best { best = s; }
     }
     if best == f64::MAX { 1.0 } else { (1.0 / best).min(1.0) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // GDI+'s pixels for DrawImageUnscaled through a fractional translate (probe t55): bilinear at each device pixel's
+    // integer point, hard edges, transparent beyond the picture.
+    #[test]
+    fn unscaled_at_a_fractional_offset_matches_gdiplus() {
+        let mut img = Bitmap::new(3, 2);
+        for y in 0..2 { img.data[(y * 3) as usize..(y * 3 + 3) as usize].copy_from_slice(&[0xFFC82800, 0xFF0078F0, 0xFFFAFAFA]); }
+        let run = |tx: f32, ty: f32| {
+            let mut g = Graphics::new(Bitmap::new(8, 4));
+            g.clear(Color::from_argb(255, 10, 20, 30));
+            g.translate_transform(tx, ty);
+            g.draw_image_unscaled(&img, 0, 0);
+            g.bmp.data
+        };
+        let (bg, f40, f75) = (0xFF0A141E, run(2.4, 1.0), run(2.75, 1.5));
+        let row = |d: &Vec<u32>, y: usize| d[y * 8..y * 8 + 8].to_vec();
+        assert_eq!(row(&f40, 0), vec![bg; 8]);
+        for y in [1, 2] { assert_eq!(row(&f40, y), vec![bg, bg, bg, 0xFF505890, 0xFF96C6F6, 0xFF6A7076, bg, bg]); }
+        assert_eq!(row(&f40, 3), vec![bg; 8]);
+        assert_eq!(row(&f75, 1), vec![bg; 8]);
+        assert_eq!(row(&f75, 2), vec![bg, bg, bg, 0xFF963C3C, 0xFF3F99F3, 0xFFBFC1C4, bg, bg]);
+        assert_eq!(row(&f75, 3), vec![bg, bg, bg, 0xFF50282D, 0xFF245688, 0xFF646A71, bg, bg]);
+    }
 }

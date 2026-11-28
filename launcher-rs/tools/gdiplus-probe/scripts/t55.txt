@@ -1,0 +1,18 @@
+# t55: DrawImageUnscaled of a 3x2 picture through fractional translates (the unit test's numbers).
+canvas 3 2
+clear 255 200 40 0
+solid 255 0 120 240
+fillrect 1 0 1 2
+solid 255 250 250 250
+fillrect 2 0 1 2
+grab
+canvas 8 4
+clear 255 10 20 30
+translate 2.4 1
+drawunscaled 0 0
+out f40
+canvas 8 4
+clear 255 10 20 30
+translate 2.75 1.5
+drawunscaled 0 0
+out f75

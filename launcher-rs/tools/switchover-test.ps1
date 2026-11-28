@@ -4,7 +4,11 @@
 # the other) with --roms, --saves list and --sync, and their result files and the state they leave are compared
 # byte for byte. No window, no game; ROMs and saves are copied (originals hashed before and after).
 # switchover-test.ps1 -Exe <Rust exe, the `shipped` build> [-Root <scratch folder>] [-Keep]
-param([string]$Exe = "", [string]$Root = "", [switch]$Keep)
+# -Live (needs the user's OK: windows on monitor 3 for about a minute): step 3 goes through the C# window instead,
+# as a player does (Settings > Updates > Update now, by posted keys), then the restart into the Rust exe, its first
+# start on the install (the lock wait, .old removed, home), a plain start of it by the shell (no console), and a
+# C# start on a copy of the install from before the update as the control for what a start writes. Step 4 is skipped.
+param([string]$Exe = "", [string]$Root = "", [switch]$Keep, [switch]$Live)
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\work.ps1"
 if (-not $Exe) { $Exe = "$TargetDir\release\nativemons.exe" }
@@ -54,6 +58,7 @@ Copy-Item -LiteralPath $originals.red, $originals.firered $roms
 $st = "$install\state"; New-Item -ItemType Directory -Force $st, "$install\engines\fulldex\saves", "$install\engines\nativeplat\userdata", "$Root\inputs" | Out-Null
 Set-Content -LiteralPath "$st\rom-folders.txt" -Value $roms -Encoding utf8
 $settings = @{ 'layout.txt' = 'phone'; 'game-options.txt' = "text=fast`r`nscene=on`r`nvol=60"; 'discord.txt' = 'off'; '3ds-games.txt' = 'on'; '3ds-emulator.txt' = 'azaharplus'; 'wallpaper.txt' = 'play'; 'engine-platinum.txt' = 'port'; 'update-dismissed.txt' = '26' }
+if ($Live) { $settings['quick-start.txt'] = 'off'; $settings['last-game.txt'] = 'firered' }
 foreach ($k in $settings.Keys) { Set-Content -LiteralPath "$st\$k" -Value $settings[$k] -Encoding ascii }
 Copy-Item -LiteralPath $originals.frSave "$install\engines\fulldex\saves\firered.sav"
 Copy-Item -LiteralPath $originals.redSave "$Root\inputs\red.sav"
@@ -76,6 +81,114 @@ Say "package: $([math]::Round((Get-Item "$rel\nativeMons.zip").Length / 1MB)) MB
 
 # 3. The C# launcher updates itself, as from Settings > Updates, with no window.
 $treeBefore = Tree $install
+if ($Live) {
+    Add-Type -Namespace SW -Name U -MemberDefinition @"
+public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
+[DllImport("user32.dll")] public static extern bool PostMessageW(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, System.IntPtr l);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint pid);
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr h);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(System.IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
+public struct RECT { public int L, T, R, B; }
+"@
+    $log = "$Root\live.log"
+    # Every visible top-level window of these processes: "pid class x,y wxh".
+    function Windows-Of([int[]]$pids) {
+        $script:found = @()
+        [void][SW.U]::EnumWindows({ param($h, $l) $p = [uint32]0; [void][SW.U]::GetWindowThreadProcessId($h, [ref]$p); if ($pids -contains [int]$p -and [SW.U]::IsWindowVisible($h)) { $c = New-Object Text.StringBuilder 256; [void][SW.U]::GetClassNameW($h, $c, 256); $r = New-Object SW.U+RECT; [void][SW.U]::GetWindowRect($h, [ref]$r); $script:found += [pscustomobject]@{ pid = [int]$p; hwnd = $h; cls = "$c"; rect = "$($r.L),$($r.T) $($r.R - $r.L)x$($r.B - $r.T)" } }; return $true }, [IntPtr]::Zero)
+        $script:found
+    }
+    # Console hosts that are children of these processes (a console window would come with one).
+    function Consoles-Of([int[]]$pids) { @(Get-CimInstance Win32_Process -Filter "Name='conhost.exe' OR Name='OpenConsole.exe' OR Name='WindowsTerminal.exe'" | Where-Object { $pids -contains [int]$_.ParentProcessId }) }
+    function Key($h, [int]$vk) { [void][SW.U]::PostMessageW($h, 0x0100, [IntPtr]$vk, [IntPtr]::Zero); Start-Sleep -Milliseconds 350 }
+    function Last-Page { (Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\d+\|' -or $_ -eq 'job' } | Select-Object -Last 1) }
+    function Wait-Line([string]$rx, [int]$s) { $t = Get-Date; do { if (Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Where-Object { $_ -match $rx } | Select-Object -First 1) { return $true }; Start-Sleep -Milliseconds 200 } while (((Get-Date) - $t).TotalSeconds -lt $s); $false }
+    function Wait-Page([string]$rx, [int]$s) { $t = Get-Date; do { if ("$(Last-Page)" -match $rx) { return $true }; Start-Sleep -Milliseconds 200 } while (((Get-Date) - $t).TotalSeconds -lt $s); $false }
+    function Start-Launcher([string]$exe, [bool]$shell) {
+        $psi = New-Object Diagnostics.ProcessStartInfo $exe; $psi.WorkingDirectory = Split-Path $exe
+        $psi.UseShellExecute = $shell; if (-not $shell) { $psi.CreateNoWindow = $true }
+        [Diagnostics.Process]::Start($psi)
+    }
+    function Launchers { @(Get-Process -Name NativeMonsLauncher -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Root\*" }) }
+    $env:NATIVEMONS_UPDATE_URL = 'file:///' + ($Root -replace '\\', '/') + '/releases/'
+    $env:NATIVEMONS_TEST_SCREEN = "DISPLAY3"; $env:NATIVEMONS_TEST_LOG = $log; $env:NATIVEMONS_TEST_NO_CAPTURE = "1"
+    $env:NATIVEMONS_TEST_DISCORD = "$Root\results\discord.txt"; $env:NATIVEMONS_TEST_FRAMES = "$Root\frames"
+    robocopy $install "$Root\pre-update" /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    $onScreen = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        # C#: home, Settings (home's third row), Updates, Update now; the restart starts the Rust exe and closes.
+        $cs = Start-Launcher "$install\NativeMonsLauncher.exe" $false
+        $ok = Wait-Page '^1\|nativeMons' 60; Start-Sleep 2
+        $t = Get-Date; do { $cs.Refresh(); $h = $cs.MainWindowHandle; if ($h -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 200 } } while ($h -eq [IntPtr]::Zero -and ((Get-Date) - $t).TotalSeconds -lt 10)
+        Say "C# window: $(@(Windows-Of @($cs.Id) | ForEach-Object { "$($_.cls) at $($_.rect)" }) -join '; '); home $ok"
+        if ($ok -and $h -ne [IntPtr]::Zero) {
+            Key $h 0x28; Key $h 0x28; Key $h 0x27; Key $h 0x27; Key $h 0x0D
+            $ok = Wait-Page '^2\|Settings$' 10
+        }
+        # Settings rows above Updates on this install: Fulldex, Gen1Recomp, 3DS games, the two Zakuro rows, Import,
+        # Export, Download Pokedex, Game options, Wallpapers, Controls, Screenshots, Wide layout, Quick start, Discord.
+        if ($ok) { 1..15 | ForEach-Object { Key $h 0x28 }; Start-Sleep -Milliseconds 400; Key $h 0x0D; $ok = Wait-Page '^3\|Updates$' 20 }
+        Say "C# pages: $((Get-Content $log | Where-Object { $_ -match '^\d+\|' -or $_ -eq 'job' }) -join ' > ')"
+        if (-not $ok) { Say "C#: did not reach Updates (last: $(Last-Page)); stopped here"; Key $h 0x1B; Key $h 0x1B; Key $h 0x1B }
+        else {
+            Start-Sleep 1; Key $h 0x0D
+            $clicked = Get-Date
+            if (-not $cs.WaitForExit(120000)) { Say "C# did not close within 120 s" }
+            $csGone = Get-Date
+            Say ("C# closed {0:0.0} s after Update now (exit {1})" -f ($csGone - $clicked).TotalSeconds, $cs.ExitCode)
+            $came = Wait-Line '^\d+ page 1\|nativeMons' 30
+            $rs = Launchers | Select-Object -First 1
+            $hwndLine = Get-Content $log | Where-Object { $_ -match '^\d+ hwnd ' } | Select-Object -First 1
+            Say "Rust came up by itself: $came (process $(if ($rs) { $rs.Id } else { 'none' }), $hwndLine)"
+            Start-Sleep 4
+            if ($rs) {
+                Say "Rust windows: $(@(Windows-Of @($rs.Id) | ForEach-Object { "$($_.cls) at $($_.rect)" }) -join '; '); console hosts under it: $((Consoles-Of @($rs.Id)).Count)"
+                Say "Rust start: $((Get-Content $log | Where-Object { $_ -match '^\d+ (display|page|items 0: |pads)' } | Select-Object -First 5) -join ' / ')"
+                Say "  .old still there: $(Test-Path "$install\NativeMonsLauncher.exe.old"); version.txt: $((Get-Content "$install\version.txt") -join ' ')"
+                $rh = [IntPtr][long](($hwndLine -split ' ')[2]); [void][SW.U]::PostMessageW($rh, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+                if (-not $rs.WaitForExit(15000)) { Say "Rust did not close within 15 s: stopped"; $rs.Kill() } else { Say "Rust closed by WM_CLOSE: $((Get-Content $log | Where-Object { $_ -match '^\d+ exit ' } | Select-Object -Last 1))" }
+            }
+        }
+        $treeLive = Tree $install
+        # The shipped exe started as Explorer starts it (shell execute, no CreateNoWindow): no console may come with it.
+        $consBefore = @(Get-Process conhost, OpenConsole, WindowsTerminal -ErrorAction SilentlyContinue | ForEach-Object Id)
+        $direct = Start-Launcher "$install\NativeMonsLauncher.exe" $true
+        Start-Sleep 5
+        $wins = @(Windows-Of @($direct.Id)); $kids = Consoles-Of @($direct.Id)
+        $newCons = @(Get-Process conhost, OpenConsole, WindowsTerminal -ErrorAction SilentlyContinue | Where-Object { $consBefore -notcontains $_.Id })
+        Say "shell start: windows $(($wins | ForEach-Object { "$($_.cls) at $($_.rect)" }) -join '; '); console windows: $(@($wins | Where-Object { $_.cls -match 'Console|CASCADIA' }).Count); console hosts under it: $($kids.Count); new console processes anywhere: $($newCons.Count)"
+        foreach ($w in $wins) { [void][SW.U]::PostMessageW($w.hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+        if (-not $direct.WaitForExit(15000)) { $direct.Kill(); Say "shell start: did not close, stopped" } else { Say "shell start closed (exit $($direct.ExitCode))" }
+        $treeShell = Tree $install
+        # Control: the C# started and closed on a copy of the install from before the update (what a plain start writes).
+        $ctl = "$Root\control"; robocopy "$Root\pre-update" $ctl /E /NFL /NDL /NJH /NJS /NP | Out-Null
+        $env:NATIVEMONS_TEST_LOG = "$Root\control.log"
+        $c2 = Start-Launcher "$ctl\NativeMonsLauncher.exe" $false
+        $t = Get-Date; do { Start-Sleep -Milliseconds 300 } while (-not (Select-String -LiteralPath "$Root\control.log" -Pattern '^1\|nativeMons' -Quiet -ErrorAction SilentlyContinue) -and ((Get-Date) - $t).TotalSeconds -lt 60)
+        Start-Sleep 4; $c2.Refresh(); [void][SW.U]::PostMessageW($c2.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+        if (-not $c2.WaitForExit(15000)) { $c2.Kill(); Say "control C#: did not close, stopped" }
+        $ctlChanged = Diff-Trees (Tree "$Root\pre-update") (Tree $ctl)
+        Say "a plain C# start and close wrote: $(if ($ctlChanged.Count) { $ctlChanged -join ', ' } else { 'nothing' })"
+    } finally {
+        $onScreen.Stop()
+        foreach ($p in (Launchers)) { Say "left running, stopped: $($p.Id)"; Stop-Process -Id $p.Id -Force }
+        Remove-Item env:NATIVEMONS_UPDATE_URL, env:NATIVEMONS_TEST_SCREEN, env:NATIVEMONS_TEST_LOG, env:NATIVEMONS_TEST_NO_CAPTURE, env:NATIVEMONS_TEST_DISCORD, env:NATIVEMONS_TEST_FRAMES -ErrorAction SilentlyContinue
+    }
+    Say ("windows on screen: about {0:0} s" -f $onScreen.Elapsed.TotalSeconds)
+    foreach ($pair in @(@("the live update and the Rust start", $treeLive), @("then the shell start", $treeShell))) {
+        $ch = Diff-Trees $treeBefore $pair[1]
+        Say "files changed by $($pair[0]) (from before the update): $($ch -join ', ')"
+    }
+    $playerBefore = @($treeBefore.Keys | Where-Object { $_ -like 'state\*' -or $_ -like 'engines\fulldex\saves\*' -or $_ -in 'engines\fulldex\settings.cfg', 'engines\nativeplat\userdata\options.ini' })
+    Say "  state, saves and settings ($($playerBefore.Count) files) byte-identical after: $(@($playerBefore | Where-Object { $treeBefore[$_] -ne $treeShell[$_] }) -join ', ')"
+    Say "  the Rust exe in place: $((Sha "$install\NativeMonsLauncher.exe") -eq (Sha $Exe))"
+    $bad = @($originals.Keys | Where-Object { (Sha $originals[$_]) -ne $before[$_] })
+    Say "originals (2 ROMs, 2 saves) unchanged: $($bad.Count -eq 0)"
+    $report | Set-Content -LiteralPath "$Root\..\switchover-live-report.txt" -Encoding utf8
+    if (-not $Keep) { Remove-Item -Recurse -Force $Root }
+    return
+}
 $env:NATIVEMONS_UPDATE_URL = 'file:///' + ($Root -replace '\\', '/') + '/releases/'
 $e = Run-Exe "$install\NativeMonsLauncher.exe" @("--update", "$Root\results\update.txt")
 Remove-Item env:NATIVEMONS_UPDATE_URL

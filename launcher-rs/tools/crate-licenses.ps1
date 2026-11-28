@@ -44,6 +44,9 @@ foreach ($c in $crates) {
     if ($c.license_file) { $files += (Join-Path $dir $c.license_file) }
     if ($extra.ContainsKey($c.name)) { $files += @($extra[$c.name] | ForEach-Object { Join-Path $dir $_ }) }
     $files = @($files | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
+    # A crate that ships no license file: the text kept in launcher-rs\licenses (see its README.txt).
+    $kept = Join-Path $root "licenses\$($c.name)-LICENSE"
+    if (-not $files.Count -and (Test-Path -LiteralPath $kept)) { $dir = Join-Path $root 'licenses'; $files = @($kept) }
     if (-not $files.Count) { [void]$sb.AppendLine("(The crate holds no license file; its license is $($c.license).)"); continue }
     foreach ($f in $files) {
         $t = [IO.File]::ReadAllText($f).Replace("`r`n", "`n").Trim()

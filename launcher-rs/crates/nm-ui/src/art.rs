@@ -42,6 +42,30 @@ pub fn smooth(k: f32) -> f32 {
     k * k * (3.0 - 2.0 * k)
 }
 
+/// The window's outline, as the C#'s `Region = new Region(Round(0, 0, w, h, rad))`: GDI+'s region pixels (nm-draw's
+/// clip of the same path) as rows of [x0, x1) spans. The last result is kept (the morph asks every tick).
+pub fn outline_spans(w: i32, h: i32, rad: f32) -> Vec<(i32, i32, i32)> {
+    static LAST: std::sync::Mutex<Option<((i32, i32, u32), Vec<(i32, i32, i32)>)>> = std::sync::Mutex::new(None);
+    let key = (w, h, rad.to_bits());
+    if let Some((k, v)) = LAST.lock().unwrap().as_ref() { if *k == key { return v.clone(); } }
+    let mut out = Vec::new();
+    if w > 0 && h > 0 {
+        let mut g = Graphics::new(Bitmap::new(w, h));
+        g.set_clip_path(&round(RectangleF::new(0.0, 0.0, w as f32, h as f32), rad));
+        for y in 0..h {
+            let mut x = 0;
+            while x < w {
+                if !g.clip_at(x, y) { x += 1; continue; }
+                let x0 = x;
+                while x < w && g.clip_at(x, y) { x += 1; }
+                out.push((y, x0, x));
+            }
+        }
+    }
+    *LAST.lock().unwrap() = Some((key, out.clone()));
+    out
+}
+
 pub fn round(r: RectangleF, rad: f32) -> GraphicsPath {
     let mut path = GraphicsPath::new();
     let d = (rad * 2.0).min(r.width.min(r.height));
@@ -709,4 +733,16 @@ pub fn browse_art(g: &mut Graphics, icon: char, r: RectangleF) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod outline_tests {
+    /// GDI+'s Region of the C#'s Round() path for the 609x1015 phone (monitor 3), its first rows and its middle.
+    #[test]
+    fn outline_is_the_csharp_region() {
+        let s = super::outline_spans(609, 1015, 609.0 * 0.075);
+        assert_eq!(s.len(), 1015);
+        assert_eq!(&s[..6], &[(0, 46, 564), (1, 37, 573), (2, 33, 577), (3, 30, 580), (4, 28, 582), (5, 26, 585)]);
+        assert_eq!(s[500], (500, 0, 609));
+    }
 }

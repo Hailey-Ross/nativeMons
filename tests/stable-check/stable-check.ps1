@@ -289,9 +289,9 @@ if (On 'package') {
   T package 'no 3DS dumps or recompiled game code inside' (-not $recomp) (($recomp | Select-Object -First 5 | ForEach-Object Name) -join ', ')
   $prop = $all | Where-Object { $_.Name -match '^(LauncherView|LauncherSettings|OnlinePanel|CartLabelArt|CartShape|LauncherMods)\.lua$' -or $_.FullName -match '\\assets\\(launcher|labels)\\' }
   T package 'no Gen1Recomp proprietary launcher files inside' (-not $prop) (($prop | Select-Object -First 5 | ForEach-Object Name) -join ', ')
-  # .NET keeps its strings as UTF-16, which can start on an odd byte: read it both ways.
+  # .NET keeps its strings as UTF-16, which can start on an odd byte: read it both ways; the Rust launcher as UTF-8.
   $raw = [IO.File]::ReadAllBytes($exe)
-  $text = [Text.Encoding]::Unicode.GetString($raw) + [Text.Encoding]::Unicode.GetString($raw, 1, $raw.Length - 1)
+  $text = [Text.Encoding]::Unicode.GetString($raw) + [Text.Encoding]::Unicode.GetString($raw, 1, $raw.Length - 1) + [Text.Encoding]::UTF8.GetString($raw)
   T package 'launcher carries the Gen1Recomp credit' ($text.Contains('BOIS CLUB GAMES, LLC') -and $text.Contains('github.com/bryanthaboi/gen1recomp'))
   $v = Get-Content (Join-Path $app 'version.txt') -ErrorAction SilentlyContinue
   T package 'version.txt has channel, build and revision' (($v -join ' ') -match 'channel=\S+ build=\d+ revision=[0-9a-f]{40}') ($v -join ' ')
@@ -864,7 +864,8 @@ if (On 'updater') {
   Set-Content "$old\engines\gen1recomp\src\old\stale.lua" 'stale'; Set-Content "$old\games.json" '[]'
   $oexe = "$old\NativeMonsLauncher.exe"
   function Ver([string]$c, [int]$b, [string]$r) { Set-Content "$old\version.txt" "channel=$c`nbuild=$b`nrevision=$r" -Encoding Ascii }
-  function Up { Copy-Item -LiteralPath $exe $oexe -Force; Remove-Item "$oexe.old","$Work\u.txt" -ErrorAction SilentlyContinue; $q = Start-Process $oexe -ArgumentList "--update `"$Work\u.txt`"" -PassThru -WindowStyle Hidden; if (-not $q.WaitForExit(540000)) { $q.Kill(); return 'TIMED OUT' }; (Get-Content "$Work\u.txt" -ErrorAction SilentlyContinue) -join ' | ' }
+  # The copy retries: a virus scan of the exe just run can hold it for a moment.
+  function Up { $w = [Diagnostics.Stopwatch]::StartNew(); while ($true) { try { Copy-Item -LiteralPath $exe $oexe -Force -ErrorAction Stop; break } catch { if ($w.Elapsed.TotalSeconds -gt 10) { throw }; Start-Sleep -Milliseconds 250 } }; Remove-Item "$oexe.old","$Work\u.txt" -ErrorAction SilentlyContinue; $q = Start-Process $oexe -ArgumentList "--update `"$Work\u.txt`"" -PassThru -WindowStyle Hidden; if (-not $q.WaitForExit(540000)) { $q.Kill(); return 'TIMED OUT' }; (Get-Content "$Work\u.txt" -ErrorAction SilentlyContinue) -join ' | ' }
   function Channel { ((Get-Content "$old\version.txt") -join ' ') }
 
   Ver 'bleeding-edge' 1 'aaaa'; Rel 'bleeding-edge' 100 'bbbb'

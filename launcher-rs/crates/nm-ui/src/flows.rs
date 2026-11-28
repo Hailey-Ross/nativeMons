@@ -120,7 +120,7 @@ pub fn search(source: &str, query: &str, page: i32) -> Result<(Vec<WallResult>, 
     }
     Ok((list, more))
 }
-fn load_thumb(r: &WallResult) {
+pub fn load_thumb(r: &WallResult) {
     let got = (|| -> Option<Bitmap> {
         let tmp = nm_core::proc::temp_dir().join(format!("nativemons-thumb-{}.bin", nm_core::proc::new_guid()));
         let ok = nm_core::net::download_file(&r.thumb, &tmp, None, &mut |_| {}).is_ok();

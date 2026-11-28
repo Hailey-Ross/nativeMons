@@ -1,7 +1,7 @@
 //! The launcher's window on SDL3: borderless, the device outline as its region, a streaming texture presented
 //! without scaling, and events in the C# launcher's terms (virtual keys, Pad bits, WinForms wheel deltas).
 
-use crate::geometry::{self, Rect};
+use crate::geometry::Rect;
 use crate::input::{self, PadState};
 use sdl3_sys::everything::*;
 use std::ffi::{CStr, CString};
@@ -234,13 +234,13 @@ impl Window {
         unsafe { SDL_GetPointerProperty(SDL_GetWindowProperties(self.win), SDL_PROP_WINDOW_WIN32_HWND_POINTER, std::ptr::null_mut()) as isize }
     }
 
-    /// The device's outline: SetWindowRgn with the aliased rounded rectangle (jagged corners, as the C#);
-    /// on X11 the same mask as alpha. `x` shifts it in the window (SetMorphRegion mid-morph).
-    pub fn set_outline(&mut self, x: i32, w: i32, h: i32, rad: f32) {
+    /// The device's outline: SetWindowRgn with the aliased rounded rectangle's rows (jagged corners, as the C#'s Region;
+    /// the caller works out the spans), on X11 the same mask as alpha. `x` shifts it in the window (SetMorphRegion mid-morph).
+    pub fn set_outline(&mut self, x: i32, h: i32, spans: &[(i32, i32, i32)]) {
         #[cfg(windows)]
         unsafe {
             use windows_sys::Win32::Graphics::Gdi::*;
-            let spans = geometry::outline_spans(w, h, rad);
+            let _ = h;
             let rgn = CreateRectRgn(0, 0, 0, 0);
             let mut i = 0;
             while i < spans.len() {
@@ -259,7 +259,7 @@ impl Window {
         {
             let (ww, _) = self.size();
             let mut m = vec![false; (ww.max(0) * h.max(0)) as usize];
-            for (y, x0, x1) in geometry::outline_spans(w, h, rad) { for c in (x + x0).max(0)..(x + x1).min(ww) { m[(y * ww + c) as usize] = true; } }
+            for &(y, x0, x1) in spans { for c in (x + x0).max(0)..(x + x1).min(ww) { m[(y * ww + c) as usize] = true; } }
             self.mask = Some((ww, h, m));
         }
     }

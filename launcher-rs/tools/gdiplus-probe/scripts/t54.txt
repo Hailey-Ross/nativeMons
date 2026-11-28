@@ -1,0 +1,108 @@
+# t54: DrawImageUnscaled through a fractional translate (the home scene at screen x = 0.06 * width).
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+drawunscaled 10 3
+out src
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10 3
+drawunscaled 0 0
+out u10x3
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10.25 3
+drawunscaled 0 0
+out u10_25x3
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10.4 3
+drawunscaled 0 0
+out u10_4x3
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10.5 3
+drawunscaled 0 0
+out u10_5x3
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10.6 3
+drawunscaled 0 0
+out u10_6x3
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10.75 3
+drawunscaled 0 0
+out u10_75x3
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10 3.4
+drawunscaled 0 0
+out u10x3_4
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10 3.6
+drawunscaled 0 0
+out u10x3_6
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 10.4 3.6
+drawunscaled 0 0
+out u10_4x3_6
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+translate 36.6 3
+drawunscaled 0 0
+out u36_6x3
+canvas 100 30
+noise 9 40 20 alpha
+clear 255 40 50 60
+smooth 1
+translate 10.4 3
+drawunscaled 0 0
+out a10_4
+canvas 100 30
+noise 9 40 20 alpha
+clear 255 40 50 60
+smooth 1
+translate 10.6 3
+drawunscaled 0 0
+out a10_6
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+clipround 10.4 3 40.2 20.1 4
+translate 10.4 3
+cliprect 0 0 40.2 20.1
+drawunscaled 0 0
+out c10_4
+canvas 100 30
+noise 7 40 20 opaque
+clear 255 40 50 60
+smooth 1
+clipround 10.6 3 40.2 20.1 4
+translate 10.6 3
+cliprect 0 0 40.2 20.1
+drawunscaled 0 0
+out c10_6

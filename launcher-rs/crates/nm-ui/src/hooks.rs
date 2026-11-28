@@ -8,6 +8,21 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 fn var(n: &str) -> Option<String> { std::env::var(n).ok() }
 
+/// Seconds since that day's midnight.
+pub fn local_day_seconds(t: chrono::NaiveDateTime) -> f64 {
+    use chrono::Timelike;
+    t.num_seconds_from_midnight() as f64 + t.nanosecond().min(999_999_999) as f64 / 1e9
+}
+#[cfg(test)]
+#[test]
+fn the_clock_reads_the_local_time_of_day() {
+    let t = chrono::NaiveDate::from_ymd_opt(2026, 11, 27).unwrap().and_hms_opt(20, 25, 7).unwrap();
+    assert_eq!(local_day_seconds(t), 20.0 * 3600.0 + 25.0 * 60.0 + 7.0);
+    let h = TestHooks { t: None, battery: None, seed: None, mask: None, replay: false };
+    let now = chrono::Local::now().naive_local();
+    assert!((h.wall_seconds() - local_day_seconds(now)).abs() < 5.0);
+}
+
 pub struct TestHooks {
     pub t: Option<f32>,
     pub battery: Option<String>,
@@ -28,14 +43,11 @@ impl TestHooks {
         }
     }
     pub fn fixed_time(&self) -> bool { self.t.is_some() }
-    /// Seconds since midnight of the wall clock: 09:41:00 + T when fixed.
+    /// Seconds since midnight of the wall clock (local time, as DateTime.Now): 09:41:00 + T when fixed.
     pub fn wall_seconds(&self) -> f64 {
         match self.t {
             Some(t) => 9.0 * 3600.0 + 41.0 * 60.0 + t as f64,
-            None => {
-                let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-                s % 86400.0
-            }
+            None => local_day_seconds(chrono::Local::now().naive_local()),
         }
     }
     /// DateTime.ToString("h:mm").

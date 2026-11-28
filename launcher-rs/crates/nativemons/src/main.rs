@@ -48,6 +48,13 @@ fn main() {
         }
         return;
     }
+    // --outline <w> <h> <out>: the window outline's rows ("y x0 x1"), to compare with GDI+'s Region (test tool).
+    if a.len() >= 5 && a[1] == "--outline" {
+        let (w, h) = (a[2].parse().unwrap_or(0), a[3].parse().unwrap_or(0));
+        let rows: Vec<String> = nm_ui::art::outline_spans(w, h, nm_platform::geometry::corner_radius(w, h)).iter().map(|s| format!("{} {} {}", s.0, s.1, s.2)).collect();
+        let _ = std::fs::write(&a[4], rows.join("\n"));
+        return;
+    }
     // --play-snap-test <result> <window.png>...: PlaySnaps.Judge on each picture, as the C# mode.
     if a.len() >= 4 && a[1] == "--play-snap-test" {
         if let Err(e) = nm_ui::play_snaps::play_snap_test(std::path::Path::new(&a[2]), &a[3..]) { eprintln!("{}", e); std::process::exit(2); }
@@ -178,6 +185,11 @@ fn cli(argv: &[String]) -> Option<i32> {
         let why = recomp::check_shared_hints();
         let list: Vec<String> = recomp::shared_hint_files().iter().map(|f| format!("{}={}", nm_core::library::file_name(&f.to_string_lossy()), &save_guard::hash_of(f)[..8])).collect();
         let _ = std::fs::write(&argv[1], why.unwrap_or_else(|| format!("ok {}", list.join(" "))));
+        return Some(0);
+    }
+    // --net-check <result>: the real fetches the UI makes, one line each (Rust only, needs the network).
+    if n == 2 && is("--net-check") {
+        let _ = std::fs::write(&argv[1], net_check().join("\n") + "\n");
         return Some(0);
     }
     // --recomp <result> <game> state|build: 3DSrecomp+Zakuro with no window (build: Idle, the Settings cores).
@@ -440,6 +452,47 @@ fn scan() -> Option<nm_core::library::Library> {
             std::process::exit(1);
         }
     }
+}
+
+/// `--net-check`: each live service through the functions the UI calls; "pass|fail <check> <detail>" per line.
+fn net_check() -> Vec<String> {
+    use nm_core::{mod_index, nds_patch, recomp, updater};
+    use nm_ui::{dex, flows, sprites};
+    let mut out = Vec::new();
+    let mut note = |name: &str, r: Result<String, String>| out.push(match r { Ok(s) => format!("pass {} {}", name, s), Err(e) => format!("fail {} {}", name, e) });
+    note("update", match updater::check() {
+        Some(e) => Err(e),
+        None => updater::latest().ok_or_else(|| "no release".to_string()).map(|r| format!("build {} {} {} sha {}", r.build, r.channel.unwrap_or_default(), r.package.unwrap_or_default(), &r.sha256.unwrap_or_default()[..8])),
+    });
+    note("zakuro-hints", match recomp::check_shared_hints() {
+        Some(e) => Err(e),
+        None => { let f = recomp::shared_hint_files(); Ok(format!("{} lists, {} bytes, {}", f.len(), f.iter().map(|p| std::fs::metadata(p).map_or(0, |m| m.len())).sum::<u64>(), f.first().map(|p| nm_core::library::file_name(&p.to_string_lossy())).unwrap_or_default())) }
+    });
+    let repo = match mod_index::load() {
+        Err(e) => { note("mod-index", Err(e)); None }
+        Ok((list, why)) => {
+            note("mod-index", Ok(format!("{} mods{}, first \"{}\"", list.len(), why.map(|w| format!(" ({})", w)).unwrap_or_default(), list.first().map(|e| e.title.clone()).unwrap_or_default())));
+            list.iter().find_map(|e| e.repo.as_deref().and_then(|r| r.strip_prefix("https://github.com/")).map(|r| (r.trim_end_matches('/').to_string(), e.id.clone())))
+        }
+    };
+    match repo {
+        None => note("mod-github", Err("no index entry with a GitHub repo".into())),
+        Some((r, id)) => note("mod-github", mod_index::github_zip(&r, &id).map(|z| match z { Some((url, size, v)) => format!("{} {} {} bytes {}", r, v, size, url), None => format!("{} no release zip", r) })),
+    }
+    let temp = nm_core::proc::temp_dir();
+    let mut said = Vec::new();
+    note("desmume", nds_patch::download_table(&temp, &mut |l| said.push(l.text)).map(|t| format!("key table {} bytes sha {} ({})", t.len(), &nm_core::save_guard::hash_of_bytes(&t)[..8], said.join("; "))));
+    note("pokeapi", dex::dex_info(25).ok_or_else(|| "no entry for #25".to_string()).map(|i| format!("#25 {} {} types {} stats {:?} {} flavor texts", i.genus, i.height, i.types.join("/"), i.stats, i.flavor.len())));
+    note("sprite", sprites::get("25").ok_or_else(|| "no picture for 25".to_string()).map(|b| format!("25.png {}x{}", b.width, b.height)));
+    for source in [flows::FAN, flows::FREE] {
+        note(&format!("wallpaper-{}", source), flows::search(source, "Pokemon FireRed", 1).and_then(|(list, more)| {
+            let first = list.first().ok_or_else(|| "no results".to_string())?;
+            flows::load_thumb(first);
+            let pic = first.pic.lock().unwrap().clone().ok_or_else(|| format!("thumbnail failed: {}", first.thumb))?;
+            Ok(format!("{} results, more {}, thumb {}x{} {}", list.len(), more, pic.width, pic.height, first.thumb))
+        }));
+    }
+    out
 }
 
 /// Where the C# dies on a null game (an unhandled exception): no result file, its exit code.
