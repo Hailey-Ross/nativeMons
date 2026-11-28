@@ -1,0 +1,37 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1 and NATIVEMONS_TEST_FETCH (stubs: wallhaven pages 1-2, openverse, pictures).
+# Red's own picture: fan art search, its results (one thumbnail missing), More, a preview, Use it; free-license art.
+screen wallpapers 3.0
+clickitem 2
+wait 0.3
+key enter
+wait 0.3
+key enter
+wait 0.3
+key enter
+wait 0.5
+snap wall-results
+key down
+key down
+key down
+key enter
+wait 0.5
+snap wall-more
+key enter
+wait 0.5
+snap wall-preview
+key enter
+wait 0.5
+key enter
+wait 0.3
+key down
+key down
+key down
+key enter
+wait 0.5
+snap wall-free
+key down
+key enter
+wait 0.5
+key escape
+wait 0.3
+until 7.25

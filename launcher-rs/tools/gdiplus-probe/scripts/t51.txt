@@ -1,0 +1,135 @@
+# HighQualityBicubic upscaling at many ratios and offsets
+canvas 1 1
+noise 23 40 30 opaque
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 40.0400 30.0300
+out u0
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 40.0400 30.0300
+out u1
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 40.0400 30.0300
+out u2
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 43.2000 32.4000
+out u3
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 43.2000 32.4000
+out u4
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 43.2000 32.4000
+out u5
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 50.0000 37.5000
+out u6
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 50.0000 37.5000
+out u7
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 50.0000 37.5000
+out u8
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 60.0000 45.0000
+out u9
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 60.0000 45.0000
+out u10
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 60.0000 45.0000
+out u11
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 80.0000 60.0000
+out u12
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 80.0000 60.0000
+out u13
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 80.0000 60.0000
+out u14
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 100.0000 75.0000
+out u15
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 100.0000 75.0000
+out u16
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 100.0000 75.0000
+out u17
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 120.0000 90.0000
+out u18
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 120.0000 90.0000
+out u19
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 120.0000 90.0000
+out u20
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 148.0000 111.0000
+out u21
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 148.0000 111.0000
+out u22
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 148.0000 111.0000
+out u23
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 160.0000 120.0000
+out u24
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 160.0000 120.0000
+out u25
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 160.0000 120.0000
+out u26
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 212.0000 159.0000
+out u27
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 212.0000 159.0000
+out u28
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 212.0000 159.0000
+out u29
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3 2 320.0000 240.0000
+out u30
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.3 2.55 320.0000 240.0000
+out u31
+canvas 330 250
+clear 255 0 0 0
+drawimagebc 3.02 2.9 320.0000 240.0000
+out u32

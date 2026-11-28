@@ -1,0 +1,18 @@
+# Root goldens-pc. Infinite Fusion from a zip: one without Game.exe, a canceled pick, then the game's own zip (one folder inside).
+screen main 3.0
+page PcGamePage infinitefusion
+key down
+answer %PCDATA%\noexe.zip
+key enter
+expect Not imported
+key escape
+answer -
+key enter
+expect Pokemon Infinite Fusion
+answer %PCDATA%\if.zip
+key enter
+expect Imported
+key escape
+wait 0.5
+snap pc-zip-installed
+until 7.25

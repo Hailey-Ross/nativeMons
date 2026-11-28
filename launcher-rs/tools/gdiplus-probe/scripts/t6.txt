@@ -1,0 +1,12 @@
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawline 20.5 5 20.5 30
+out v
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawline 10.3 10.7 30.2 13.1
+out d

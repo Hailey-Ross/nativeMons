@@ -1,0 +1,10 @@
+# As flows-emu without the checksum override: the download isn't the expected file.
+screen emu 3.0
+clickitem 0
+wait 0.3
+clickitem 1
+wait 0.3
+key enter
+wait 0.6
+snap emu-bad
+until 7.25

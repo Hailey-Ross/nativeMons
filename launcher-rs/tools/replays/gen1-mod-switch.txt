@@ -1,0 +1,21 @@
+# Root goldens-gen1 (scratch) after gen1-deps (fast_text installed). Mods for Red: Kanto Colors switched off and on
+# again (Gen1Recomp's set; this fixture reports the clash only while both are on, so no Switch ... on? question).
+screen main 3.0
+key down
+key right
+key right
+key enter
+wait 0.5
+expect Mods: choose a game
+key enter
+wait 0.5
+snap mods-before
+clickitem 5
+expect Mods: Pokemon Red
+wait 0.3
+snap mods-off
+clickitem 5
+expect Mods: Pokemon Red
+wait 0.3
+snap mods-on
+until 7.25

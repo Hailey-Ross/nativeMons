@@ -1,0 +1,6 @@
+canvas 420 120
+clear 255 255 255 255
+smooth 1
+text @NotoSans-Regular.ttf 20.29 255 28 28 30 10 10 400 49 0 0 1 Shiny: ★ ▶ Next ◀ Back
+text @NotoSans-Regular.ttf 20.29 255 226 164 16 10 60 400 49 0 2 1 ★
+out symbols png

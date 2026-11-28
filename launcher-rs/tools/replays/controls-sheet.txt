@@ -1,0 +1,8 @@
+# Controls: Enter on Fulldex shows its sheet (golden: controls-0); Escape goes back to Controls.
+screen controls 3.0
+key enter
+expect Fulldex controls
+until 7.25
+snap controls-0
+key escape
+expect Controls

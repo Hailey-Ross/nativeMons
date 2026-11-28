@@ -1,0 +1,5 @@
+# Root goldens-boxes, dry run: Play on Infinite Fusion's page (the empty placeholder Game.exe) after its save backup.
+screen main 3.0
+page PcGamePage infinitefusion
+key enter
+effect Launch

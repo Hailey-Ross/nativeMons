@@ -1,0 +1,26 @@
+# Root goldens-pc (goldens-pc.ps1), PCDATA = its data folder. Infinite Fusion imported from a folder: one without
+# Game.exe first, then the fake copy (its save in the scratch roaming folder is copied in); then uninstalled.
+screen main 3.0
+page PcGamePage infinitefusion
+answer %PCDATA%\noexe
+key enter
+expect Not imported
+key escape
+answer %PCDATA%\if-src
+key enter
+expect Imported
+snap pc-imported
+key escape
+expect Pokemon Infinite Fusion
+wait 0.5
+snap pc-installed
+key down
+key down
+key down
+key down
+key down
+key enter
+expect Uninstall Pokemon Infinite Fusion?
+key enter
+expect Uninstalled
+until 7.25

@@ -1,0 +1,19 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, NATIVEMONS_TEST_FETCH (a fake AzaharPlus release) and NATIVEMONS_TEST_SHA256
+# its hash. 3DS games on, AzaharPlus installed (the animation over its page), then removed.
+screen emu 3.0
+clickitem 0
+wait 0.3
+clickitem 1
+wait 0.3
+key enter
+wait 0.6
+snap emu-installing
+wait 1.5
+snap emu-installed
+key down
+key down
+key down
+key enter
+wait 0.5
+snap emu-removed
+until 7.25

@@ -1,0 +1,28 @@
+# Root goldens-recomp: the pages around 3DSrecomp+Zakuro, snapped on both launchers (no golden): X's game page (built,
+# can be improved, findings to share), Y's (not built, header to fix), Settings' two recompile rows, the build question
+# from Y's page and from Play, and the setup question.
+screen game:x 3.0
+wait 0.5
+snap recomp-game-x
+screen game:y 3.0
+wait 0.5
+snap recomp-game-y
+key down
+key down
+key enter
+wait 0.5
+snap recomp-ask-y
+screen settings 3.0
+key down
+key down
+key down
+wait 0.5
+snap recomp-settings
+screen recompask:y 3.0
+wait 0.5
+snap recomp-ask-play
+screen main 3.0
+page Setup3dsPage y
+wait 0.5
+snap recomp-setup3ds
+until 7.25

@@ -1,0 +1,310 @@
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 0.5
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_0.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 0.5 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_0.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 0.5
+drawellipse 10.3 10.6 70 60
+out ell_0.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 0.5
+drawround 10.3 10.6 70 60 12
+out round_0.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 0.5 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_0.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 0.5
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_0.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_1
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_1
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawellipse 10.3 10.6 70 60
+out ell_1
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawround 10.3 10.6 70 60 12
+out round_1
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_1
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_1
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_1.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_1.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5
+drawellipse 10.3 10.6 70 60
+out ell_1.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5
+drawround 10.3 10.6 70 60 12
+out round_1.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_1.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_1.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_2
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_2
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2
+drawellipse 10.3 10.6 70 60
+out ell_2
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2
+drawround 10.3 10.6 70 60 12
+out round_2
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_2
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_2
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_3
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_3
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3
+drawellipse 10.3 10.6 70 60
+out ell_3
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3
+drawround 10.3 10.6 70 60 12
+out round_3
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_3
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_3
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 4.5
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_4.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 4.5 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_4.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 4.5
+drawellipse 10.3 10.6 70 60
+out ell_4.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 4.5
+drawround 10.3 10.6 70 60 12
+out round_4.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 4.5 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_4.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 4.5
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_4.5
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_flat_9
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9 round round miter
+drawline 10.3 10.7 80.2 30.1
+drawline 10 50 80 50
+drawline 20.5 60 20.5 90
+out line_round_9
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9
+drawellipse 10.3 10.6 70 60
+out ell_9
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9
+drawround 10.3 10.6 70 60 12
+out round_9
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9 round round round
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_rj_9
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9
+drawlines 4 10 80 30 20 50 70 85 15
+out lines_mj_9
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3 round round round
+drawarc 10 10 70 70 -60 300
+out arc
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2.5 round round round
+drawbezier 10 70 30 10 60 10 85 60
+out bez
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 200 30 60 200 2
+drawpoly 3 10 10 80 30 30 80
+out poly
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2 flat flat miter dash dot
+drawellipse 10 10 70 70
+out dot
+canvas 96 96
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2 flat flat miter dash dash
+drawround 10 10 70 70 12
+out dash

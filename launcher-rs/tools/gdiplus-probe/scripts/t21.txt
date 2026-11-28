@@ -1,0 +1,12 @@
+canvas 200 140
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 6 round round miter
+drawcurve 9 20 120 40 80 60 50 85 30 110 22 135 25 158 35 175 52 185 75
+out curve_frond
+canvas 200 140
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1
+drawcurve 4 20 120 60 20 120 120 180 30
+out curve_thin

@@ -1,0 +1,40 @@
+# Root goldens-pc. An existing installation: a folder without Game.exe, then the fake one (run where it is);
+# Import into the launcher, Import this installation; then a second run forgets it (Remove from the launcher).
+screen main 3.0
+page PcGamePage infinitefusion
+key down
+key down
+key down
+answer %PCDATA%\noexe
+key enter
+expect Not added
+key escape
+answer %PCDATA%\if-src
+key enter
+expect Pokemon Infinite Fusion
+wait 0.5
+snap pc-existing
+key down
+key down
+key down
+key enter
+expect Import Pokemon Infinite Fusion
+key enter
+expect Imported
+key escape
+screen main 3.5
+page PcGamePage infinitefusion
+key down
+key down
+key down
+key down
+answer %PCDATA%\if-src
+key enter
+expect Pokemon Infinite Fusion
+key down
+key down
+key down
+key down
+key enter
+expect Removed
+until 7.25

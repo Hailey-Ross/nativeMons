@@ -1,0 +1,11 @@
+# Root goldens-gen1. Mods: the game list, Enter on the first (golden: mods).
+screen main 3.0
+key down
+key right
+key right
+key enter
+wait 0.5
+expect Mods: choose a game
+key enter
+until 7.25
+snap mods

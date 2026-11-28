@@ -1,0 +1,36 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, root goldens, seed: Gen1Recomp placeholders; NATIVEMONS_TEST_GEN1_CLI answers
+# its command line (games, list, paths, enable-new), NATIVEMONS_TEST_FETCH the mod index and fast_text's zip.
+# Red's Mods, Find mods: the kinds in turn, A to Z, back to most downloaded, then Fast Text installed from the list.
+screen game:red 3.0
+clickitem 3
+wait 0.5
+snap mods-red
+key enter
+wait 0.5
+snap find-mods
+key enter
+wait 0.2
+key enter
+wait 0.2
+key enter
+wait 0.2
+snap find-mods-kind
+key enter
+wait 0.2
+key enter
+wait 0.2
+key down
+key enter
+wait 0.2
+snap find-mods-az
+key enter
+wait 0.2
+key down
+key down
+key enter
+wait 0.5
+snap mod-entry
+key enter
+wait 0.8
+snap mod-installed
+until 7.25

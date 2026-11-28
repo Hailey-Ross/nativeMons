@@ -106,8 +106,9 @@ static class DiscordPresence {
         for (int i = 0; i < 10; i++) {
             var p = new System.IO.Pipes.NamedPipeClientStream(".", "discord-ipc-" + i, System.IO.Pipes.PipeDirection.InOut);
             try {
-                p.Connect(200);
+                if (TestFrames == null) p.Connect(200);
                 Send(p, 0, new Dictionary<string, object> { { "v", 1 }, { "client_id", id } });
+                if (TestFrames != null) return p;
                 // Discord answers the handshake with READY, or closes the pipe for an unknown application.
                 if (Receive(p) != null) return p;
             } catch { }
@@ -115,7 +116,10 @@ static class DiscordPresence {
         }
         return null;
     }
+    // Test only: NATIVEMONS_TEST_DISCORD=<file> notes each frame there as "op <n> <json>", nothing is sent.
+    static readonly string TestFrames = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_DISCORD");
     static void Send(Stream s, int op, object body) {
+        if (TestFrames != null) { File.AppendAllText(TestFrames, "op " + op + " " + new JavaScriptSerializer().Serialize(body) + Environment.NewLine); return; }
         byte[] data = Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(body));
         var frame = new byte[8 + data.Length];
         BitConverter.GetBytes(op).CopyTo(frame, 0);
@@ -369,6 +373,7 @@ static class Recomp {
     }
     // The addresses alone, for sharing: one per line. .txt, since GitHub refuses a .hints attachment.
     public static string ShareFile(GameEntry g, string codeId) {
+        if (TestHooks.Todo("Recomp.ShareFile")) return null;
         string to = Path.Combine(Dir, "share", codeId + ".hints.txt");
         Directory.CreateDirectory(Path.GetDirectoryName(to));
         File.WriteAllLines(to, File.ReadAllLines(HintsOf(g)).Select(l => l.Trim()).Where(l => System.Text.RegularExpressions.Regex.IsMatch(l, "^(0x)?[0-9A-Fa-f]{1,8}$")).ToArray());
@@ -523,6 +528,7 @@ static class Recomp {
         int covered = HintCount(g);
         try {
             var psi = BuildInto(g, Next(g), QuietWork);
+            if (TestHooks.Replay && TestHooks.DryRun) { int h = Math.Max(1, Math.Min(64, Environment.ProcessorCount / 2)); TestHooks.Priority = "idle " + (h >= 64 ? -1L : (1L << h) - 1).ToString("X"); TestHooks.Launch((first ? "Building " : "Improving ") + g.Title, psi, false); return; }
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
             QuietProgress = 0; BannerTitle = g.Title; BannerVerb = first ? "Building" : "Improving";
             p.OutputDataReceived += (o, ev) => {
@@ -631,7 +637,7 @@ static class UiFont {
     public static readonly bool Wine = DetectWine();
     static bool DetectWine() { try { var nt = GetModuleHandle("ntdll.dll"); return nt != IntPtr.Zero && GetProcAddress(nt, "wine_get_version") != IntPtr.Zero; } catch { return false; } }
     public static Font Get(string name, float size, GraphicsUnit unit) {
-        if (!Wine && have.Contains(name)) try { return new Font(name, size, unit); } catch (ArgumentException) { }
+        if (!Wine && !(TestHooks.BundledFonts && bundled.ContainsKey(name)) && have.Contains(name)) try { return new Font(name, size, unit); } catch (ArgumentException) { }
         var own = Bundled(name);
         if (own != null) try { return new Font(own, size, own.IsStyleAvailable(FontStyle.Regular) ? FontStyle.Regular : FontStyle.Bold, unit); } catch (ArgumentException) { }
         string[] alts;
@@ -640,6 +646,132 @@ static class UiFont {
         try { return new Font(name == "Consolas" ? FontFamily.GenericMonospace : FontFamily.GenericSansSerif, size, style, unit); }
         catch (ArgumentException) { return SystemFonts.DefaultFont; }
     }
+}
+
+// Test-only, for the Rust launcher's reference pictures: fixed time, clock, battery, seed and fonts, and where text was
+// drawn. Inert unless their NATIVEMONS_TEST_* variables are set.
+static class TestHooks {
+    static string Var(string n) { return Environment.GetEnvironmentVariable(n); }
+    public static float T = Var("NATIVEMONS_TEST_T") != null ? float.Parse(Var("NATIVEMONS_TEST_T"), System.Globalization.CultureInfo.InvariantCulture) : float.NaN;
+    public static bool FixedTime { get { return !float.IsNaN(T); } }
+    public static DateTime Wall() { return FixedTime ? new DateTime(2026, 1, 1, 9, 41, 0).AddSeconds(T) : DateTime.Now; }
+    // "none", or a charge from 0 to 100.
+    public static readonly string Battery = Var("NATIVEMONS_TEST_BATTERY");
+    static readonly string seed = Var("NATIVEMONS_TEST_SEED");
+    public static Random NewRandom() { return seed != null ? new Random(int.Parse(seed)) : new Random(); }
+    public static readonly bool BundledFonts = Var("NATIVEMONS_TEST_FONTS") == "bundled";
+    // Snapshots with NATIVEMONS_SNAPSHOT_TEXTMASK=1: each string's box in image pixels, in <picture>.text.txt.
+    public static List<string> Mask;
+    public static void Text(Graphics g, string s, Font f, RectangleF r, StringFormat sf) {
+        if (Mask == null || string.IsNullOrEmpty(s)) return;
+        try {
+            var box = RectangleF.Intersect(r, g.VisibleClipBounds);
+            if (box.Width <= 0 || box.Height <= 0) return;
+            var pts = new[] { box.Location, new PointF(box.Right, box.Top), new PointF(box.Right, box.Bottom), new PointF(box.Left, box.Bottom) };
+            g.TransformPoints(System.Drawing.Drawing2D.CoordinateSpace.Device, System.Drawing.Drawing2D.CoordinateSpace.World, pts);
+            int x0 = (int)Math.Floor(pts.Min(p => p.X)), y0 = (int)Math.Floor(pts.Min(p => p.Y));
+            int x1 = (int)Math.Ceiling(pts.Max(p => p.X)), y1 = (int)Math.Ceiling(pts.Max(p => p.Y));
+            float px = f.Unit == GraphicsUnit.Pixel ? f.Size : f.SizeInPoints * g.DpiY / 72f;
+            string align = sf == null ? "Near Near None" : sf.Alignment + " " + sf.LineAlignment + " " + sf.FormatFlags.ToString().Replace(" ", "");
+            Mask.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} {1} {2} {3}\t{4}\t{5:0.##}\t{6}\t{7}",
+                x0, y0, x1 - x0, y1 - y0, f.FontFamily.Name, px, align, s.Replace("\t", " ").Replace("\r", "").Replace("\n", "\\n")));
+        } catch { }
+    }
+    public static void SaveMask(string picture) {
+        if (Mask == null) return;
+        File.WriteAllText(Path.ChangeExtension(picture, ".text.txt"), string.Concat(Mask.Select(l => l + "\r\n")));
+        Mask.Clear();
+    }
+    // --replay: no window; the script's pad, focus and screen; what would leave the process is noted, not run.
+    public static bool Replay, Active = true;
+    public static ushort Pad;
+    public static readonly Rectangle Area = new Rectangle(0, 0, 1920, 1040);
+    public static readonly List<string> Effects = new List<string>();
+    public static bool Skip(string what) { if (!Replay) return false; Effects.Add(what); return true; }
+    public static bool Todo(string what) { return Skip("Todo(\"" + what + "\")"); }
+    // NATIVEMONS_TEST_DRYRUN=1 with --replay: what would start (a game or a tool) is noted, never started.
+    public static readonly bool DryRun = Var("NATIVEMONS_TEST_DRYRUN") == "1";
+    // In a replay a dialog is noted and answered by the script's "answer" lines (none left: Cancel).
+    public static readonly Queue<string> Answers = new Queue<string>();
+    public static bool Answer(string what, out string answer) {
+        answer = null;
+        if (!Replay) return false;
+        Effects.Add("Dialog(\"" + what + "\")");
+        if (Answers.Count > 0) answer = Answers.Dequeue();
+        return true;
+    }
+    // NATIVEMONS_TEST_SAVE_FLOWS=1 with --replay: RestoreBackup, OpenBoxView and MoveNow run instead of being noted (on copies).
+    public static readonly bool SaveFlows = Var("NATIVEMONS_TEST_SAVE_FLOWS") == "1";
+    // With --replay: PC games' repository and roaming save folder from the test (a local repo, a scratch folder).
+    public static string PcRepo(string repo) { string r = Var("NATIVEMONS_TEST_PC_REPO"); return Replay && !string.IsNullOrEmpty(r) ? r : repo; }
+    public static string PcSaves { get { string r = Var("NATIVEMONS_TEST_PC_SAVES"); return Replay && !string.IsNullOrEmpty(r) ? r : null; } }
+    // NATIVEMONS_TEST_FLOWS=1 in a dry-run replay: the flows that are only noted otherwise run (on fixture copies).
+    public static readonly bool Flows = Var("NATIVEMONS_TEST_FLOWS") == "1" && DryRun;
+    public static bool Note(string what) { return Replay && Flows ? false : Todo(what); }
+    // With --replay and NATIVEMONS_TEST_FETCH=<folder>: a download is noted (when asked) and read from the folder's
+    // file named after the URL; none there answers as a 404. Nothing goes online.
+    public static bool Fetch(string url, bool note, out byte[] data) {
+        data = null; string dir = Var("NATIVEMONS_TEST_FETCH");
+        if (!Replay || string.IsNullOrEmpty(dir)) return false;
+        if (note) lock (Effects) Effects.Add("Fetch(\"" + url + "\")");
+        string f = Path.Combine(dir, new string(url.Select(c => c < 128 && char.IsLetterOrDigit(c) || c == '.' || c == '-' ? c : '_').ToArray()));
+        if (!File.Exists(f)) throw new System.Net.WebException("The remote server returned an error: (404) Not Found.");
+        data = File.ReadAllBytes(f);
+        return true;
+    }
+    public static bool FetchText(string url, out string text) { byte[] d; text = Fetch(url, true, out d) ? Encoding.UTF8.GetString(d) : null; return text != null; }
+    public static bool FetchFile(string url, string to) { byte[] d; if (!Fetch(url, true, out d)) return false; File.WriteAllBytes(to, d); return true; }
+    // With --replay (or NATIVEMONS_TEST_ART_SHOTS) and NATIVEMONS_TEST_GEN1_CLI=<file>: Gen1Recomp's command line is noted and
+    // answered from the file's "<command>\t<exit code>\t<output, \n for line breaks>" lines (%VAR% expanded), never run.
+    public static bool Gen1(ProcessStartInfo psi, out string output, out int code) {
+        output = ""; code = 1; string file = Var("NATIVEMONS_TEST_GEN1_CLI");
+        if ((!Replay && string.IsNullOrEmpty(Var("NATIVEMONS_TEST_ART_SHOTS"))) || string.IsNullOrEmpty(file) || psi.FileName != Config.Love || !psi.EnvironmentVariables.ContainsKey("NATIVEMONS_CLI")) return false;
+        string cmd = psi.EnvironmentVariables["NATIVEMONS_CLI"];
+        lock (Effects) Effects.Add("Gen1Cli(\"" + cmd.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\")");
+        foreach (var l in File.ReadAllLines(file)) {
+            var f = l.Split(new[] { '\t' }, 3);
+            if (f.Length == 3 && Environment.ExpandEnvironmentVariables(f[0]) == cmd) { code = int.Parse(f[1]); output = Environment.ExpandEnvironmentVariables(f[2].Replace("\\n", "\n")); break; }
+        }
+        return true;
+    }
+    // With --replay and NATIVEMONS_TEST_FLOWS: whether Python 3 works, from NATIVEMONS_TEST_PYTHON (yes/no), never run.
+    public static bool Python(out bool works) { works = Var("NATIVEMONS_TEST_PYTHON") == "yes"; return Replay && Flows; }
+    // A download's expected SHA-256 in such a replay (NATIVEMONS_TEST_SHA256), else the real one.
+    public static string Sha(string real) { string s = Var("NATIVEMONS_TEST_SHA256"); return Replay && Flows && !string.IsNullOrEmpty(s) ? s : real; }
+    // NATIVEMONS_TEST_ART_SHOTS=<folder>: a picture capture's engine isn't started; its plan is added to
+    // NATIVEMONS_TEST_ART_PLAN and the folder's pictures are copied in as if it had made them.
+    public static bool ArtShots(ProcessStartInfo psi, string temp) {
+        string dir = Var("NATIVEMONS_TEST_ART_SHOTS");
+        if (string.IsNullOrEmpty(dir)) return false;
+        var env = new List<string>();
+        foreach (string k in psi.EnvironmentVariables.Keys) { string v = psi.EnvironmentVariables[k]; if ((Environment.GetEnvironmentVariable(k) ?? "") != (v ?? "")) env.Add(k.ToUpperInvariant() + "=" + v); }
+        env.Sort(StringComparer.Ordinal);
+        File.AppendAllText(Var("NATIVEMONS_TEST_ART_PLAN"), "Capture | " + psi.FileName + " | " + psi.Arguments + " | " + psi.WorkingDirectory + " | " + string.Join(";", env.ToArray()) + "\r\n");
+        if (temp != null) foreach (var f in Directory.GetFiles(dir)) File.Copy(f, Path.Combine(temp, Path.GetFileName(f)), true);
+        return true;
+    }
+    // RunCapture in such a test, noted the same way: pictures go to its NATIVEMONS_TOWN_ART folder and that run's
+    // output is NATIVEMONS_TEST_ART_SAID's text.
+    public static bool ArtRun(ProcessStartInfo psi, out string output) {
+        output = "";
+        string many = psi.EnvironmentVariables.ContainsKey("NATIVEMONS_TOWN_ART") ? psi.EnvironmentVariables["NATIVEMONS_TOWN_ART"] : null;
+        if (!ArtShots(psi, many)) return false;
+        string said = Var("NATIVEMONS_TEST_ART_SAID");
+        if (many != null && !string.IsNullOrEmpty(said) && File.Exists(said)) output = File.ReadAllText(said);
+        return true;
+    }
+    // The priority and cores the next start would get after it starts (a dry run's note).
+    public static string Priority;
+    public static bool Launch(string title, ProcessStartInfo psi, bool isGame) {
+        if (!Replay || !DryRun) return false;
+        var env = new List<string>();
+        foreach (string k in psi.EnvironmentVariables.Keys) { string v = psi.EnvironmentVariables[k]; if ((Environment.GetEnvironmentVariable(k) ?? "") != (v ?? "")) env.Add(k.ToUpperInvariant() + "=" + v); }
+        env.Sort(StringComparer.Ordinal);
+        string line = title + " | " + psi.FileName + " | " + psi.Arguments + " | " + psi.WorkingDirectory + " | " + string.Join(";", env.ToArray()) + (isGame ? " | game" : "") + (Priority != null ? " | " + Priority : "");
+        Priority = null;
+        return Skip("Launch(\"" + line.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\")");
+    }
+    public static DateTime Clock() { return Replay ? Wall() : DateTime.Now; }
 }
 
 // Shared packages to submit.hails.app (nativemons-submit, docs/protocol.md there): signed with this install's
@@ -701,6 +833,7 @@ static class Submit {
     }
     // Sends a Zakuro hint list; the receipt, or throws with why.
     public static string ZakuroHints(string codeId, IEnumerable<string> lines) {
+        if (TestHooks.Todo("Submit.ZakuroHints")) return "a replay";
         var addrs = new SortedSet<uint>();
         foreach (var l in lines) {
             var m = System.Text.RegularExpressions.Regex.Match(l.Trim(), "^(0x)?([0-9A-Fa-f]{1,8})$");
@@ -785,16 +918,18 @@ class Emu3ds {
     static readonly string[] Kept = { "user" };
     // Download, check, unpack beside, then swap in. Null when done, or why not.
     public static string Install(Emu3ds e) {
+        if (TestHooks.Note("Emu3ds.Install")) return "a replay";
         string zip = e.Dir + ".download.zip", temp = e.Dir + ".new", old = e.Dir + ".old";
         try {
             // The link to its data (state\3ds\emu) goes first, so nothing below can reach the saves through it.
             Ctr3dsSaves.Unlink(e);
             System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
             Directory.CreateDirectory(Config.Emulators);
+            if (!TestHooks.FetchFile(e.Url, zip))
             using (var web = new System.Net.WebClient()) { web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; web.DownloadFile(e.Url, zip); }
             string hash;
             using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
-            if (hash != e.Sha256) return "The download wasn't the expected file, so it wasn't used.";
+            if (hash != TestHooks.Sha(e.Sha256)) return "The download wasn't the expected file, so it wasn't used.";
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
             // The zip holds one folder (azahar\) with the program inside.
@@ -1266,9 +1401,11 @@ static class WallFind {
         var list = new List<WallResult>(); more = false;
         string q = Uri.EscapeDataString(query);
         string json;
-        using (var w = Web()) json = w.DownloadString(source == Fan
+        string url = source == Fan
             ? "https://wallhaven.cc/api/v1/search?q=" + q + "&purity=100&categories=110&sorting=relevance&page=" + page
-            : "https://api.openverse.org/v1/images/?q=" + q + "&mature=false&page_size=20&page=" + page);
+            : "https://api.openverse.org/v1/images/?q=" + q + "&mature=false&page_size=20&page=" + page;
+        if (!TestHooks.FetchText(url, out json))
+        using (var w = Web()) json = w.DownloadString(url);
         var root = new JavaScriptSerializer { MaxJsonLength = 1 << 24 }.Deserialize<Dictionary<string, object>>(json);
         if (source == Fan) {
             var data = root["data"] as System.Collections.ArrayList;
@@ -1295,11 +1432,13 @@ static class WallFind {
         foreach (var one in list) {
             var r = one;
             if (r.Pic != null || r.Failed) continue;
-            Task.Run(delegate {
-                try { using (var w = Web()) using (var ms = new MemoryStream(w.DownloadData(r.Thumb))) using (var img = Image.FromStream(ms)) r.Pic = new Bitmap(img); }
+            Action get = delegate {
+                try { byte[] d; if (!TestHooks.Fetch(r.Thumb, true, out d)) using (var w = Web()) d = w.DownloadData(r.Thumb); using (var ms = new MemoryStream(d)) using (var img = Image.FromStream(ms)) r.Pic = new Bitmap(img); }
                 catch { r.Failed = true; }
                 done();
-            });
+            };
+            // A replay gets them in order, at once.
+            if (TestHooks.Replay && TestHooks.Flows) get(); else Task.Run(get);
         }
     }
     // The full picture, into a temporary file the caller removes.
@@ -1307,6 +1446,7 @@ static class WallFind {
         string ext = Path.GetExtension(new Uri(r.Full).AbsolutePath).ToLowerInvariant();
         if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".gif" && ext != ".bmp") ext = ".jpg";
         string tmp = Path.Combine(Path.GetTempPath(), "nativemons-wallpaper-" + Guid.NewGuid().ToString("N") + ext);
+        if (!TestHooks.FetchFile(r.Full, tmp))
         using (var w = Web()) w.DownloadFile(r.Full, tmp);
         return tmp;
     }
@@ -1515,7 +1655,7 @@ static class PcGames {
     public static string Dir(GameEntry g) { string e = Exe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static string OwnDir(GameEntry g) { string e = OwnExe(g); return e == null ? null : Path.GetDirectoryName(e); }
     public static bool Installed(GameEntry g) { string e = Exe(g); return e != null && File.Exists(e); }
-    public static string GameSaveDir(GameEntry g) { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Of(g).SaveFolder); }
+    public static string GameSaveDir(GameEntry g) { return Path.Combine(TestHooks.PcSaves ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Of(g).SaveFolder); }
     public static string SaveDir(GameEntry g) { return IsExisting(g) ? GameSaveDir(g) : Path.Combine(Config.State, "saves", g.Id); }
     // Keeps an imported copy's saves beside the launcher (notes/launcher.md, PC games).
     const string PreloadName = "nativemons-saves.rb";
@@ -1613,7 +1753,7 @@ static class PcGames {
                 if (Git() == null) return "Downloading needs Git for Windows (git-scm.com). Or install from your own copy of the game.";
                 Directory.CreateDirectory(Path.GetDirectoryName(work));
                 report("Downloading " + pf.Name + " from GitHub (" + pf.Size + ")", -1);
-                int code = RunGit("clone --depth=1 --branch " + pf.Branch + " --progress " + pf.Repo + " \"" + work + "\"", null, delegate(string l) { report(l, -1); });
+                int code = RunGit("clone --depth=1 --branch " + pf.Branch + " --progress " + TestHooks.PcRepo(pf.Repo) + " \"" + work + "\"", null, delegate(string l) { report(l, -1); });
                 if (code != 0) return "The download stopped (git said " + code + "). Nothing was changed.";
             } else if (File.Exists(source)) {
                 using (var zip = System.IO.Compression.ZipFile.OpenRead(source)) {
@@ -1666,7 +1806,7 @@ static class PcGames {
         if (!Directory.Exists(Path.Combine(dir, ".git"))) return "This copy has no update history (.git). Install it again from GitHub to get updates.";
         try { File.Delete(Path.Combine(dir, ".git", "shallow.lock")); } catch { }
         var pf = Of(g);
-        RunGit("remote set-url origin " + pf.Repo, dir, null);
+        RunGit("remote set-url origin " + TestHooks.PcRepo(pf.Repo), dir, null);
         if (RunGit("fetch --depth=1 --progress origin " + pf.Branch, dir, line) != 0) return "Couldn't reach the game's GitHub. Nothing was changed.";
         if (RunGit("reset --hard origin/" + pf.Branch, dir, line) != 0) return "The update didn't apply cleanly. Install it again to repair it.";
         return null;
@@ -1989,7 +2129,7 @@ static class ModIndex {
                 using (var web = new System.Net.WebClient()) {
                     web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
                     web.Encoding = Encoding.UTF8;
-                    text = web.DownloadString(Feed);
+                    if (!TestHooks.FetchText(Feed, out text)) text = web.DownloadString(Feed);
                 }
                 Parse(text);   // a feed that doesn't read is never kept
                 Directory.CreateDirectory(Config.State);
@@ -2077,6 +2217,7 @@ static class ModIndex {
     }
     // Downloads the release .zip as <id>.zip (the name a bare archive's folder takes) and installs it.
     public static string Install(Entry e, Action<float> progress) {
+        if (TestHooks.Note("InstallFromIndex")) return "a replay";
         if (e.ZipSize > MaxZip) return e.Title + " is " + (e.ZipSize / (1024 * 1024)) + " MB, larger than nativeMons installs from the index.";
         return InstallFrom(e.ZipUrl, e.Id, e.Title, e.ZipSize, progress);
     }
@@ -2087,6 +2228,7 @@ static class ModIndex {
         try {
             if (url == null || !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return "Only https:// links are used.";
             System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            byte[] stub; if (TestHooks.Fetch(url, true, out stub)) File.WriteAllBytes(zip + ".part", stub); else {
             var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
             req.UserAgent = "nativeMons";
             using (var resp = req.GetResponse()) using (var input = resp.GetResponseStream()) using (var output = File.Create(zip + ".part")) {
@@ -2098,6 +2240,7 @@ static class ModIndex {
                     output.Write(buffer, 0, n);
                     if (total > 0) progress((float)got / total);
                 }
+            }
             }
             if (File.Exists(zip)) File.Delete(zip);
             File.Move(zip + ".part", zip);
@@ -2439,7 +2582,7 @@ static class GameArt {
         try { return stamp == "" || File.ReadAllText(done).Contains("engine=" + stamp); } catch { return true; }
     }
     // One of them, picked at random once per launcher start.
-    static readonly Random townDice = new Random();
+    static readonly Random townDice = TestHooks.NewRandom();
     static readonly Dictionary<string, string> townChosen = new Dictionary<string, string>();
     static string ChosenTown(string id) {
         lock (gate) {
@@ -2591,6 +2734,7 @@ static class GameArt {
         if (warp != null) { psi.EnvironmentVariables["PC_WARP"] = warp; psi.EnvironmentVariables["PC_WARP_SETTLE"] = "120"; }
         stopsMissed.Clear();
         if (sweep != null) psi.EnvironmentVariables["PC_SWEEP"] = sweep;
+        if (TestHooks.ArtShots(psi, Path.Combine(Config.State, "game-art"))) return 0;
         using (var p = Process.Start(psi)) { Watch(p);
             try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
             var said = new Queue<string>();
@@ -2631,7 +2775,7 @@ static class GameArt {
             string dir = Config.FulldexDir;
             string args = "\"" + g.FulldexRom + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --input \"" + script + "\" --shot-dir \"" + temp + "\" --shot-at " + g.TownFrame + " --frames " + (g.TownFrame + 10) + " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            using (var p = Process.Start(psi)) { Watch(p);
+            if (!TestHooks.ArtShots(psi, temp)) using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -2989,7 +3133,7 @@ static class GameArt {
             psi.EnvironmentVariables["POKEPORT_BACKGROUND"] = "1";
             psi.EnvironmentVariables["POKEPORT_DRIVER"] = "src/nativemons/TitleArt.lua";
             psi.EnvironmentVariables["NATIVEMONS_TITLE_ART"] = temp.Replace('\\', '/');
-            using (var p = Process.Start(psi)) { Watch(p);
+            if (!TestHooks.ArtShots(psi, temp)) using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(240000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -3032,7 +3176,7 @@ static class GameArt {
             var at = Enumerable.Range(0, Count).Select(i => (GbaFirstShot + i * Step).ToString()).ToArray();
             string args = "--gba-art \"" + rom + "\" \"" + temp + "\" " + (GbaFirstShot + Count * Step + 2) + " " + GbaPress + ":start " + string.Join(",", at);
             var psi = new ProcessStartInfo(Application.ExecutablePath, args) { UseShellExecute = false, CreateNoWindow = true };
-            using (var p = Process.Start(psi)) { Watch(p);
+            if (!TestHooks.ArtShots(psi, temp)) using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
             }
@@ -3060,7 +3204,7 @@ static class GameArt {
             psi.EnvironmentVariables["SDL_VIDEO_DRIVER"] = "dummy";
             psi.EnvironmentVariables["SDL_AUDIO_DRIVER"] = "dummy";
             psi.EnvironmentVariables["NP_AUTOTEST"] = "frames=" + (1500 + Count * Step) + ",shots=" + Step + ",size=512x384,layout=top,game=" + g.Nativeplat + ",png=" + Path.Combine(temp, "s.png") + ",rom=" + LauncherForm.NativeplatRomCopy(g) + ",press=1200:start:10";
-            using (var p = Process.Start(psi)) { Watch(p);
+            if (!TestHooks.ArtShots(psi, temp)) using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -3107,7 +3251,7 @@ static class GameArt {
             string args = "\"" + romFile + "\" --no-save --config \"" + Path.Combine(dir, "settings.cfg") + "\" --jit --headless --compose 960x720 --shot-dir \"" + temp + "\" --shot-at " + string.Join(",", at) + " --frames " + (g.ArtFrame + Count * Step + 10);
             if (g.FulldexCode != "IPGE" && g.FulldexCode != "IPKE") args += " --funcs \"" + Path.Combine(dir, "data", "funcs", g.FulldexCode + ".txt") + "\"";
             var psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            using (var p = Process.Start(psi)) { Watch(p);
+            if (!TestHooks.ArtShots(psi, temp)) using (var p = Process.Start(psi)) { Watch(p);
                 try { p.PriorityClass = Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 if (!p.WaitForExit(180000)) { try { p.Kill(); } catch { } return "It took too long."; }
@@ -3738,7 +3882,7 @@ static class DexInfos {
         using (var web = new System.Net.WebClient()) {
             web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
             web.Encoding = Encoding.UTF8;
-            return web.DownloadString(url);
+            byte[] stub; return TestHooks.Fetch(url, false, out stub) ? Encoding.UTF8.GetString(stub) : web.DownloadString(url);
         }
     }
     static void Fetch(int id) {
@@ -3777,6 +3921,7 @@ static class PythonSetup {
     // Whether Config.Python runs Python 3 (Windows' "python" can be only the Microsoft Store's shortcut).
     public static bool Works() {
         if (works) return true;
+        bool stub; if (TestHooks.Python(out stub)) return stub;
         try {
             var psi = new ProcessStartInfo(Config.Python, "-c \"import sys; print(sys.version_info[0])\"") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             using (var p = Process.Start(psi)) {
@@ -3793,10 +3938,10 @@ static class PythonSetup {
         try {
             System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
             Directory.CreateDirectory(Path.GetDirectoryName(dir));
-            using (var web = new System.Net.WebClient()) { web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; web.DownloadFile(Url, zip); }
+            using (var web = new System.Net.WebClient()) { web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons"; if (!TestHooks.FetchFile(Url, zip)) web.DownloadFile(Url, zip); }
             string hash;
             using (var f = File.OpenRead(zip)) using (var sha = SHA256.Create()) hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "").ToLowerInvariant();
-            if (hash != Sha256) return "The download from python.org wasn't the expected file, so it wasn't used.";
+            if (hash != TestHooks.Sha(Sha256)) return "The download from python.org wasn't the expected file, so it wasn't used.";
             if (Directory.Exists(temp)) Directory.Delete(temp, true);
             System.IO.Compression.ZipFile.ExtractToDirectory(zip, temp);
             string pth = Directory.GetFiles(temp, "python3*._pth").FirstOrDefault();
@@ -3857,7 +4002,7 @@ static class Updater {
     public static string Check() {
         try {
             string text;
-            using (var web = Web()) { web.Encoding = Encoding.UTF8; text = web.DownloadString(Base + Channel + "/release.json"); }
+            if (!TestHooks.FetchText(Base + Channel + "/release.json", out text)) using (var web = Web()) { web.Encoding = Encoding.UTF8; text = web.DownloadString(Base + Channel + "/release.json"); }
             Latest = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Release>(text.TrimStart('\uFEFF'));
             Sprites.Touch();
             return null;
@@ -3876,6 +4021,7 @@ static class Updater {
         try {
             if (Directory.Exists(work)) Directory.Delete(work, true);
             Directory.CreateDirectory(work);
+            if (!TestHooks.FetchFile(Base + Channel + "/" + release.package, zip))
             using (var web = Web()) {
                 web.DownloadProgressChanged += (s, e) => report("Downloading " + Label(release.channel, release.build, release.version), e.ProgressPercentage / 100f * 0.7f);
                 var wait = new System.Threading.ManualResetEventSlim();
@@ -4000,7 +4146,7 @@ static class Sprites {
             System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
             using (var web = new System.Net.WebClient()) {
                 web.Headers[System.Net.HttpRequestHeader.UserAgent] = "nativeMons";
-                var data = web.DownloadData(Site + key + ".png");
+                byte[] data; if (!TestHooks.Fetch(Site + key + ".png", false, out data)) data = web.DownloadData(Site + key + ".png");
                 using (var check = new MemoryStream(data)) using (var image = Image.FromStream(check)) { }   // only keep real pictures
                 string temp = file + "." + Guid.NewGuid().ToString("N") + ".part";
                 File.WriteAllBytes(temp, data);
@@ -4241,7 +4387,7 @@ class LauncherForm : Form {
             // Closed by the user, the device powers down first (PowerOffTick), then closes for real.
             if (powerOff < 0 && Visible && playDirect == null && !Native.Quiet && WindowState == FormWindowState.Normal
                 && (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.None)) {
-                e.Cancel = true; powerOff = (float)clock.Elapsed.TotalSeconds; powerTop = Top;
+                e.Cancel = true; powerOff = Now(); powerTop = Top;
                 // Background engines (waiting game, snapshot, picture capture) close during the animation, not after it.
                 DropReady(); StopSnapshot(); GameArt.StopNow(); Recomp.StopQuiet(); return;
             }
@@ -4298,7 +4444,11 @@ class LauncherForm : Form {
     }
 
     string previewId;
-    public void Snapshot(string file, string screen, int w, int h) {
+    // anim: t0, t1 and frames a second; file is then a folder of frame-NNNN.png. Screens open-<app> and poweroff play those.
+    bool snapshotAnim;
+    public void Snapshot(string file, string screen, int w, int h, float[] anim = null) {
+        TestHooks.Mask = Environment.GetEnvironmentVariable("NATIVEMONS_SNAPSHOT_TEXTMASK") == "1" ? new List<string>() : null;
+        if (anim != null) { TestHooks.T = anim[0]; snapshotAnim = true; }
         // A size wider than tall shows the tablet, with the phone's text.
         if (w > h) { phoneW = h * 60 / 100; tabletK = 1; wideWindow = true; MakeFonts(WideText(w, phoneW)); } else MakeFonts(w);
         try { Library.Scan(Gen1Cli); } catch (Exception e) { Library.Note = e.Message; }
@@ -4320,9 +4470,9 @@ class LauncherForm : Form {
             if (clashGame == null) { clashGame = Library.Games.Find(x => x.OnGen1); clashCount = 1; }
             clashAt = -100;
         }
-        if (screen == "improvebanner") { Recomp.BannerTitle = "Pokemon Y"; Recomp.QuietProgress = 0.45f; Recomp.DoneAt = DateTime.Now.AddSeconds(-30); Recomp.FakeRunning = true; }
+        if (screen == "improvebanner") { Recomp.BannerTitle = "Pokemon Y"; Recomp.QuietProgress = 0.45f; Recomp.DoneAt = TestHooks.Wall().AddSeconds(-30); Recomp.FakeRunning = true; }
         if (screen == "updatebanner") { Updater.Latest = new Updater.Release { build = Updater.Build + 1, sha256 = "preview" }; bannerBuild = Updater.Latest.build; bannerAt = -1; }
-        if (screen == "splash") { starting = true; startSince = DateTime.Now.AddSeconds(-4); startStage = "Looking for your games"; }
+        if (screen == "splash") { starting = true; startSince = TestHooks.Wall().AddSeconds(-4); startStage = "Looking for your games"; }
         else pages.Push(MainPage());
         if (screen == "games") pages.Push(GamesPage());
         if (screen == "folders") pages.Push(FoldersPage());
@@ -4344,7 +4494,7 @@ class LauncherForm : Form {
         // setup-<step>[only][@seconds]: a setup step, that far into its entrance (all the way by default).
         // setupslide-<from>-<to>@seconds: the slide between two steps, that far in.
         if (screen.StartsWith("setup")) {
-            float now = (float)clock.Elapsed.TotalSeconds, at = 99;
+            float now = Now(), at = 99;
             string spec = screen; int atSign = spec.IndexOf('@');
             if (atSign > 0) { at = float.Parse(spec.Substring(atSign + 1), System.Globalization.CultureInfo.InvariantCulture); spec = spec.Substring(0, atSign); }
             inSetup = true;
@@ -4388,7 +4538,7 @@ class LauncherForm : Form {
         // emuinstalled-<id>-<seconds>: that emulator's page, its install animation that far in.
         if (screen.StartsWith("emuinstalled-")) {
             var f = screen.Split('-'); var e = Emu3ds.All.FirstOrDefault(x => x.Id == f[1]);
-            if (e != null) { pages.Push(EmuPage()); pages.Push(EmuDetailPage(e)); emuInstallName = e.Short; emuInstallAt = (float)clock.Elapsed.TotalSeconds - float.Parse(f[2], System.Globalization.CultureInfo.InvariantCulture); }
+            if (e != null) { pages.Push(EmuPage()); pages.Push(EmuDetailPage(e)); emuInstallName = e.Short; emuInstallAt = Now() - float.Parse(f[2], System.Globalization.CultureInfo.InvariantCulture); }
         }
         // emuask-<id>[-quiet]: the update question before a 3DS game starts.
         if (screen.StartsWith("emuask-")) {
@@ -4469,6 +4619,7 @@ class LauncherForm : Form {
                     screen == "guide-close" ? 2 : screen == "guide-controls" ? 1 : 0, screen == "guide-controls", screen == "guide-close");
                 bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
             }
+            TestHooks.SaveMask(file);
             return;
         }
         // gameoptions[:<game>]: Game options, from Settings or for one game.
@@ -4502,7 +4653,7 @@ class LauncherForm : Form {
             else { pages.Push(DexEntryPage(species, order)); if (DexCaught(species)) DexInfos.Wait(species, 30); Sprites.Get((DexShiny(species) ? "shiny/" : "") + species); Sprites.Wait(15); }
         }
         if (screen == "job") {
-            job = new Process(); jobTitle = "Preparing Pokemon LeafGreen"; jobStart = DateTime.Now.AddSeconds(-14); progress = 0.62f;
+            job = new Process(); jobTitle = "Preparing Pokemon LeafGreen"; jobStart = TestHooks.Wall().AddSeconds(-14); progress = 0.62f;
             foreach (var l in new[] { "Reading the ROM", "Decoding maps", "Decoding Pokemon graphics" }) log.Add(l);
         }
         if (screen == "emuinstall") {
@@ -4532,10 +4683,210 @@ class LauncherForm : Form {
             }
             return;
         }
+        if (TestHooks.Replay) return;
+        if (anim != null) { SnapshotFrames(file, screen, w, h, anim[0], anim[1], anim[2]); return; }
         using (var bmp = new Bitmap(w, h)) {
-            using (var g = Graphics.FromImage(bmp)) { Render(g, w, h); screenAt = selAt = -10; Render(g, w, h); }
+            using (var g = Graphics.FromImage(bmp)) { Render(g, w, h); screenAt = selAt = -10; if (TestHooks.Mask != null) TestHooks.Mask.Clear(); Render(g, w, h); }
             bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
         }
+        TestHooks.SaveMask(file);
+    }
+    // One form drawn at rising t, so state carries from frame to frame as it does live.
+    void SnapshotFrames(string folder, string screen, int w, int h, float t0, float t1, float fps) {
+        Directory.CreateDirectory(folder);
+        int app = screen.StartsWith("open-") ? Array.IndexOf(AppNames, screen.Substring(5)) : -1;
+        if (app >= 1 || screen == "poweroff") {
+            // A settled frame first, so the apps' places are known.
+            if (app >= 1 && pages.Count > 0 && app < pages.Peek().Items.Count) pages.Peek().Sel = app;
+            TestHooks.T = t0 - 1;
+            using (var bmp = new Bitmap(w, h)) using (var g = Graphics.FromImage(bmp)) { Render(g, w, h); screenAt = selAt = -10; Render(g, w, h); }
+            if (TestHooks.Mask != null) TestHooks.Mask.Clear();
+            var p = pages.Count > 0 ? pages.Peek() : null;
+            if (app >= 1 && p != null && p.Main && app < p.Items.Count && AppNames[app] != "Move" && AppNames[app] != "Exit" && !appRects[app].IsEmpty) {
+                openRun = p.Items[app].Run; openApp = app; openFrom = appRects[app]; openAt = t0;
+            }
+            if (screen == "poweroff") { powerOff = t0; powerTop = Top; }
+        }
+        int n = (int)Math.Floor((t1 - t0) * fps + 0.001f) + 1;
+        for (int i = 0; i < n; i++) {
+            TestHooks.T = t0 + i / fps;
+            OpenTick(); if (powerOff >= 0) PowerOffTick();
+            string png = Path.Combine(folder, "frame-" + i.ToString("0000") + ".png");
+            using (var bmp = new Bitmap(w, h)) { using (var g = Graphics.FromImage(bmp)) Render(g, w, h); bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png); }
+            TestHooks.SaveMask(png);
+        }
+    }
+
+    // Test only: --replay, the Rust launcher's replay scripts (launcher-rs\tools\replays) played on a form that is never
+    // shown, on the fixed clock in 16 ms ticks, a frame drawn whenever it was invalidated. Notes: rust-launcher-step4.md.
+    bool replayInvalid;
+    protected override void OnInvalidated(InvalidateEventArgs e) { base.OnInvalidated(e); if (TestHooks.Replay) replayInvalid = true; }
+    void ReplayClose() { if (powerOff < 0 && !closing) { powerOff = Now(); powerTop = Top; } else { closing = true; TestHooks.Skip("Close"); } }
+    void ReplayPaint(ref Bitmap bmp) {
+        int cw = ClientSize.Width, ch = ClientSize.Height;
+        if (bmp == null || bmp.Width != cw || bmp.Height != ch) { if (bmp != null) bmp.Dispose(); bmp = new Bitmap(cw, ch); }
+        using (var g = Graphics.FromImage(bmp)) {
+            spinning = false; panelIntro = false;
+            if (drawW > 0) { g.TranslateTransform(drawX, 0); Render(g, drawW, ch); } else { Render(g, cw, ch); Outro(g, cw, ch); }
+        }
+        replayInvalid = false;
+        replayFrames++;
+    }
+    int replayFrames;
+    public static int Replay(string script, string outDir, int w, int h) {
+        TestHooks.Replay = true;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        float envT = TestHooks.T;
+        Directory.CreateDirectory(outDir);
+        var keys = new Dictionary<string, Keys> { { "up", Keys.Up }, { "down", Keys.Down }, { "left", Keys.Left }, { "right", Keys.Right },
+            { "w", Keys.W }, { "a", Keys.A }, { "s", Keys.S }, { "d", Keys.D }, { "enter", Keys.Enter }, { "return", Keys.Enter },
+            { "escape", Keys.Escape }, { "esc", Keys.Escape }, { "back", Keys.Back }, { "backspace", Keys.Back }, { "space", Keys.Space },
+            { "tab", Keys.Tab }, { "x", Keys.X }, { "q", Keys.Q }, { "e", Keys.E }, { "pageup", Keys.PageUp }, { "prior", Keys.PageUp },
+            { "pagedown", Keys.PageDown }, { "next", Keys.PageDown } };
+        var buttons = new Dictionary<string, ushort> { { "A", A }, { "B", B }, { "X", X }, { "UP", UP }, { "DOWN", DOWN }, { "LEFT", LEFT }, { "RIGHT", RIGHT }, { "LB", LB }, { "RB", RB } };
+        LauncherForm f = null; Bitmap bmp = null; float t = 0;
+        var log = new StringBuilder(); var step = new StringBuilder(); var seen = new List<string>(); int failed = 0;
+        Action note = delegate { foreach (var e in TestHooks.Effects) { step.Append("  effect " + e + "\n"); seen.Add(e); } TestHooks.Effects.Clear(); };
+        // NATIVEMONS_REPLAY_FRAMES=1: every frame drawn, as frames\f-<ms>-<n>.png (and its text mask).
+        string frames = Environment.GetEnvironmentVariable("NATIVEMONS_REPLAY_FRAMES") == "1" ? Path.Combine(outDir, "frames") : null;
+        int lastMs = -1, sameMs = 0;
+        Action paint = delegate {
+            if (frames != null && TestHooks.Mask != null) TestHooks.Mask.Clear();
+            int arrived = Sprites.Arrived, marks = TestHooks.Mask != null ? TestHooks.Mask.Count : 0;
+            var before = bmp != null ? (Bitmap)bmp.Clone() : null;
+            f.ReplayPaint(ref bmp);
+            // Pictures this frame asked for are waited for and the frame drawn again: the Rust launcher reads them at once.
+            Sprites.Wait(15);
+            if (Sprites.Arrived != arrived) {
+                if (TestHooks.Mask != null) TestHooks.Mask.RemoveRange(marks, TestHooks.Mask.Count - marks);
+                if (before != null && before.Size == bmp.Size) { bmp.Dispose(); bmp = before; before = null; } else { bmp.Dispose(); bmp = null; }
+                f.ReplayPaint(ref bmp); f.replayFrames--;
+            }
+            if (before != null) before.Dispose();
+            f.spritesSeen = Sprites.Arrived;
+            if (frames == null) return;
+            int ms = (int)Math.Round(t * 1000); sameMs = ms == lastMs ? sameMs + 1 : 0; lastMs = ms;
+            Directory.CreateDirectory(frames);
+            string png = Path.Combine(frames, "f-" + ms.ToString("000000") + "-" + sameMs + ".png");
+            bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png); TestHooks.SaveMask(png);
+        };
+        Action tick = delegate { t += 0.016f; TestHooks.T = t; f.Poll(); if (f.replayInvalid) paint(); note(); };
+        Action<float> advance = delegate(float until) { while (t + 0.016f <= until + 1e-4f) tick(); };
+        Action afterInput = delegate { if (f.replayInvalid) paint(); note(); };
+        Func<string> top = delegate { return f.pages.Count > 0 ? f.pages.Peek().Title : ""; };
+        string[] lines = File.ReadAllText(script).Replace("\r\n", "\n").Split('\n');
+        for (int n = 0; n < lines.Length; n++) {
+            string line = lines[n].Split('#')[0].Trim();
+            if (line == "") continue;
+            var p = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            Func<int, float> num = delegate(int i) { return float.Parse(p[i], inv); };
+            if (p[0] == "screen") {
+                string name = p.Length > 1 ? p[1] : "main";
+                float t0 = p.Length > 2 ? float.Parse(p[2], inv) : 0;
+                if (f != null) f.Dispose();
+                if (bmp != null) { bmp.Dispose(); bmp = null; }
+                TestHooks.T = envT; TestHooks.Pad = 0;
+                f = new LauncherForm();
+                var handle = f.Handle;
+                f.SetBounds((TestHooks.Area.Width - w) / 2, (TestHooks.Area.Height - h) / 2, w, h);
+                f.Snapshot(Path.Combine(outDir, "unused.png"), name, w, h);
+                TestHooks.Effects.Clear();
+                t = t0; TestHooks.T = t0; lastMs = -1;
+                paint();
+                log.Append(string.Format(inv, "{0}: screen {1} at t {2:0.000}: {3}\n", n + 1, name, (double)t0, top()));
+                continue;
+            }
+            if (f == null) throw new Exception("line " + (n + 1) + ": no screen yet");
+            float before = t;
+            switch (p[0]) {
+                case "t": t = num(1); TestHooks.T = t; break;
+                case "wait": advance(t + num(1)); break;
+                case "until": advance(num(1)); break;
+                case "key": { var m = new Message(); f.ProcessCmdKey(ref m, keys[p[1].ToLowerInvariant()]); afterInput(); tick(); break; }
+                case "pad": case "hold": {
+                    ushort bits = 0;
+                    foreach (var b in p[1].Split('+')) bits |= buttons[b.ToUpperInvariant()];
+                    TestHooks.Pad = bits;
+                    if (p[0] == "hold") advance(t + num(2)); else tick();
+                    TestHooks.Pad = 0;
+                    tick();
+                    break;
+                }
+                case "move": case "click": case "down": case "up": case "clickitem": {
+                    int x, y;
+                    if (p[0] == "clickitem") {
+                        int i = (int)num(1);
+                        var hit = f.hits.First(kv => kv.Value == i).Key;
+                        x = (int)(hit.X + hit.Width / 2f + f.screenX); y = (int)(hit.Y + hit.Height / 2f + f.screenY);
+                    } else { x = (int)num(1); y = (int)num(2); }
+                    var mb = p[p.Length - 1] == "right" ? MouseButtons.Right : MouseButtons.Left;
+                    var moved = new MouseEventArgs(MouseButtons.None, 0, x, y, 0); var press = new MouseEventArgs(mb, 1, x, y, 0);
+                    if (p[0] == "move") f.OnMouseMove(moved);
+                    else if (p[0] == "down") f.OnMouseDown(press);
+                    else if (p[0] == "up") f.OnMouseUp(press);
+                    else { f.OnMouseMove(moved); afterInput(); f.OnMouseDown(press); f.OnMouseUp(press); f.OnMouseClick(press); }
+                    afterInput(); tick();
+                    break;
+                }
+                case "page": {
+                    // A page the fixture can't reach by keys, by its name: a game by id, then the rest of the line as text.
+                    var g = p.Length > 2 ? Library.Games.Find(x => x.Id == p[2]) : null;
+                    Func<int, string> rest = delegate(int skip) { return string.Join(" ", p.Skip(skip)); };
+                    Page pg = null;
+                    switch (p[1]) {
+                        case "ExportGamesPage": pg = f.ExportGamesPage(); break;
+                        case "RemoveRomFilePage": pg = f.RemoveRomFilePage(rest(2)); break;
+                        case "RemoveUnzippedPage": pg = f.RemoveUnzippedPage(rest(2)); break;
+                        case "RemoveFolderPage": pg = f.RemoveFolderPage(rest(2)); break;
+                        case "SavePage": pg = f.SavePage(g, rest(3)); break;
+                        case "BackupsPage": pg = f.BackupsPage(g); break;
+                        case "ExportPage": pg = f.ExportPage(g); break;
+                        case "ConflictPage": pg = f.ConflictPage(g, delegate { }); break;
+                        case "DamagedPage": pg = f.DamagedPage(g, rest(3), delegate { }); break;
+                        case "ShareHintsPage": pg = f.ShareHintsPage(g, rest(3) == "true"); break;
+                        case "HeaderFixPage": pg = f.HeaderFixPage(new List<GameEntry> { g }, null); break;
+                        case "PatchPage": pg = f.PatchPage(g, false); break;
+                        case "Setup3dsPage": pg = f.Setup3dsPage(new List<GameEntry> { g }); break;
+                        case "CustomGamePage": pg = f.CustomGamePage(g); break;
+                        case "PcGamePage": pg = f.PcGamePage(g); break;
+                        case "PcRemovePage": pg = f.PcRemovePage(g); break;
+                    }
+                    if (pg == null) throw new Exception("line " + (n + 1) + ": no such page or game: " + line);
+                    f.pages.Push(pg); f.Invalidate(); afterInput(); tick();
+                    break;
+                }
+                case "discord": {
+                    string df = Environment.GetEnvironmentVariable("NATIVEMONS_TEST_DISCORD");
+                    Func<int> had = delegate { try { using (var r = new StreamReader(new FileStream(df, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))) { int k = 0; while (r.ReadLine() != null) k++; return k; } } catch { return 0; } };
+                    foreach (var dg in Library.Games.Where(x => p[1] == "all" || x.Id == p[1]).ToList()) { int n0 = had(); DiscordPresence.Playing(dg); for (int i = 0; i < 250 && had() < n0 + 2; i++) System.Threading.Thread.Sleep(20); }
+                    afterInput(); break;
+                }
+                case "quick": { if (p.Length > 1) f.current = Library.Games.Find(x => x.Id == p[1]); f.menuSince = DateTime.Now.AddSeconds(-2); f.QuickStartTick(); afterInput(); break; }
+                case "answer": { string a = Environment.ExpandEnvironmentVariables(line.Substring(6).Trim()); TestHooks.Answers.Enqueue(a == "-" ? null : a); break; }
+                case "drop": { f.TakeDrop(Environment.ExpandEnvironmentVariables(line.Substring(4)).Split('|').Select(x => x.Trim()).Where(x => x != "").ToArray()); afterInput(); tick(); break; }
+                case "wheel": f.OnMouseWheel(new MouseEventArgs(MouseButtons.None, 0, 0, 0, (int)num(1))); afterInput(); tick(); break;
+                // A result page only the Rust launcher shows, by the user's decision: nothing here.
+                case "deliberate": break;
+                case "snap": {
+                    string file = Path.Combine(outDir, (p.Length > 1 ? p[1] : "frame") + ".png");
+                    if (TestHooks.Mask != null) TestHooks.Mask.Clear();
+                    string dump = frames; frames = null; paint(); frames = dump;
+                    bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+                    TestHooks.SaveMask(file);
+                    break;
+                }
+                case "expect": { string want = line.Substring(6).Trim(); if (top() != want) { failed++; step.Append("  FAIL expected page \"" + want + "\", got \"" + top() + "\"\n"); } break; }
+                case "effect": { string want = line.Substring(6).Trim(); if (!seen.Any(e => e.Contains(want))) { failed++; step.Append("  FAIL expected an effect with \"" + want + "\"\n"); } seen.Clear(); break; }
+                default: throw new Exception("line " + (n + 1) + ": unknown command " + p[0]);
+            }
+            log.Append(string.Format(inv, "{0}: {1} (t {2:0.000} -> {3:0.000}) top: {4} sel {5}{6}\n", n + 1, line, (double)before, (double)t, top(),
+                f.pages.Count > 0 ? f.pages.Peek().Sel : -1, step.Length == 0 ? "" : "\n" + step.ToString().TrimEnd()));
+            step.Clear();
+        }
+        if (f != null) log.Append("frames drawn: " + f.replayFrames + "\n");
+        log.Append(failed == 0 ? "replay: all checks passed\n" : "replay: checks FAILED\n");
+        File.WriteAllText(Path.Combine(outDir, "replay.log"), log.ToString());
+        return failed == 0 ? 0 : 1;
     }
 
     // ---------- the engines ----------
@@ -4638,6 +4989,7 @@ class LauncherForm : Form {
         if (!File.Exists(Config.Love) || !File.Exists(Path.Combine(Config.Gen1, "main.lua"))) return null;
         var psi = Gen1Start("");
         psi.EnvironmentVariables["NATIVEMONS_CLI"] = command;
+        string so; int sc; if (TestHooks.Gen1(psi, out so, out sc)) return so;
         using (var p = Process.Start(psi)) {
             var err = p.StandardError.ReadToEndAsync();
             string o = p.StandardOutput.ReadToEnd();
@@ -4711,7 +5063,7 @@ class LauncherForm : Form {
         if (ClientSize.Width > 0 && ClientSize.Height > 0) {
             splashShot = new Bitmap(ClientSize.Width, ClientSize.Height);
             using (var g = Graphics.FromImage(splashShot)) Render(g, ClientSize.Width, ClientSize.Height);
-            outroAt = (float)clock.Elapsed.TotalSeconds;
+            outroAt = Now();
         }
         starting = false;
         PickCurrent();
@@ -4736,7 +5088,7 @@ class LauncherForm : Form {
             if (Wallpaper.Chosen) AskAboutRecomp();
         }
         // Asked once, also on the first start of the version that brought the choice.
-        if (err == null && !firstSetup && !Wallpaper.Chosen) { setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds; pages.Push(SetupPage(3, true)); }
+        if (err == null && !firstSetup && !Wallpaper.Chosen) { setupFrom = null; setupAt = Now(); pages.Push(SetupPage(3, true)); }
         Invalidate();
     }
     // A shortcut started while the launcher is open (see Main), or --launcher at start.
@@ -4839,7 +5191,7 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Emulators", !Emu3ds.Enabled ? "3DS games are off. Turn them on here." : emus == 0 ? "Pick an emulator for your 3DS games." : emus + (emus == 1 ? " emulator" : " emulators") + " for your 3DS games.", true, delegate { pages.Push(EmuPage()); }) { Icon = '' });
         p.Items.Add(new Item("Move Pokemon", "From one game to another.", File.Exists(Config.MonBridge) && Library.Games.Count(g => g.MoveTools) > 1, delegate { OpenBoxView(); }) { Icon = '\uE8AB' });
         p.Items.Add(new Item("Settings", "Game options, sprites, credits.", true, delegate { pages.Push(SettingsPage()); }) { Icon = '\uE713' });
-        p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { Close(); }) { Icon = '' });
+        p.Items.Add(new Item("Exit", "Close the launcher.", true, delegate { if (TestHooks.Replay) ReplayClose(); else Close(); }) { Icon = '' });
         return p;
     }
     // ---------- settings ----------
@@ -4908,14 +5260,14 @@ class LauncherForm : Form {
                 // Right here: the animation plays over this page, then its menus show it installed.
                 pages.Pop(); pages.Pop(); pages.Push(EmuPage()); pages.Push(EmuDetailPage(e));
                 ReplaceMain();
-                emuInstallName = e.Short; emuInstallAt = (float)clock.Elapsed.TotalSeconds;
+                emuInstallName = e.Short; emuInstallAt = Now();
                 dirty = true;
             });
         }) { Icon = '',
             Info = "Gets " + e.Name + " from github.com/" + e.Repo + ", checks the download, and puts it beside the launcher. Your saves stay where they are." });
         p.Items.Add(new Item("Use for 3DS games: " + (isDefault ? "Yes" : "No"), "", have && !isDefault, delegate { Emu3ds.Default = e; pages.Pop(); pages.Push(EmuDetailPage(e)); }) { Icon = '', Tint = AppColors[App("Emu")],
             Info = isDefault ? "Your 3DS games play with " + e.Short + "." : have ? "Select to play your 3DS games with " + e.Short + " instead." : "Install it first." });
-        p.Items.Add(new Item("Open its folder", "", have, delegate { try { Process.Start("explorer.exe", "\"" + e.Dir + "\""); } catch { } }) { Icon = '', Info = e.Dir });
+        p.Items.Add(new Item("Open its folder", "", have, delegate { if (!TestHooks.Skip("OpenFolder(\"" + e.Dir + "\")")) try { Process.Start("explorer.exe", "\"" + e.Dir + "\""); } catch { } }) { Icon = '', Info = e.Dir });
         p.Items.Add(new Item("Remove", "Deletes the emulator. Your saves stay.", have, delegate {
             if (Emu3ds.Running(e)) { ShowText("Close " + e.Short + " first", e.Short + " is open. Close it, then remove it.", null); return; }
             string problem = null;
@@ -4927,6 +5279,7 @@ class LauncherForm : Form {
         return p;
     }
     void OpenUpdates() {
+        if (TestHooks.Note("OpenUpdates")) return;
         string problem = null;
         Busy("Looking for updates", delegate { problem = Updater.Check(); return null; }, delegate(string e) {
             string local = Updater.Local;
@@ -4963,6 +5316,7 @@ class LauncherForm : Form {
             return null;
         }, delegate(string e) {
             if (e != null || wrong != null) { ShowText("Update stopped", e ?? wrong, null); return; }
+            if (TestHooks.Skip("Restart")) return;
             try { Process.Start(Path.Combine(Config.Here, "NativeMonsLauncher.exe")); Close(); }
             catch (Exception x) { ShowText("Updated", "Start the launcher again to finish. " + x.Message, null); }
         });
@@ -5094,7 +5448,7 @@ class LauncherForm : Form {
             at = (at + 1) % names.Length;
             it.Text = label + ": " + names[at];
             int chosen = at;
-            Task.Run(delegate { try { apply(chosen); } catch { } });
+            if (TestHooks.Replay && TestHooks.Flows) { try { apply(chosen); } catch { } } else Task.Run(delegate { try { apply(chosen); } catch { } });
         }) { Icon = '\uE713', Info = info };
         return it;
     }
@@ -5103,6 +5457,7 @@ class LauncherForm : Form {
         return Choice(label, info, new[] { "ON", "OFF" }, on ? 0 : 1, delegate(int i) { WriteFulldex(key, i == 0 ? "1" : "0"); });
     }
     void OpenEngineSettings(string group) {
+        if (TestHooks.Note("OpenEngineSettings " + group)) return;
         bool hasFulldex = File.Exists(Config.Fulldex), hasGen1 = File.Exists(Path.Combine(Config.Gen1, "main.lua"));
         var gen1 = new Dictionary<string, string>();
         Busy("Reading settings", delegate {
@@ -5328,6 +5683,7 @@ class LauncherForm : Form {
         return p;
     }
     void RestoreBackup(GameEntry g, string file, Action done) {
+        if (!TestHooks.SaveFlows && TestHooks.Todo("RestoreBackup")) return;
         string problem = null;
         Busy("Restoring your save", delegate {
             try {
@@ -5524,6 +5880,7 @@ class LauncherForm : Form {
     }
     // Runs a change behind a card, then returns to a fresh list of the game's saves, or says what went wrong.
     void SaveAction(GameEntry g, string title, Func<string> work, int popCount) {
+        if (TestHooks.Todo("SaveAction: " + title)) return;
         string problem = null; Page fresh = null;
         Busy(title, delegate { problem = work(); fresh = SavesPage(g); return null; }, delegate(string e) {
             for (int i = 0; i < popCount && pages.Count > 1; i++) pages.Pop();
@@ -5541,6 +5898,7 @@ class LauncherForm : Form {
         });
     }
     string AskText(string title, string prompt, string start) {
+        if (TestHooks.Todo("AskText: " + title)) return null;
         using (var f = new Form { Text = title, FormBorderStyle = FormBorderStyle.FixedDialog, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false, MaximizeBox = false, ClientSize = new Size(340, 110) })
         using (var label = new Label { Text = prompt, Left = 12, Top = 12, Width = 316 })
         using (var box = new TextBox { Text = start, Left = 12, Top = 36, Width = 316, MaxLength = 40 })
@@ -5617,9 +5975,11 @@ class LauncherForm : Form {
         return p;
     }
     string PickFolder(string prompt) {
+        string answer; if (TestHooks.Answer("PickFolder: " + prompt, out answer)) return answer;
         using (var d = new FolderBrowserDialog { Description = prompt }) return d.ShowDialog(this) == DialogResult.OK ? d.SelectedPath : null;
     }
     void RunExport(GameEntry g, bool checkpoint, string backup) {
+        if (TestHooks.Todo("RunExport: " + (checkpoint ? "checkpoint" : "plain"))) return;
         string outFolder = PickFolder("Where should the export go?");
         if (outFolder == null) return;
         string message = null; bool ok = false;
@@ -5761,9 +6121,11 @@ class LauncherForm : Form {
         return it;
     }
     void ChooseSaveFile() {
+        string picked; bool replay = TestHooks.Answer("OpenFile: Choose a save", out picked);
+        if (replay && picked == null) return;
         using (var d = new OpenFileDialog { Filter = "Cartridge save (*.sav)|*.sav|All files (*.*)|*.*", Title = "Choose a save" }) {
-            if (d.ShowDialog(this) != DialogResult.OK) return;
-            FoundSave save = null; string file = d.FileName;
+            if (!replay && d.ShowDialog(this) != DialogResult.OK) return;
+            FoundSave save = null; string file = replay ? picked : d.FileName;
             Busy("Reading the save", delegate { save = Identify(file); return null; }, delegate(string e) {
                 if (e != null || save == null) { ShowText("Can't read that save", e ?? "PKHeX doesn't recognise this file as a save.", null); return; }
                 if (save.Game == null || !save.Game.Playable) { ShowText("Can't import that save", (save.Note ?? "") + " Its game isn't in your ROM folders.", null); return; }
@@ -5772,10 +6134,12 @@ class LauncherForm : Form {
         }
     }
     void AddSaveFolder() {
+        string picked; bool replay = TestHooks.Answer("PickFolder: Choose a folder with your saves", out picked);
+        if (replay && picked == null) return;
         using (var d = new FolderBrowserDialog { Description = "Choose a folder with your saves" }) {
-            if (d.ShowDialog(this) != DialogResult.OK) return;
+            if (!replay && d.ShowDialog(this) != DialogResult.OK) return;
             string extra = Path.Combine(Config.State, "save-folders.txt");
-            File.AppendAllText(extra, d.SelectedPath + Environment.NewLine);
+            File.AppendAllText(extra, (replay ? picked : d.SelectedPath) + Environment.NewLine);
             pages.Pop();
             OpenImportSaves();
         }
@@ -6479,7 +6843,7 @@ class LauncherForm : Form {
             p.Items.Add(new Item("Zakuro mods folder", "", true, delegate {
                 string dir = Path.Combine(Ctr3dsSaves.EmuData(Emu3ds.Zakuro), "mods", g.Ctr.ToUpperInvariant());
                 Directory.CreateDirectory(dir);
-                try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+                if (!TestHooks.Skip("OpenFolder(\"" + dir + "\")")) try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
             }) { Icon = '', Info = "Mods for this game, laid out as for Luma3DS and Azahar (romfs, exefs, code.ips). Cheats are in the game's menu: Esc, then Cheats." });
             int found = Recomp.HintCount(g);
             if (found > 0) p.Items.Add(new Item("Share Zakuro findings", "", true, delegate { pages.Push(ShareHintsPage(g)); }) { Icon = '',
@@ -6527,6 +6891,7 @@ class LauncherForm : Form {
         return p;
     }
     void ChooseVersion(GameEntry g, RomFile r) {
+        if (TestHooks.Note("ChooseVersion")) return;
         if (r == g.Chosen) { pages.Pop(); return; }
         if (AfterCapture(delegate { ChooseVersion(g, r); })) return;
         string running = RunningGames();
@@ -6557,7 +6922,7 @@ class LauncherForm : Form {
         }) { Icon = '' });
         p.Items.Add(new Item("I'll install it myself", "Opens python.org's download page.", true, delegate {
             pages.Pop();
-            try { Process.Start("https://www.python.org/downloads/windows/"); } catch { }
+            if (!TestHooks.Skip("OpenUrl(\"https://www.python.org/downloads/windows/\")")) try { Process.Start("https://www.python.org/downloads/windows/"); } catch { }
         }) { Icon = '' });
         p.Items.Add(new Item("Not now", "Nothing is changed.", true, delegate { pages.Pop(); }) { Icon = '' });
         pages.Push(p);
@@ -6707,7 +7072,7 @@ class LauncherForm : Form {
             p.Items.Add(new Item("Asks for: " + string.Join(", ", m.Permissions.Select(x => x == "engine_internals" ? "Engine" : x == "filesystem" ? "Files" : x == "network" ? "Internet" : Titled(x.Replace('_', '-'))).ToArray()), "", true, null) { Icon = '\uE72E', Info = "Besides what a plain mod does, it " + string.Join(", and ", m.Permissions.Select(ModIndex.PermissionWords).ToArray()) + "." });
         }
         fact("Licence", m.License, '\uE8A5');
-        if (!string.IsNullOrEmpty(m.Repo)) p.Items.Add(new Item("Open its page", "", m.Repo.StartsWith("https://", StringComparison.OrdinalIgnoreCase), delegate { try { Process.Start(m.Repo); } catch { } }) { Icon = '\uE774', TileHint = m.Repo.Replace("https://", ""), Info = m.Repo });
+        if (!string.IsNullOrEmpty(m.Repo)) p.Items.Add(new Item("Open its page", "", m.Repo.StartsWith("https://", StringComparison.OrdinalIgnoreCase), delegate { if (!TestHooks.Skip("OpenUrl(\"" + m.Repo + "\")")) try { Process.Start(m.Repo); } catch { } }) { Icon = '\uE774', TileHint = m.Repo.Replace("https://", ""), Info = m.Repo });
         return p;
     }
     // What installed mods ask for, for one game: each missing one to install from where the player says, or leave.
@@ -6836,7 +7201,8 @@ class LauncherForm : Form {
         }) { Icon = '\uE774', TileHint = "github.com/" + d.Github, Info = "The newest release there with a .zip, as " + d.ModName + " names it." });
         p.Items.Add(new Item("Choose a downloaded .zip", "", true, delegate {
             string zip;
-            using (var dlg = new OpenFileDialog { Filter = "Mod archive (*.zip)|*.zip", Title = "Choose the .zip for " + d.Id }) { if (dlg.ShowDialog(this) != DialogResult.OK) return; zip = dlg.FileName; }
+            if (TestHooks.Answer("OpenFile: Choose the .zip for " + d.Id, out zip)) { if (zip == null) return; }
+            else using (var dlg = new OpenFileDialog { Filter = "Mod archive (*.zip)|*.zip", Title = "Choose the .zip for " + d.Id }) { if (dlg.ShowDialog(this) != DialogResult.OK) return; zip = dlg.FileName; }
             install(d.Id, delegate(Action<float> at) { try { return ExtractMod(zip, d.Id); } catch (Exception x) { return "Could not install it: " + x.Message; } });
         }) { Icon = '\uE8B7', TileHint = "One you already downloaded", Info = "A mod archive on your PC. It has to be " + d.Id + "." });
         p.Items.Add(new Item("Enter a download link", "", true, delegate {
@@ -6850,6 +7216,7 @@ class LauncherForm : Form {
         return p;
     }
     void InstallMod(GameEntry g) {
+        if (TestHooks.Todo("InstallMod")) return;
         using (var d = new OpenFileDialog { Filter = "Mod archive (*.zip)|*.zip", Title = "Choose a mod" }) {
             if (d.ShowDialog(this) != DialogResult.OK) return;
             string message;
@@ -6949,6 +7316,7 @@ class LauncherForm : Form {
         return p;
     }
     void RunWallSearch(GameEntry g, string source, string query, int page, List<WallResult> before) {
+        if (TestHooks.Note("RunWallSearch")) return;
         List<WallResult> found = null; bool more = false; string problem = null;
         Busy("Searching", delegate { try { found = WallFind.Search(source, query, page, out more); } catch (Exception e) { problem = e.Message; } return null; }, delegate(string e) {
             if (problem != null || e != null) { ShowText("Couldn't search", "The search didn't answer: " + (problem ?? e) + "\n\nCheck your internet connection and try again.", null); return; }
@@ -6986,7 +7354,7 @@ class LauncherForm : Form {
                 if (pages.Peek().Title == g.Title) RebuildTop(delegate { return OwnWallpaperPage(g); });
                 Invalidate();
             }));
-            p.Items.Add(new Item("Open its page", "", r.Page != "", delegate { try { Process.Start(new ProcessStartInfo(r.Page) { UseShellExecute = true }); } catch { } }));
+            p.Items.Add(new Item("Open its page", "", r.Page != "", delegate { if (!TestHooks.Skip("OpenUrl(\"" + r.Page + "\")")) try { Process.Start(new ProcessStartInfo(r.Page) { UseShellExecute = true }); } catch { } }));
             p.OnBack = delegate { pages.Pop(); try { File.Delete(file); } catch { } };
             pages.Push(p);
         });
@@ -7067,22 +7435,22 @@ class LauncherForm : Form {
     Page setupFrom, setupLeaving; float setupAt = -10, setupShotAt = -10; int setupDir = 1; Bitmap setupShot;
     void StartSetup() {
         inSetup = true; firstSetup = true;
-        setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds;
+        setupFrom = null; setupAt = Now();
         pages.Push(SetupPage(0, false));
     }
     void SetupGo(int step) {
         var from = pages.Peek();
-        setupFrom = from; setupDir = step > from.Step ? 1 : -1; setupAt = (float)clock.Elapsed.TotalSeconds;
+        setupFrom = from; setupDir = step > from.Step ? 1 : -1; setupAt = Now();
         pages.Pop(); pages.Push(SetupPage(step, false));
     }
     // Back on the same step after a search: its parts ease in again with the new count.
     void SetupAgain(int step) {
         while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
-        setupFrom = null; setupAt = (float)clock.Elapsed.TotalSeconds;
+        setupFrom = null; setupAt = Now();
         pages.Push(SetupPage(step, false));
     }
     void SetupFinish() {
-        setupLeaving = pages.Peek(); setupShotAt = (float)clock.Elapsed.TotalSeconds;
+        setupLeaving = pages.Peek(); setupShotAt = Now();
         inSetup = false; firstSetup = false; setupFrom = null;
         while (pages.Count > 1 && !pages.Peek().Main) pages.Pop();
         ReplaceMain();
@@ -7472,6 +7840,7 @@ class LauncherForm : Form {
         return p;
     }
     void AddRomFile() {
+        if (TestHooks.Todo("AddRomFile")) return;
         Browse(new BrowseRequest { Title = "Choose ROMs", Multi = true, Kinds = RomKinds,
             Hint = "Open the folder with your ROM and select it. Select several to add them together. A .zip works too: its ROMs are copied out.",
             Done = delegate(string[] picked) { TakeDrop(picked); } });
@@ -7617,7 +7986,7 @@ class LauncherForm : Form {
         return p;
     }
     Page CreditsPage() {
-        return new Page { Title = "Credits", Links = true, Body = "Pokemon Fulldex by mamesj (github.com/mamesj/pokemon-fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
+        return new Page { Title = "Credits", Links = true, Body = "Pokemon Fulldex by mamesj (github.com/mamesj/fulldex), a fork of ssrecomp by ClickingMaster. It uses melonDS, and mGBA by way of Pokemon GBA Widescreen. Function names come from the pokebw2, aletheia and pokeplatinum decompilations."
             + "\n\nPokemon Platinum PC port by cybervisi0n and contributors (github.com/cybervisi0n/pokeplatinum), from the pret decompilation, using libntr (MIT). They aren't affiliated with nativeMons."
             + "\n\nnativeplat by sohamb117 (github.com/sohamb117/gen4recomp), native Diamond, Pearl and Platinum from the pret decompilations. Not affiliated with nativeMons."
             + "\n\nPokemon Infinite Fusion and Infinite Fusion 2 by chardub (Frogman) and their contributors (github.com/infinitefusion/infinitefusion-e18, github.com/infinitefusion/infinitefusion-hoenn-public), made with Pokemon Essentials on RPG Maker XP. Its custom fusion sprites are by the Infinite Fusion artist community. Installed from your own copy or its GitHub; not included, and not affiliated with nativeMons."
@@ -7668,7 +8037,7 @@ class LauncherForm : Form {
             string count = n == 0 ? "None yet: press " + key + " in the game." : n + (n == 1 ? " picture" : " pictures") + ", taken with " + key + ".";
             p.Items.Add(new Item(kv.Key, "", true, delegate {
                 Directory.CreateDirectory(dir);
-                try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+                if (!TestHooks.Skip("OpenFolder(\"" + dir + "\")")) try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
             }) { Icon = '', Info = count + " Select to open the folder: " + dir });
         }
         p.Items.Add(new Item("Other games", "", true, delegate {
@@ -7696,6 +8065,7 @@ class LauncherForm : Form {
     }
 
     void GetAllSprites() {
+        if (TestHooks.Note("GetAllSprites")) return;
         string summary = null, dexSummary = null;
         Busy("Downloading the Pokedex", delegate {
             Sprites.GetAll(delegate(int done, int total, int fresh, int failed) {
@@ -7719,6 +8089,8 @@ class LauncherForm : Form {
     internal static string RunCapture(ProcessStartInfo psi, int seconds, out int code) {
         psi.UseShellExecute = false; psi.CreateNoWindow = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
         psi.StandardOutputEncoding = Encoding.UTF8;
+        string so; if (TestHooks.Gen1(psi, out so, out code)) { string sp = string.Join("\n", so.Split('\n').Where(l => !l.StartsWith("AL lib:") && !l.StartsWith("[")).ToArray()); return code != 0 && sp.Trim() == "" ? so : sp; }
+        if (TestHooks.ArtRun(psi, out so)) { code = 0; return so; }
         using (var p = Process.Start(psi)) { if (GameArt.OnCaptureThread) GameArt.Watch(p);
             if (GameArt.OnCaptureThread) try { p.PriorityClass = GameArt.Eager ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Idle; } catch { }
             var err = p.StandardError.ReadToEndAsync();
@@ -7827,6 +8199,7 @@ class LauncherForm : Form {
         });
     }
     void OpenBoxView() {
+        if (!TestHooks.SaveFlows && TestHooks.Todo("OpenBoxView")) return;
         var games = Library.Games.Where(x => x.MoveTools).ToList();
         if (games.Count == 0) return;
         var saved = games.Where(HasBoxSave).ToList();
@@ -7972,10 +8345,10 @@ class LauncherForm : Form {
             if (Math.Abs(v.Drag.X - v.DragStart.X) + Math.Abs(v.Drag.Y - v.DragStart.Y) > 8) v.Dragged = true;
             // Held over a box arrow, the box turns, as HOME does.
             string arrow = hit != null && (hit[0] == 'l' || hit[0] == 'r') ? hit : null;
-            if (arrow != v.HoverArrow) { v.HoverArrow = arrow; v.HoverSince = DateTime.Now; }
-            else if (arrow != null && (DateTime.Now - v.HoverSince).TotalSeconds > 0.7) {
+            if (arrow != v.HoverArrow) { v.HoverArrow = arrow; v.HoverSince = TestHooks.Clock(); }
+            else if (arrow != null && (TestHooks.Clock() - v.HoverSince).TotalSeconds > 0.7) {
                 int pane = arrow[1] - '0'; var s = v.Side[pane];
-                v.Box[pane] = (v.Box[pane] + (arrow[0] == 'r' ? 1 : -1) + s.Boxes) % s.Boxes; v.HoverSince = DateTime.Now;
+                v.Box[pane] = (v.Box[pane] + (arrow[0] == 'r' ? 1 : -1) + s.Boxes) % s.Boxes; v.HoverSince = TestHooks.Clock();
             }
             Invalidate();
         }
@@ -8052,6 +8425,7 @@ class LauncherForm : Form {
         MoveNow(from, file, box, slot, name, to, at, after);
     }
     void MoveNow(GameEntry from, string file, string box, string slot, string name, GameEntry to, string at, Action after) {
+        if (!TestHooks.SaveFlows && TestHooks.Todo("MoveNow")) return;
         if (AfterCapture(delegate { MoveNow(from, file, box, slot, name, to, at, after); })) return;
         string running = RunningGames();
         if (running != "") { ShowText("Close the game first", "Already running: " + running + ". Saves can't change while it plays.", null); return; }
@@ -8151,25 +8525,31 @@ class LauncherForm : Form {
         });
     }
     void BringBack(GameEntry g) {
+        if (TestHooks.Note("BringBack")) return;
+        string picked; bool replay = TestHooks.Answer("OpenFile: Choose the edited save", out picked);
+        if (replay && picked == null) return;
         using (var d = new OpenFileDialog { Filter = "Cartridge save (*.sav)|*.sav", Title = "Choose the edited save" }) {
-            if (d.ShowDialog(this) != DialogResult.OK) return;
-            string file = d.FileName, problem = null;
+            if (!replay && d.ShowDialog(this) != DialogResult.OK) return;
+            string file = replay ? picked : d.FileName, problem = null;
             Busy("Bringing back the save", delegate { problem = ImportBack(g, file); return null; }, delegate(string e) { ShowText(e == null && problem == null ? "Done" : "Not changed", e ?? problem ?? g.Title + " will start from the edited save. Your older slots are kept.", null); });
         }
     }
     // Opens the game's save in the player's own copy of PKHeX, which the launcher asks for the first time.
     void OpenInPkhex(GameEntry g) {
+        if (TestHooks.Note("OpenInPkhex")) return;
         string exe = Config.Read("pkhex-path.txt", "");
         if (!File.Exists(exe)) {
+            string picked; bool replay = TestHooks.Answer("OpenFile: Where is PKHeX? (projectpokemon.org/home/files/file/1-pkhex)", out picked);
+            if (replay && picked == null) return;
             using (var d = new OpenFileDialog { Filter = "PKHeX|PKHeX*.exe|Programs (*.exe)|*.exe", Title = "Where is PKHeX? (projectpokemon.org/home/files/file/1-pkhex)" }) {
-                if (d.ShowDialog(this) != DialogResult.OK) return;
-                exe = d.FileName; Config.Write("pkhex-path.txt", exe);
+                if (!replay && d.ShowDialog(this) != DialogResult.OK) return;
+                exe = replay ? picked : d.FileName; Config.Write("pkhex-path.txt", exe);
             }
         }
         string why = null, file = null;
         Busy("Opening " + g.Title + " in PKHeX", delegate { file = SaveOf(g, out why); return null; }, delegate(string e) {
             if (e != null || file == null) { ShowText("Can't open that save", e ?? why, null); return; }
-            try { Process.Start(new ProcessStartInfo(exe, "\"" + file + "\"") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }); }
+            try { var psi = new ProcessStartInfo(exe, "\"" + file + "\"") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }; if (!TestHooks.Launch("PKHeX", psi, false)) Process.Start(psi); }
             catch (Exception x) { ShowText("Can't start PKHeX", x.Message, null); return; }
             if (g.Engine() == "gen1") ShowText("Editing an exported copy", "Gen1Recomp keeps its own save format, so PKHeX has an exported copy:\n" + file + "\n\nSave your changes there in PKHeX, then choose Bring back the edited save on this game's page.", null);
         });
@@ -8177,22 +8557,25 @@ class LauncherForm : Form {
 
     // OpenHome takes no file on its command line, as far as its source shows, so the player picks the save inside it.
     void OpenInOpenHome(GameEntry g) {
+        if (TestHooks.Note("OpenInOpenHome")) return;
         string exe = Config.Read("openhome-path.txt", "");
         if (!File.Exists(exe)) {
             using (var d = new OpenFileDialog { Filter = "OpenHome|OpenHome*.exe|Programs (*.exe)|*.exe", Title = "Where is OpenHome? (github.com/andrewbenington/OpenHome/releases)" }) {
                 string likely = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenHome");
                 if (Directory.Exists(likely)) d.InitialDirectory = likely;
-                if (d.ShowDialog(this) != DialogResult.OK) return;
-                exe = d.FileName; Config.Write("openhome-path.txt", exe);
+                string picked; bool replay = TestHooks.Answer("OpenFile: Where is OpenHome? (github.com/andrewbenington/OpenHome/releases)", out picked);
+                if (replay && picked == null) return;
+                if (!replay && d.ShowDialog(this) != DialogResult.OK) return;
+                exe = replay ? picked : d.FileName; Config.Write("openhome-path.txt", exe);
             }
         }
         string why = null, file = null;
         Busy("Opening OpenHome", delegate { file = SaveOf(g, out why); return null; }, delegate(string e) {
             if (e != null || file == null) { ShowText("Can't open that save", e ?? why, null); return; }
             file = file.Replace('/', '\\');
-            try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }); }
+            try { var psi = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) }; if (!TestHooks.Launch("OpenHome", psi, false)) Process.Start(psi); }
             catch (Exception x) { ShowText("Can't start OpenHome", x.Message, null); return; }
-            try { Clipboard.SetText(file); } catch { }
+            if (!TestHooks.Replay) try { Clipboard.SetText(file); } catch { }
             string after = g.Engine() == "gen1"
                 ? "\n\nGen1Recomp keeps its own save format, so this is an exported copy. Save your changes there, then choose Bring back the edited save on this game's page."
                 : "\n\nThe launcher picks up what OpenHome saves here. A backup is made before each game.";
@@ -8202,6 +8585,7 @@ class LauncherForm : Form {
 
     // ---------- running things ----------
     void Play(GameEntry g) {
+        if (!TestHooks.DryRun && TestHooks.Todo("Play " + (g != null ? g.Id : ""))) return;
         if (g == null || !g.Playable) return;
         // The waiting game is kept through everything before it starts (a picture job finishing, the backup and sharing);
         // PlayGen1 decides whether it's still good.
@@ -8238,6 +8622,7 @@ class LauncherForm : Form {
         });
     }
     void Import(GameEntry g, Action then) {
+        if (!TestHooks.DryRun && TestHooks.Todo("Import")) return;
         var psi = Gen1Start("");
         psi.EnvironmentVariables["POKEPORT_IMPORT_ONLY"] = "1";
         psi.EnvironmentVariables["POKEPORT_FORCE_IMPORT"] = "1";
@@ -8369,6 +8754,7 @@ class LauncherForm : Form {
     // Asked once per game, at start and after a scan finds one; after that the game page and Play offer it.
     static string RecompAskedFile { get { return Path.Combine(Config.State, "recomp-asked.txt"); } }
     void AskAboutRecomp() {
+        if (!TestHooks.DryRun && TestHooks.Todo("AskAboutRecomp")) return;
         if (!Recomp.Installed) return;
         if (!Recomp.Busy) Recomp.ClearLeftovers();
         ImproveFromShared();
@@ -8454,14 +8840,14 @@ class LauncherForm : Form {
             string id = null, file = null;
             Busy("Preparing the list", delegate { id = Recomp.CodeId(g); if (id != null) file = Recomp.ShareFile(g, id); return null; }, delegate(string x) {
                 if (x != null || id == null || file == null) { ShowText("Couldn't prepare it", x ?? "The game's code version couldn't be read.", null); return; }
-                try { Process.Start("explorer.exe", "/select,\"" + file + "\""); } catch { }
+                if (!TestHooks.Skip("OpenFolder(\"" + file + "\")")) try { Process.Start("explorer.exe", "/select,\"" + file + "\""); } catch { }
                 string url = "https://github.com/Hailey-Ross/nativeMons/issues/new?template=zakuro-hints.yml"
                     + "&title=" + Uri.EscapeDataString("Zakuro hints: " + g.Title + " " + id)
                     + "&game=" + Uri.EscapeDataString(g.Title) + "&code=" + Uri.EscapeDataString(id)
                     + "&versions=" + Uri.EscapeDataString(Recomp.ShareVersions());
                 // The player's default browser; if it can't open, the link goes to the clipboard to paste into one.
                 bool opened = false;
-                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); opened = true; } catch { }
+                if (!TestHooks.Skip("OpenUrl(\"" + url + "\")")) try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); opened = true; } catch { }
                 // The list goes on the clipboard to paste into the form; one too long for a GitHub text box is attached as the file.
                 string list = ""; try { list = File.ReadAllText(file); } catch { }
                 bool pasted = false;
@@ -8512,6 +8898,7 @@ class LauncherForm : Form {
         if (games.Count == 0) { ReplaceMain(); if (play != null) Play(play); return; }
         var g = games[0]; var rest = games.Skip(1).ToList();
         bool stopped = false;
+        if (TestHooks.DryRun) TestHooks.Priority = "idle " + ((long)Recomp.Mask()).ToString("X");
         RunJob("Building " + g.Title, Recomp.BuildStart(g), false, delegate(int code) {
             bool ok = Recomp.Finish(g, code);
             if (pages.Count > 1 && !pages.Peek().Main && pages.Peek().Title == g.Title) RebuildTop(delegate { return GamePage(g); });
@@ -8557,7 +8944,7 @@ class LauncherForm : Form {
             if (x != null || problem != null) { ShowText("Could not start " + g.Title, "Its save couldn't be handed to " + e.Short + ", so nothing was started. " + (x ?? problem), null); return; }
             string full;
             bool fullscreen = GameOptions.ForGame(g).TryGetValue("full", out full) && full == "on";
-            var area = Screen.FromControl(this).WorkingArea;
+            var area = TestHooks.Replay ? TestHooks.Area : Screen.FromControl(this).WorkingArea;
             string place = " --at " + (area.X + 40) + "," + (area.Y + 30) + " --scale " + Ctr3dsSaves.ZakuroScale(area) + " --focus-pad --fast-forward 4";
             string args = e.Native ? "\"" + g.CtrPlainRom + "\" --recompiled \"" + Recomp.LibraryOf(g) + "\" --data \"" + Ctr3dsSaves.EmuData(e) + "\"" + place + (fullscreen ? " --fullscreen" : "") : "\"" + g.CtrRom + "\"";
             // Quick start: from the title-screen snapshot, only while the save is exactly the one it was made from.
@@ -8585,6 +8972,7 @@ class LauncherForm : Form {
             });
             // Wallpapers from this session's play, while it runs.
             if (job != null && jobIsGame && !Wallpaper.Drawn) PlaySnaps.Watch(job, g);
+            else if (TestHooks.Replay && TestHooks.DryRun && !Wallpaper.Drawn) TestHooks.Skip("PlaySnaps.Watch(" + g.Id + ")");
         });
     }
     void PlayPc(GameEntry g) {
@@ -8608,6 +8996,7 @@ class LauncherForm : Form {
     // ---------- PC games the player adds (CustomGames) ----------
     // From its folder, its .zip or its program (notes/launcher.md, PC games).
     void AddPcGame() {
+        if (TestHooks.Todo("AddPcGame")) return;
         var p = new Page { Title = "Add a PC game", Body = "Any game with its own program, such as a fan game. It runs as it is, with no extras, and keeps its saves wherever it always does." };
         p.Items.Add(new Item("From its folder", "Runs where it is. Nothing is copied.", true, delegate {
             string dir = PickFolder("Choose the game's folder");
@@ -8709,7 +9098,7 @@ class LauncherForm : Form {
             string id = g.Id;
             Rescan(delegate { pages.Pop(); pages.Pop(); pages.Push(GamesPage()); var fresh = Library.Games.Find(x => x.Id == id); if (fresh != null) pages.Push(GamePage(fresh)); ReplaceMain(); });
         }) { Icon = '' });
-        p.Items.Add(new Item("Open its folder", "", Directory.Exists(CustomGames.Dir(c)), delegate { try { Process.Start("explorer.exe", "\"" + CustomGames.Dir(c) + "\""); } catch { } }) { Icon = '', Info = CustomGames.Dir(c) });
+        p.Items.Add(new Item("Open its folder", "", Directory.Exists(CustomGames.Dir(c)), delegate { if (!TestHooks.Skip("OpenFolder(\"" + CustomGames.Dir(c) + "\")")) try { Process.Start("explorer.exe", "\"" + CustomGames.Dir(c) + "\""); } catch { } }) { Icon = '', Info = CustomGames.Dir(c) });
         p.Items.Add(new Item("Remove from the launcher", c.copy ? "Deletes the launcher's copy. Saves stay." : "Forgets it. Nothing is deleted.", true, delegate {
             if (RunningGames() != "") { ShowText("Close your game first", "Already running: " + RunningGames() + ".", null); return; }
             string problem = null, id = g.Id;
@@ -8735,6 +9124,7 @@ class LauncherForm : Form {
         Action<Page> importItems = delegate(Page into) {
             into.Items.Add(new Item("Import from a folder", "Copies your installation into the launcher.", true, delegate { string f = PickFolder("Choose the folder with " + PcGames.Of(g).Exe); if (f != null) InstallPc(g, f); }) { Icon = '' });
             into.Items.Add(new Item("Import from a zip", "Unpacks the game's download into the launcher.", true, delegate {
+                string picked; if (TestHooks.Answer("OpenFile: Choose " + g.Title + "'s zip", out picked)) { if (picked != null) InstallPc(g, picked); return; }
                 using (var d = new OpenFileDialog { Filter = "Zip (*.zip)|*.zip", Title = "Choose " + g.Title + "'s zip" }) if (d.ShowDialog(this) == DialogResult.OK) InstallPc(g, d.FileName);
             }) { Icon = '' });
             into.Items.Add(new Item("Download", "From the game's GitHub (a few GB). Needs Git for Windows.", PcGames.Git() != null, delegate { InstallPc(g, null); }) { Icon = '' });
@@ -8754,12 +9144,12 @@ class LauncherForm : Form {
         p.Items.Add(new Item("Saves folder", existing ? "Where the game keeps them." : "In the launcher's folder.", true, delegate {
             string dir = PcGames.SaveDir(g);
             Directory.CreateDirectory(dir);
-            try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+            if (!TestHooks.Skip("OpenFolder(\"" + dir + "\")")) try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
         }) { Icon = '', Info = PcGames.SaveDir(g) });
         p.Items.Add(new Item("Save backups", "Copies made before each session.", true, delegate {
             string dir = Path.Combine(Config.State, "save-backups", g.Id);
             Directory.CreateDirectory(dir);
-            try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
+            if (!TestHooks.Skip("OpenFolder(\"" + dir + "\")")) try { Process.Start("explorer.exe", "\"" + dir + "\""); } catch { }
         }) { Icon = '', Info = "The launcher copies your save files here before each session, keeping the newest 30. The game also keeps backups of its own in its save folder." });
         if (existing) {
             p.Items.Add(new Item("Import into the launcher", "A copy the launcher keeps and updates.", true, delegate {
@@ -8854,6 +9244,7 @@ class LauncherForm : Form {
         var g = current;
         if (g.Engine() != "nativeplat") { StartReady(g, key); return; }
         // nativeplat plays a copy of the save in its own slot: put it there first, as Play does, off the window's thread.
+        if (TestHooks.Replay) { try { PrepareNativeplat(g); } catch (Exception x) { readyFailed = key; QuickNote("failed " + g.Id + ": " + x.Message); return; } StartReady(g, key); return; }
         readyStarting = true;
         string problem = null;
         Task.Run(() => { try { PrepareNativeplat(g); } catch (Exception x) { problem = x.Message; } }).ContinueWith(t => BeginInvoke((Action)delegate {
@@ -8875,6 +9266,7 @@ class LauncherForm : Form {
             psi.EnvironmentVariables["NATIVEMONS_QUICK_START"] = "1";
         }
         psi.RedirectStandardInput = true;
+        if (TestHooks.Replay && TestHooks.DryRun) { TestHooks.Priority = "below normal"; TestHooks.Launch("Quick start " + g.Title, psi, false); readyFailed = key; QuickNote("starting " + g.Id); return; }
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         DataReceivedEventHandler line = delegate(object s, DataReceivedEventArgs e) {
             if (e.Data == null) return;
@@ -8979,6 +9371,7 @@ class LauncherForm : Form {
             + (funcs != null ? " --funcs \"" + funcs + "\"" : "") + " --headless --frames " + (g.ArtFrame + 5) + " --state-save \"" + made + "\" --state-at " + g.ArtFrame;
         psi = new ProcessStartInfo(Config.Fulldex, args) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true };
         }
+        if (TestHooks.Replay && TestHooks.DryRun) { TestHooks.Priority = "below normal"; TestHooks.Launch("Snapshot " + g.Title, psi, false); snapFailed = key + saveHash; try { Directory.Delete(work, true); } catch { } return; }
         var p = new Process { StartInfo = psi };
         try { p.Start(); } catch (Exception x) { snapFailed = key + saveHash; QuickNote("snapshot failed " + g.Id + ": " + x.Message); try { Directory.Delete(work, true); } catch { } return; }
         try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
@@ -9283,6 +9676,7 @@ class LauncherForm : Form {
     }
     Action jobCancel;
     void RunJob(string title, ProcessStartInfo psi, bool isGame, Action<int> done) {
+        if (TestHooks.Launch(title, psi, isGame)) return;
         jobCancel = null;
         log.Clear(); jobTitle = title; jobIsGame = isGame; jobHid = false; jobStart = DateTime.Now; if (isGame) gameStart = jobStart; progress = -1; jobDone = done;
         // Let the game take the foreground from us.
@@ -9344,6 +9738,7 @@ class LauncherForm : Form {
     }
     // A short wait on another thread, shown as a card, so the window never freezes.
     void Busy(string title, Func<object, string> work, Action<string> then) {
+        if (TestHooks.Replay) { string r; try { r = work == null ? null : work(null); } catch (Exception x) { r = x.GetBaseException().Message; } then(r); Invalidate(); return; }
         job = new Process(); jobTitle = title; jobIsGame = false; jobStart = DateTime.Now; progress = -1; log.Clear(); Invalidate();
         Task.Run(() => work == null ? null : work(null)).ContinueWith(t => BeginInvoke((Action)delegate {
             job = null; then(t.IsFaulted ? t.Exception.GetBaseException().Message : t.Result); Invalidate();
@@ -9462,9 +9857,9 @@ class LauncherForm : Form {
                     using (var pen = new Pen(Color.FromArgb(120, accent), 2)) g.DrawPath(pen, path);
                 }
                 float y = card.Y + pad, x = card.X + pad;
-                using (var b = new SolidBrush(Color.FromArgb(150, 255, 255, 255))) g.DrawString("NATIVEMONS", f0, b, x, y);
+                using (var b = new SolidBrush(Color.FromArgb(150, 255, 255, 255))) g.DrawString("NATIVEMONS", f0, b, x, y); TestHooks.Text(g, "NATIVEMONS", f0, new RectangleF(new PointF(x, y), g.MeasureString("NATIVEMONS", f0)), null);
                 y += labelH;
-                using (var b = new SolidBrush(Color.White)) g.DrawString(title, f1, b, new RectangleF(x, y, inner, titleH));
+                using (var b = new SolidBrush(Color.White)) g.DrawString(title, f1, b, new RectangleF(x, y, inner, titleH)); TestHooks.Text(g, title, f1, new RectangleF(x, y, inner, titleH), null);
                 y += titleH + gap * 2;
                 string[] names = { "Resume", showControls ? "Hide controls" : "Controls", confirmClose ? "Press again to close" : "Close game" };
                 var mid = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
@@ -9473,22 +9868,22 @@ class LauncherForm : Form {
                     bool on = i == sel;
                     Color fill = on ? (i == 2 && confirmClose ? Color.FromArgb(214, 64, 52) : accent) : Color.FromArgb(44, 47, 58);
                     using (var path = Round(r, rowH / 2)) using (var b = new SolidBrush(fill)) g.FillPath(b, path);
-                    using (var b = new SolidBrush(Color.White)) g.DrawString(names[i], f2, b, new RectangleF(r.X + rowH * 0.45f, r.Y, r.Width - rowH * 0.9f, r.Height), mid);
+                    var nr = new RectangleF(r.X + rowH * 0.45f, r.Y, r.Width - rowH * 0.9f, r.Height); TestHooks.Text(g, names[i], f2, nr, mid); using (var b = new SolidBrush(Color.White)) g.DrawString(names[i], f2, b, nr, mid);
                     hits.Add(r);
                     y += rowH + gap;
                     if (i == 1 && showControls) {
                         var box = new RectangleF(x, y, inner, textH);
                         using (var path = Round(box, pad * 0.4f)) using (var b = new SolidBrush(Color.FromArgb(20, 22, 28))) g.FillPath(b, path);
-                        using (var b = new SolidBrush(Color.FromArgb(214, 218, 228))) g.DrawString(controls, f3, b, new RectangleF(box.X + pad / 2, box.Y + pad / 2, box.Width - pad, box.Height - pad));
+                        using (var b = new SolidBrush(Color.FromArgb(214, 218, 228))) g.DrawString(controls, f3, b, new RectangleF(box.X + pad / 2, box.Y + pad / 2, box.Width - pad, box.Height - pad)); TestHooks.Text(g, controls, f3, new RectangleF(box.X + pad / 2, box.Y + pad / 2, box.Width - pad, box.Height - pad), null);
                         y += textH + gap;
                     }
                 }
                 y += gap;
                 if (confirmClose) {
-                    using (var b = new SolidBrush(Color.FromArgb(255, 176, 166))) g.DrawString("Anything since your last save in the game is lost.", f3, b, new RectangleF(x, y, inner, f3.Height * 1.4f), new StringFormat { Alignment = StringAlignment.Center });
+                    var lostR = new RectangleF(x, y, inner, f3.Height * 1.4f); var lostF = new StringFormat { Alignment = StringAlignment.Center }; TestHooks.Text(g, "Anything since your last save in the game is lost.", f3, lostR, lostF); using (var b = new SolidBrush(Color.FromArgb(255, 176, 166))) g.DrawString("Anything since your last save in the game is lost.", f3, b, lostR, lostF);
                     y += f3.Height * 1.4f;
                 }
-                using (var b = new SolidBrush(Color.FromArgb(140, 255, 255, 255))) g.DrawString("A  choose      B  back      Guide  resume", f3, b, new RectangleF(x, y, inner, hintH), new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center });
+                var hintR = new RectangleF(x, y, inner, hintH); var hintF = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }; TestHooks.Text(g, "A  choose      B  back      Guide  resume", f3, hintR, hintF); using (var b = new SolidBrush(Color.FromArgb(140, 255, 255, 255))) g.DrawString("A  choose      B  back      Guide  resume", f3, b, hintR, hintF);
             }
             return hits;
         }
@@ -9496,6 +9891,7 @@ class LauncherForm : Form {
 
     // ---------- input ----------
     static ushort Pad() {
+        if (TestHooks.Replay) return TestHooks.Pad;
         for (int i = 0; i < 4; i++) {
             Native.XState s;
             try {
@@ -9517,7 +9913,7 @@ class LauncherForm : Form {
         if (powerOff >= 0 || closing) return;
         WatchGba();
         OpenTick();
-        if ((DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
+        if (!TestHooks.Replay && (DateTime.Now - scannedAt).TotalMilliseconds >= 250) {
             scannedAt = DateTime.Now;
             if (waiting != null && job == null && RunningGames() == "") {
                 string id = waiting; waiting = null; pages.Pop();
@@ -9534,19 +9930,19 @@ class LauncherForm : Form {
         }
         // A tablet while Move Pokemon's boxes are anywhere in the page stack, a phone again once they've closed.
         if (!wideWindow) MorphTowards(pages.Any(pg => pg.Boxes != null));
-        if (BannerAge((float)clock.Elapsed.TotalSeconds) >= 0) dirty = true;
-        if (ClashShowing() && (float.IsNaN(clashAt) || (float)clock.Elapsed.TotalSeconds - clashAt < 0.4f)) dirty = true;
+        if (BannerAge(Now()) >= 0) dirty = true;
+        if (ClashShowing() && (float.IsNaN(clashAt) || Now() - clashAt < 0.4f)) dirty = true;
         if (Sprites.Arrived != spritesSeen) { spritesSeen = Sprites.Arrived; dirty = true; }
         if (dirty || Animating()) { dirty = false; Invalidate(); }
         // A highlighted app moves at the full rate, so its motion stays smooth; under Wine or Proton at half, where
         // drawing costs several times more (a Steam Deck's battery).
-        if (Visible && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0 && !UiFont.Wine) Invalidate();
-        if (Visible && panelIntro && frame % 6 == 0) Invalidate();
-        if (Visible && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || Recomp.BannerShowing || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
+        if ((Visible || TestHooks.Replay) && job == null && pages.Count > 0 && pages.Peek().Main && pages.Peek().Sel >= 0 && frame % 2 == 0 && !UiFont.Wine) Invalidate();
+        if ((Visible || TestHooks.Replay) && panelIntro && frame % 6 == 0) Invalidate();
+        if ((Visible || TestHooks.Replay) && ++frame % 2 == 0 && (job != null || starting || scrolling || spinning || Recomp.BannerShowing || (pages.Count > 0 && pages.Peek().Main))) Invalidate();
         // Only while the menu is in front: XInput reports the pad to every process.
-        GuideTick();
-        if (job != null && jobCancel != null && Form.ActiveForm == this) { ushort jb = Pad(); if ((jb & ~prevPad & B) != 0) jobCancel(); prevPad = jb; return; }
-        if (job != null || starting || Form.ActiveForm != this) { prevPad = Pad(); return; }
+        if (!TestHooks.Replay) GuideTick();
+        if (job != null && jobCancel != null && Front) { ushort jb = Pad(); if ((jb & ~prevPad & B) != 0) jobCancel(); prevPad = jb; return; }
+        if (job != null || starting || !Front) { prevPad = Pad(); return; }
         ushort b = Pad(), pressed = (ushort)(b & ~prevPad);
         if ((pressed & A) != 0) Act("ok", true);
         else if ((pressed & B) != 0) Act("back", true);
@@ -9560,6 +9956,7 @@ class LauncherForm : Form {
         if (b != prevPad) held = 0;
         prevPad = b;
     }
+    bool Front { get { return TestHooks.Replay ? TestHooks.Active : Form.ActiveForm == this; } }
     protected override bool ProcessCmdKey(ref Message msg, Keys key) {
         if (job != null && jobCancel != null && (key == Keys.Escape || key == Keys.Back)) { jobCancel(); return true; }
         if (job == null && !starting) {
@@ -9598,7 +9995,7 @@ class LauncherForm : Form {
         base.OnMouseDown(e);
         if (Morphing) return;
         if (PromptAt(e.Location) == null && BoxMouseDown(e)) return;
-        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
+        if (e.Button == MouseButtons.Left && PromptAt(e.Location) == null && HitAt(e.Location) < 0) { if (TestHooks.Skip("DragWindow")) return; Native.ReleaseCapture(); Native.SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
     }
     protected override void OnMouseUp(MouseEventArgs e) {
         base.OnMouseUp(e);
@@ -9616,7 +10013,7 @@ class LauncherForm : Form {
         if (over != hoverPrompt) { hoverPrompt = over; Cursor = over != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
         if (BoxMouseMove(e)) return;
         // Only a mouse that really moved picks a row: a still cursor must not take the selection from the keys.
-        var at = System.Windows.Forms.Cursor.Position;
+        var at = TestHooks.Replay ? e.Location : System.Windows.Forms.Cursor.Position;
         if (at == lastMouse) return;
         lastMouse = at;
         int i = HitAt(e.Location);
@@ -9627,13 +10024,13 @@ class LauncherForm : Form {
         base.OnMouseClick(e);
         if (Morphing) return;
         string prompt = e.Button == MouseButtons.Left ? PromptAt(e.Location) : null;
-        if (prompt == "M") { WindowState = FormWindowState.Minimized; return; }
-        if (prompt == "X" && job == null) { Close(); return; }
+        if (prompt == "M") { if (!TestHooks.Skip("Minimize")) WindowState = FormWindowState.Minimized; return; }
+        if (prompt == "X" && job == null) { if (TestHooks.Replay) ReplayClose(); else Close(); return; }
         if (job != null) return;
         if (prompt == "NX") { bannerClosed = bannerBuild.ToString(); Config.Write("update-dismissed.txt", bannerClosed); Invalidate(); return; }
         if (prompt == "N") { bannerAt = -BannerSeconds * 2; OpenUpdates(); return; }
         if (prompt == "C") { OpenClashes(); return; }
-        if (prompt != null && prompt.StartsWith("url:")) { try { Process.Start(new ProcessStartInfo(prompt.Substring(4)) { UseShellExecute = true }); } catch { } return; }
+        if (prompt != null && prompt.StartsWith("url:")) { if (!TestHooks.Skip("OpenUrl(\"" + prompt.Substring(4) + "\")")) try { Process.Start(new ProcessStartInfo(prompt.Substring(4)) { UseShellExecute = true }); } catch { } return; }
         if (prompt != null) {
             Act(prompt == "A" ? "ok" : prompt == "B" ? "back" : prompt == "U" ? "up" : prompt == "D" ? "down" : prompt == "L" ? "left" : prompt == "R" ? "right" : "", false);
             return;
@@ -9646,8 +10043,8 @@ class LauncherForm : Form {
     }
     // The same action from the other source within 150 ms is dropped: Steam can send a key for a press XInput reports.
     void Act(string a, bool fromPad) {
-        if (a == lastAction && fromPad != lastFromPad && (DateTime.Now - lastActionTime).TotalMilliseconds < 150) return;
-        lastAction = a; lastFromPad = fromPad; lastActionTime = DateTime.Now;
+        if (a == lastAction && fromPad != lastFromPad && (TestHooks.Clock() - lastActionTime).TotalMilliseconds < 150) return;
+        lastAction = a; lastFromPad = fromPad; lastActionTime = TestHooks.Clock();
         if (pages.Count == 0 || openRun != null || powerOff >= 0) return;
         var p = pages.Peek();
         if (a == "back" && p.Boxes != null && p.Boxes.Holding) {
@@ -9670,7 +10067,7 @@ class LauncherForm : Form {
             if (a == "ok") {
                 var it = p.Items[p.Sel];
                 if (it.On && it.Run != null && p.Main && p.Sel >= 1 && p.Sel < AppNames.Length && AppNames[p.Sel] != "Move" && AppNames[p.Sel] != "Exit" && !appRects[p.Sel].IsEmpty) {
-                    openRun = it.Run; openApp = p.Sel; openFrom = appRects[p.Sel]; openAt = (float)clock.Elapsed.TotalSeconds;
+                    openRun = it.Run; openApp = p.Sel; openFrom = appRects[p.Sel]; openAt = Now();
                 } else if (it.On && it.Run != null) it.Run();
             }
             else if (p.Main) p.Sel = GridMove(p.Sel, a, p.Items.Count);
@@ -9711,6 +10108,7 @@ class LauncherForm : Form {
     static readonly Color Text1 = Color.FromArgb(38, 40, 50), Text2 = Color.FromArgb(92, 94, 106), Text3 = Color.FromArgb(150, 148, 136);
     static readonly Color FootInk = Color.FromArgb(196, 202, 214);
     readonly Stopwatch clock = Stopwatch.StartNew();
+    float Now() { return TestHooks.FixedTime ? TestHooks.T : (float)clock.Elapsed.TotalSeconds; }
 
     // Set while a loading Poke Ball is on screen, so the window keeps redrawing and it turns.
     bool spinning;
@@ -9737,12 +10135,12 @@ class LauncherForm : Form {
     float powerOff = -1; int powerTop; bool poweredOff;
     void PowerOffTick() {
         if (powerOff < 0 || poweredOff) return;
-        float u = (float)clock.Elapsed.TotalSeconds - powerOff;
+        float u = Now() - powerOff;
         PowerLevel = PowerCurve(u - LightsAt);
         if (u >= LightsAt && FrozenT < 0) FrozenT = powerOff + LightsAt;
         float k = u - LightsAt - LightsTime;
         bool gone = false;
-        if (k > 0) {
+        if (k > 0 && !snapshotAnim && !TestHooks.Replay) {
             // Put away: down to the bottom of the screen, a soft lift as a hand picks it up, then it falls away out of sight.
             var scr = Screen.FromControl(this);
             int rest = Math.Max(powerTop, scr.WorkingArea.Bottom - Height), bottom = scr.Bounds.Bottom + 20;
@@ -9757,14 +10155,14 @@ class LauncherForm : Form {
         Invalidate();
         if (gone) { poweredOff = true; Close(); }
     }
-    bool Animating() { float t = (float)clock.Elapsed.TotalSeconds; return powerOff >= 0 || setupLeaving != null || t - setupAt < 1.4f || (pages.Count > 0 && pages.Peek().Step == 0) || t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null || openRun != null || t - openAt < OpenTime + 0.3f || t - bounceAt < 1.4f; }
+    bool Animating() { float t = Now(); return powerOff >= 0 || setupLeaving != null || t - setupAt < 1.4f || (pages.Count > 0 && pages.Peek().Step == 0) || t - screenAt < 0.2f || t - selAt < 0.14f || splashShot != null || openRun != null || t - openAt < OpenTime + 0.3f || t - bounceAt < 1.4f; }
     // An app opening: its icon grows to fill the screen, then the screen it opens has its rows pop in one by one.
     const float OpenTime = 0.3f;
     float openAt = -10, bounceAt = -10; int openApp; RectangleF openFrom; Action openRun; bool bounceArm;
     readonly RectangleF[] appRects = new RectangleF[AppNames.Length];
     static float BackOut(float x) { x = Math.Max(0, Math.Min(1, x)) - 1; return 1 + 2.4f * x * x * x + 1.4f * x * x; }
     void OpenTick() {
-        if (openRun == null || (float)clock.Elapsed.TotalSeconds - openAt < OpenTime) return;
+        if (openRun == null || Now() - openAt < OpenTime) return;
         var run = openRun; openRun = null; bounceArm = true; run();
     }
     void RenderOpen(Graphics g, int w, int h, float t) {
@@ -9816,7 +10214,7 @@ class LauncherForm : Form {
     const float ShakeLength = 0.62f;
     static float BallShake(float u) {
         if (u < 0) { shakeRandom = null; return 0; }
-        if (shakeRandom == null || u < shakeU) { shakeRandom = new Random(); shakeStarts.Clear(); shakeStarts.Add(0.15f); }
+        if (shakeRandom == null || u < shakeU) { shakeRandom = TestHooks.NewRandom(); shakeStarts.Clear(); shakeStarts.Add(0.15f); }
         shakeU = u;
         while (shakeStarts[shakeStarts.Count - 1] + ShakeLength < u) shakeStarts.Add(shakeStarts[shakeStarts.Count - 1] + ShakeLength + 0.3f + (float)shakeRandom.NextDouble() * 0.7f);
         float k = (u - shakeStarts[shakeStarts.Count - 1]) / ShakeLength;
@@ -10274,6 +10672,7 @@ class LauncherForm : Form {
         using (var b = new SolidBrush(c)) using (var sf = new StringFormat()) {
             sf.Alignment = h; sf.LineAlignment = v; sf.Trimming = StringTrimming.EllipsisCharacter;
             sf.FormatFlags = wrap ? StringFormatFlags.LineLimit : StringFormatFlags.NoWrap;
+            TestHooks.Text(g, s, f, r, sf);
             g.DrawString(s ?? "", f, b, r, sf);
         }
     }
@@ -11225,11 +11624,12 @@ class LauncherForm : Form {
     }
     // The Settings switch: the window becomes the other shape where it is, right away.
     void ApplyLayout(bool wide) {
-        var area = Screen.FromControl(this).WorkingArea;
+        var area = TestHooks.Replay ? TestHooks.Area : Screen.FromControl(this).WorkingArea;
         var size = WindowSize(area, wide);
         drawX = 0; drawW = 0; wideWindow = wide;
         if (wide) { phoneW = size.Height * 60 / 100; tabletK = 1; tabletW = size.Width; } else { phoneW = 0; tabletK = 0; }
         SetBounds(area.Left + (area.Width - size.Width) / 2, area.Top + (area.Height - size.Height) / 2, size.Width, size.Height);
+        TestHooks.Skip("SetBounds { x: " + (area.Left + (area.Width - size.Width) / 2) + ", y: " + (area.Top + (area.Height - size.Height) / 2) + ", w: " + size.Width + ", h: " + size.Height + " }");
         using (var outline = Round(new RectangleF(0, 0, size.Width, size.Height), CornerRadius(size.Width, size.Height))) Region = new Region(outline);
         MakeFonts(wide ? WideText(size.Width, phoneW) : size.Width);
         Invalidate();
@@ -11241,10 +11641,10 @@ class LauncherForm : Form {
     int drawX, drawW;
     bool Morphing { get { return tabletK > 0 && tabletK < 1; } }
     void MorphTowards(bool on) {
-        float target = on ? 1 : 0, now = (float)clock.Elapsed.TotalSeconds;
+        float target = on ? 1 : 0, now = Now();
         if (tabletK == target) { tabletLast = now; return; }
         if (phoneW == 0) phoneW = ClientSize.Width;
-        var area = Screen.FromControl(this).WorkingArea;
+        var area = TestHooks.Replay ? TestHooks.Area : Screen.FromControl(this).WorkingArea;
         int h = ClientSize.Height;
         if (tabletK == 0 || tabletK == 1) {
             // Starting out: where it opens from, and how wide it gets on this screen.
@@ -11254,7 +11654,7 @@ class LauncherForm : Form {
                 int left = Math.Max(area.Left, Math.Min(area.Right - tabletW, morphCentre - tabletW / 2));
                 drawW = phoneW; drawX = Left - left;
                 // One change of the window, before anything moves: its final place and size, showing only the phone.
-                SetBounds(left, Top, tabletW, h);
+                SetBounds(left, Top, tabletW, h); TestHooks.Skip("SetBounds { x: " + left + ", y: " + Top + ", w: " + tabletW + ", h: " + h + " }");
                 SetMorphRegion(drawX, drawW, h);
                 Refresh();
             }
@@ -11271,7 +11671,7 @@ class LauncherForm : Form {
             // Folded: the window becomes the phone again, where the phone now is.
             int left = Left + drawX;
             drawX = 0; drawW = 0;
-            SetBounds(left, Top, phoneW, h);
+            SetBounds(left, Top, phoneW, h); TestHooks.Skip("SetBounds { x: " + left + ", y: " + Top + ", w: " + phoneW + ", h: " + h + " }");
             SetMorphRegion(0, phoneW, h);
             Refresh();
             return;
@@ -11318,7 +11718,7 @@ class LauncherForm : Form {
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
         hits.Clear(); promptHits.Clear();
         var th = Cur();
-        float t = (float)clock.Elapsed.TotalSeconds;
+        float t = Now();
         g.Clear(Line);
         if (tablet) TabletShell(g, w, h, th, t); else Shell(g, w, h, th, t);
         var s = ScreenRect(w, h);
@@ -11571,12 +11971,12 @@ class LauncherForm : Form {
     void ImproveBanner(Graphics g, int w, int h, float t, float top) {
         if (!Recomp.BannerShowing || starting || job != null || Recomp.BannerTitle == null) { improveAt = float.NaN; improveShown = 0; return; }
         if (float.IsNaN(improveAt)) { improveAt = t; improveLast = t; }
-        bool done = (DateTime.Now - Recomp.DoneAt).TotalSeconds < 5;
+        bool done = (TestHooks.Wall() - Recomp.DoneAt).TotalSeconds < 5;
         // The bar glides toward the build's progress (cached builds report in big steps), quicker the further it is.
         float target = done ? 1f : Recomp.QuietProgress, dt = Math.Max(0, Math.Min(0.1f, t - improveLast)); improveLast = t;
         improveShown += (target - improveShown) * Math.Min(1f, dt * 3.5f);
         float show = Ease((t - improveAt) / 0.28f);
-        if (done) show = Math.Min(show, Ease((5f - (float)(DateTime.Now - Recomp.DoneAt).TotalSeconds) / 0.28f));
+        if (done) show = Math.Min(show, Ease((5f - (float)(TestHooks.Wall() - Recomp.DoneAt).TotalSeconds) / 0.28f));
         int pct = (int)Math.Round(improveShown * 100);
         string text = done ? Recomp.BannerTitle + (Recomp.BannerVerb == "Building" ? " is ready" : " improved") : Recomp.BannerVerb + " " + Recomp.BannerTitle + " · " + pct + "%";
         float bh = h * 0.056f, y = top - (1 - show) * (bh + h * 0.06f), rad = bh / 2;
@@ -11593,7 +11993,7 @@ class LauncherForm : Form {
         if (done) Write(g, "", iconSmall, Color.White, icon, StringAlignment.Center, StringAlignment.Center, false);
         else using (var glyph = new System.Drawing.Drawing2D.GraphicsPath()) {
             glyph.AddString("", iconSmall.FontFamily, (int)iconSmall.Style, iconSmall.SizeInPoints * g.DpiY / 72f, PointF.Empty, StringFormat.GenericTypographic);
-            var bb = glyph.GetBounds();
+            var bb = glyph.GetBounds(); TestHooks.Text(g, "(glyph)", iconSmall, icon, null);
             float cx = icon.X + size / 2, cy = icon.Y + size / 2;
             using (var m = new System.Drawing.Drawing2D.Matrix()) {
                 m.Translate(cx, cy);
@@ -11679,13 +12079,18 @@ class LauncherForm : Form {
     }
     void StatusBar(Graphics g, int w, int h, Color ink) {
         float bar = h * 0.05f, x = w * 0.06f;
-        Write(g, DateTime.Now.ToString("h:mm"), smallBold, ink, new RectangleF(x, 0, w * 0.4f, bar), StringAlignment.Near, StringAlignment.Center, false);
+        Write(g, TestHooks.Wall().ToString("h:mm"), smallBold, ink, new RectangleF(x, 0, w * 0.4f, bar), StringAlignment.Near, StringAlignment.Center, false);
         // The PC's real battery, on a PC that has one.
-        var power = SystemInformation.PowerStatus;
-        if ((power.BatteryChargeStatus & BatteryChargeStatus.NoSystemBattery) != 0) return;
+        float level;
+        if (TestHooks.Battery != null) { if (TestHooks.Battery == "none") return; level = int.Parse(TestHooks.Battery) / 100f; }
+        else {
+            var power = SystemInformation.PowerStatus;
+            if ((power.BatteryChargeStatus & BatteryChargeStatus.NoSystemBattery) != 0) return;
+            level = power.BatteryLifePercent;
+        }
         float bw = w * 0.055f, bh = bw * 0.5f, bx = w - x - bw, by = (bar - bh) / 2;
         using (var path = Round(new RectangleF(bx, by, bw, bh), bh * 0.28f)) using (var pen = new Pen(Fade(ink, 150), 1)) g.DrawPath(pen, path);
-        float fill = (bw - 4) * Math.Max(0.05f, Math.Min(1f, power.BatteryLifePercent));
+        float fill = (bw - 4) * Math.Max(0.05f, Math.Min(1f, level));
         using (var path = Round(new RectangleF(bx + 2, by + 2, fill, bh - 4), (bh - 4) * 0.25f)) using (var b = new SolidBrush(ink)) g.FillPath(b, path);
     }
     // Highlighted Play: now and then its letters greet you with a soft, floaty move, picked at random, each a little different.
@@ -11706,7 +12111,7 @@ class LauncherForm : Form {
             sf.SetMeasurableCharacterRanges(Enumerable.Range(0, s.Length).Select(i => new CharacterRange(i, 1)).ToArray());
             at = g.MeasureCharacterRanges(s, itemBold, r, sf).Select(x => x.GetBounds(g)).ToArray();
         }
-        if (hopRandom == null || u < hopU) { hopRandom = new Random(); hops.Clear(); hops.Add(NextHop(1.2f, -1)); }
+        if (hopRandom == null || u < hopU) { hopRandom = TestHooks.NewRandom(); hops.Clear(); hops.Add(NextHop(1.2f, -1)); }
         hopU = u;
         for (var h = hops[hops.Count - 1]; u > h.Start + HopLength[h.Kind] * h.Speed; h = hops[hops.Count - 1])
             hops.Add(NextHop(h.Start + HopLength[h.Kind] * h.Speed + 7f + (float)hopRandom.NextDouble() * 13f, h.Kind));
@@ -12035,7 +12440,7 @@ class LauncherForm : Form {
         float icon = ib.Width;
         var pic = it.Sprite != null ? Sprites.Get(it.Sprite) : null;
         if (pic != null) DrawSprite(g, pic, new RectangleF(ib.X - icon * 0.15f, ib.Y - icon * 0.15f, icon * 1.3f, icon * 1.3f));
-        else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, ib.X + icon / 2, ib.Y + icon / 2, icon * 0.8f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
+        else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, ib.X + icon / 2, ib.Y + icon / 2, icon * 0.8f, Now()); spinning = true; }
         else if (it.Theme != null) Cart(g, ib.X + icon * 0.1f, ib.Y, icon, it.Theme);
         else {
             Color tint = RowTint(it);
@@ -12224,7 +12629,7 @@ class LauncherForm : Form {
         if (it.DexState > 0) {
             var sp = Sprites.Get(it.Sprite);
             if (sp != null) { var st = g.Save(); g.SetClip(r, System.Drawing.Drawing2D.CombineMode.Intersect); DrawSprite(g, sp, new RectangleF(right - pic, r.Y + (r.Height - pic) / 2 - r.Height * 0.06f, pic, pic)); g.Restore(st); }
-            else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, right - pic / 2, r.Y + r.Height / 2, r.Height * 0.5f, (float)clock.Elapsed.TotalSeconds); spinning = true; }
+            else if (Sprites.Loading(it.Sprite)) { SpinningBall(g, right - pic / 2, r.Y + r.Height / 2, r.Height * 0.5f, Now()); spinning = true; }
             if (it.DexStar) Write(g, "\u2605", itemFont, Color.FromArgb(226, 164, 16), new RectangleF(right - pic - itemFont.Height * 1.4f, r.Y, itemFont.Height * 1.4f, r.Height), StringAlignment.Center, StringAlignment.Center, false);
         }
         Write(g, title, itemFont, ink2, new RectangleF(x + noW, r.Y, right - pic - x - noW, r.Height), StringAlignment.Near, StringAlignment.Center, false);
@@ -12403,7 +12808,7 @@ class LauncherForm : Form {
     void RenderSplash(Graphics g, int w, int h) {
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-        float t = (float)clock.Elapsed.TotalSeconds, since = (float)(DateTime.Now - startSince).TotalSeconds;
+        float t = Now(), since = (float)(TestHooks.Wall() - startSince).TotalSeconds;
         var all = new RectangleF(0, 0, w, h);
         using (var b = new SolidBrush(Color.Black)) g.FillRectangle(b, all);
         // A phone starting up: black glass, the mark, and one quiet line of progress.
@@ -12431,7 +12836,7 @@ class LauncherForm : Form {
     Bitmap splashShot; float outroAt = -10;
     void Outro(Graphics g, int w, int h) {
         if (splashShot == null) return;
-        float k = Ease(((float)clock.Elapsed.TotalSeconds - outroAt) / 0.6f);
+        float k = Ease((Now() - outroAt) / 0.6f);
         if (k >= 1) { splashShot.Dispose(); splashShot = null; return; }
         float s = 1;
         var dest = new RectangleF(w / 2f - w * s / 2, h / 2f - h * s / 2, w * s, h * s);
@@ -12463,7 +12868,7 @@ class LauncherForm : Form {
             g.Restore(clip);
         }
         y = track.Bottom + h * 0.018f;
-        var el = DateTime.Now - jobStart;
+        var el = TestHooks.Wall() - jobStart;
         var lines = new List<string>();
         for (int i = log.Count - 1; i >= 0 && lines.Count < 9; i--) lines.Add(log[i]);
         Write(g, (lines.Count > 0 ? lines[0] : (jobIsGame ? "Starting" : "One moment")), smallFont, PhoneSub, new RectangleF(m, y, w - 2 * m, smallFont.Height * 1.3f), StringAlignment.Center, StringAlignment.Center, false);
@@ -12718,6 +13123,21 @@ static class NativeMonsLauncher {
             int sw = 600, sh = 1000;
             if (argv.Length > 3) { var wh = argv[3].Split('x'); sw = int.Parse(wh[0]); sh = int.Parse(wh[1]); }
             form.Snapshot(argv[1], argv.Length > 2 ? argv[2] : "main", sw, sh);
+            return;
+        }
+        // Test only: --replay <script> <out folder> [WxH], the Rust launcher's replay scripts.
+        if (argv.Length >= 3 && argv[0] == "--replay") {
+            int rw = 600, rh = 1000;
+            if (argv.Length > 3) { var wh = argv[3].Split('x'); rw = int.Parse(wh[0]); rh = int.Parse(wh[1]); }
+            try { Environment.ExitCode = LauncherForm.Replay(argv[1], argv[2], rw, rh); }
+            catch (Exception e) { Directory.CreateDirectory(argv[2]); File.WriteAllText(Path.Combine(argv[2], "replay-error.txt"), e.ToString()); Environment.ExitCode = 3; }
+            return;
+        }
+        // Test only: --snapshot-anim <folder> <screen> <WxH> <t0> <t1> <fps>
+        if (argv.Length >= 7 && argv[0] == "--snapshot-anim") {
+            var form = new LauncherForm();
+            var wh = argv[3].Split('x'); var inv = System.Globalization.CultureInfo.InvariantCulture;
+            form.Snapshot(argv[1], argv[2], int.Parse(wh[0]), int.Parse(wh[1]), new[] { float.Parse(argv[4], inv), float.Parse(argv[5], inv), float.Parse(argv[6], inv) });
             return;
         }
         // One launcher per folder: a second start brings the first to the front.

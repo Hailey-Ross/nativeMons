@@ -1,0 +1,12 @@
+# Settings by controller: five downs, one short hold (no repeat yet), A on Game options (golden: gameoptions).
+screen settings 3.0
+pad DOWN
+pad DOWN
+pad DOWN
+pad DOWN
+pad DOWN
+hold DOWN 0.1
+pad A
+expect Game options
+until 7.25
+snap gameoptions

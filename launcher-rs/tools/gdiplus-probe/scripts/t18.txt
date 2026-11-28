@@ -1,0 +1,25 @@
+canvas 4 667
+clear 255 100 100 120
+linear 0 -1 4 667 90 128 20 40 84 96 30 60 110 colors 3 128 20 40 84 70 40 70 120 96 30 60 110 0 0.55 1
+fillrect 0 0 4 665
+out silver_overlay
+canvas 4 256
+clear 255 255 255 255
+linear 0 0 4 256 90 0 0 0 255 255 0 0 255
+fillrect 0 0 4 256
+out alpha_ramp
+canvas 4 256
+clear 255 255 255 255
+linear 0 0 4 256 90 0 0 0 255 255 0 0 255 colors 2 0 0 0 255 255 0 0 255 0 1
+fillrect 0 0 4 256
+out alpha_ramp_colors
+canvas 4 667
+clear 255 100 100 120
+linear 0 -1 4 667 90 128 20 40 84 70 40 70 120
+fillrect 0 0 4 665
+out two_color_alpha
+canvas 4 667
+clear 255 100 100 120
+linear 0 -1 4 667 90 200 250 40 10 20 10 200 250
+fillrect 0 0 4 665
+out two_color_alpha2

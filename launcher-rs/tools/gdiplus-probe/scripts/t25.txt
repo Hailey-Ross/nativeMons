@@ -1,0 +1,14 @@
+canvas 300 300
+pen 255 0 0 0 6 flat flat miter dash dot
+widen arc6 arc 20 20 200 200 30 120
+flatten farc6 arc 20 20 200 200 30 120
+widen rect6 ellipse 20 20 200 200
+pen 255 0 0 0 4 flat flat miter dash dot
+widen e4 ellipse 20 20 200 200
+pen 255 0 0 0 10 flat flat miter dash dot
+widen e10 ellipse 20 20 200 200
+pen 255 0 0 0 6 flat flat miter dash dot
+widen e6s ellipse 20 20 100 100
+flatten fe6s ellipse 20 20 100 100
+pen 255 0 0 0 6 flat flat miter dash dash
+widen d6 ellipse 20 20 200 200

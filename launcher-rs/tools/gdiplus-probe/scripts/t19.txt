@@ -1,0 +1,12 @@
+canvas 220 220
+clear 255 0 0 0
+smooth 1
+pathellipse 10 10 200 200 255 255 255 255 0 255 255 255
+fillellipse 10 10 200 200
+out pg_circle
+canvas 220 160
+clear 255 0 0 0
+smooth 1
+pathellipse 10 10 200 140 255 255 255 255 0 255 255 255
+fillellipse 10 10 200 140
+out pg_oval

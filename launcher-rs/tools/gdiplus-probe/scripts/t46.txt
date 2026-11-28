@@ -1,0 +1,58 @@
+canvas 120 180
+clear 255 40 90 160
+solid 255 255 255 255
+fillellipse 30 50 50 40
+solid 255 200 30 30
+fillrect 70 120 33 47
+solid 255 20 220 90
+fillrect 5 5 9 170
+out src
+grab
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.025 0 42.0 63.0
+out m0
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.03 0 42.0 63.0
+out m1
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.031 0 42.0 63.0
+out m2
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.0313 0 42.0 63.0
+out m3
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.032 0 42.0 63.0
+out m4
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.035 0 42.0 63.0
+out m5
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.965 0 42.0 63.0
+out m6
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.968 0 42.0 63.0
+out m7
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.9687 0 42.0 63.0
+out m8
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.969 0 42.0 63.0
+out m9
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.9699999999999998 0 42.0 63.0
+out m10
+canvas 60 70
+clear 255 200 200 200
+drawimagehq 2.975 0 42.0 63.0
+out m11

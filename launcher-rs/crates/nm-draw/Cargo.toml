@@ -1,0 +1,17 @@
+[package]
+name = "nm-draw"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "A System.Drawing-shaped 2D API that reproduces GDI+'s pixels."
+
+[dependencies]
+tiny-skia.workspace = true
+cosmic-text.workspace = true
+swash = "0.2"
+# libjpeg-turbo's decoder (IJG licence): GDI+ decodes JPEGs exactly as it does (islow IDCT, fancy upsampling).
+mozjpeg = { version = "=0.10.13", default-features = false }
+
+[features]
+# Time per drawing stage (nm_draw::prof).
+prof = []

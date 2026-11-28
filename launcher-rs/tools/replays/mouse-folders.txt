@@ -1,0 +1,7 @@
+# Mouse: a click on the ROM folders app (golden: folders).
+screen main 3.0
+clickitem 4
+wait 0.6
+expect ROM folders
+until 7.25
+snap folders

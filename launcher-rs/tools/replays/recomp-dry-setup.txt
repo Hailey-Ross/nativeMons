@@ -1,0 +1,6 @@
+# Root goldens-recomp, dry run: the 3DS setup question for Y, Set up in the background: its header is fixed (fixture
+# copy), the library rescanned, and its quiet first build noted (Idle, half the cores); X's improvement follows.
+screen main 3.0
+page Setup3dsPage y
+key enter
+effect Launch

@@ -1,0 +1,23 @@
+# Root goldens-pc. Dropped files: not a save; the FireRed save (Replace your save?, Keep it, then Replace it);
+# the same save twice (a list); the save with the note (one save goes straight on).
+screen main 3.0
+drop %PCDATA%\drop\notes.txt
+expect Can't use that
+key escape
+drop %PCDATA%\drop\Pokemon FireRed.sav
+expect Replace your Pokemon FireRed save?
+snap save-replace
+key enter
+drop %PCDATA%\drop\Pokemon FireRed.sav
+key down
+key enter
+expect Imported
+key escape
+drop %PCDATA%\drop\Pokemon FireRed.sav|%PCDATA%\drop\Pokemon FireRed.sav
+expect Import saves
+wait 0.5
+snap save-import-list
+key escape
+drop %PCDATA%\drop\Pokemon FireRed.sav|%PCDATA%\drop\notes.txt
+expect Replace your Pokemon FireRed save?
+until 7.25

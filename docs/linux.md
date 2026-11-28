@@ -61,6 +61,23 @@ compatibility settings, and start it once so Steam makes its prefix. Then:
 2. Run `./nativemons.sh --setup-prefix <that pfx folder>`.
 3. Set the game's launch options to `WINEDLLOVERRIDES="gdiplus=n,b" %command%`.
 
+## Later: the Rust launcher
+
+A [Rust rebuild of the launcher](../README.md#a-rust-launcher-coming-later) is under way, and it changes the picture
+for Linux and the Steam Deck. Nothing above changes until it's released: today's Linux download is still the
+Windows zip with `nativemons.sh`, as described here.
+- **Native:** the Rust launcher is a Linux program of its own, with no Proton, Wine or Microsoft GDI+ download
+  for the launcher itself. It draws every screen with its own code and bundled fonts, so it looks the same as on
+  Windows, and the menu icons no longer depend on a Windows font.
+- **Light mode:** turns on by itself on a Steam Deck running on battery, and on PCs with few processor threads or
+  little memory. It keeps the same look with animations at 30 frames a second. A switch in Settings overrides it.
+- **No new download:** once it does everything today's launcher does, it replaces it through the normal update,
+  with the same folders, saves and settings.
+- **Engines:** games then switch to native Linux builds one engine at a time where one exists. Engines with no
+  Linux build, such as nativeplat and Infinite Fusion, still run under Proton or Wine.
+
+So far the Rust launcher has been built and tested on Windows only.
+
 ## Reporting problems
 
 Say it's Linux or a Steam Deck, with your distribution, and Proton or Wine with its version.

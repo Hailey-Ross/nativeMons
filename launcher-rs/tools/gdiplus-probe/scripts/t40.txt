@@ -1,0 +1,280 @@
+# t40: what else GDI+ draws as a plain offset under a scale within 0.000595 of 1 (far from the origin).
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+solid 255 40 90 200
+fillrect 510.3 520.35 60.2 30.3
+out fillrect_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+solid 255 40 90 200
+fillellipse 510.3 520.35 60.2 30.3
+out fillellipse_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+solid 255 40 90 200
+fillround 510.3 520.35 60.2 30.3 9
+out fillround_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+pen 255 30 30 30 1.68
+drawline 505.2 515.3 575.7 565.1
+drawline 505 530.37 580 530.37
+out pen168_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+pen 255 30 30 30 3
+drawline 505.2 515.3 575.7 565.1
+drawellipse 515.3 525.3 40 20
+out pen3_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+pen 255 30 30 30 1
+drawline 505.2 515.3 575.7 565.1
+drawline 505 530.37 580 530.37
+out pen1_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+linear 510 520 60 30 0 255 250 30 30 255 30 30 250
+fillrect 510.3 520.35 60.2 30.3
+out linear_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+solid 255 40 90 200
+fillrect 510.3 520.35 60.2 30.3
+out fillrect_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+solid 255 40 90 200
+fillellipse 510.3 520.35 60.2 30.3
+out fillellipse_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+solid 255 40 90 200
+fillround 510.3 520.35 60.2 30.3 9
+out fillround_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+pen 255 30 30 30 1.68
+drawline 505.2 515.3 575.7 565.1
+drawline 505 530.37 580 530.37
+out pen168_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+pen 255 30 30 30 3
+drawline 505.2 515.3 575.7 565.1
+drawellipse 515.3 525.3 40 20
+out pen3_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+pen 255 30 30 30 1
+drawline 505.2 515.3 575.7 565.1
+drawline 505 530.37 580 530.37
+out pen1_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+linear 510 520 60 30 0 255 250 30 30 255 30 30 250
+fillrect 510.3 520.35 60.2 30.3
+out linear_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+solid 255 40 90 200
+fillrect 510.3 520.35 60.2 30.3
+out fillrect_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+solid 255 40 90 200
+fillellipse 510.3 520.35 60.2 30.3
+out fillellipse_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+solid 255 40 90 200
+fillround 510.3 520.35 60.2 30.3 9
+out fillround_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+pen 255 30 30 30 1.68
+drawline 505.2 515.3 575.7 565.1
+drawline 505 530.37 580 530.37
+out pen168_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+pen 255 30 30 30 3
+drawline 505.2 515.3 575.7 565.1
+drawellipse 515.3 525.3 40 20
+out pen3_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+pen 255 30 30 30 1
+drawline 505.2 515.3 575.7 565.1
+drawline 505 530.37 580 530.37
+out pen1_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+linear 510 520 60 30 0 255 250 30 30 255 30 30 250
+fillrect 510.3 520.35 60.2 30.3
+out linear_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+pen 255 30 30 30 3
+drawround 512.3 518.3 60 30 9
+out pen3round_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+pen 255 30 30 30 3
+drawlines 3 505.2 515.3 575.7 565.1 520 560.4
+out pen3poly_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0005864 1.0005864
+pen 255 30 30 30 2
+drawellipse 515.3 525.3 40 20
+out pen2ellipse_1.0005864
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+pen 255 30 30 30 3
+drawround 512.3 518.3 60 30 9
+out pen3round_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+pen 255 30 30 30 3
+drawlines 3 505.2 515.3 575.7 565.1 520 560.4
+out pen3poly_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 0.99945 0.99945
+pen 255 30 30 30 2
+drawellipse 515.3 525.3 40 20
+out pen2ellipse_0.99945
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+pen 255 30 30 30 3
+drawround 512.3 518.3 60 30 9
+out pen3round_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+pen 255 30 30 30 3
+drawlines 3 505.2 515.3 575.7 565.1 520 560.4
+out pen3poly_1.0007
+canvas 100 70
+clear 255 255 255 255
+smooth 1
+translate -500 -510
+translate 0.13 0.27
+scale 1.0007 1.0007
+pen 255 30 30 30 2
+drawellipse 515.3 525.3 40 20
+out pen2ellipse_1.0007

@@ -1,0 +1,10 @@
+# Root goldens-gen1. Kanto, then down to No.004 (golden: dexlist-4).
+screen dex 3.0
+key down
+key enter
+expect Kanto
+key down
+key down
+key down
+until 7.25
+snap dexlist-4

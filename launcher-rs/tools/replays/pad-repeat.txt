@@ -1,0 +1,6 @@
+# Holding down repeats after 14 ticks, every 4: a 0.5 s hold from Fulldex moves 1 + 4 rows, to Download Pokedex.
+screen settings 3.0
+hold DOWN 0.5
+expect Settings
+key enter
+effect GetAllSprites

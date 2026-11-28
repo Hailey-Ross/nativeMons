@@ -1,0 +1,271 @@
+# t41: widened pen centers under small offsets, scale 1, 1.0003 and 1.0007 (1.0003 draws as 1).
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.00 0.00
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_0
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.10 0.10
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_1
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.20 0.20
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_2
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.30 0.30
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_3
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.40 0.40
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_4
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.50 0.50
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_5
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.60 0.60
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_6
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.70 0.70
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_7
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.80 0.80
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_8
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.90 0.90
+scale 1 1
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1_9
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.00 0.00
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_0
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.10 0.10
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_1
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.20 0.20
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_2
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.30 0.30
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_3
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.40 0.40
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_4
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.50 0.50
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_5
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.60 0.60
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_6
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.70 0.70
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_7
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.80 0.80
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_8
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.90 0.90
+scale 1.0003 1.0003
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0003_9
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.00 0.00
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_0
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.10 0.10
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_1
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.20 0.20
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_2
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.30 0.30
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_3
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.40 0.40
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_4
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.50 0.50
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_5
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.60 0.60
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_6
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.70 0.70
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_7
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.80 0.80
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_8
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+translate 0.90 0.90
+scale 1.0007 1.0007
+pen 255 0 0 0 3
+drawline 2 10 38 10
+drawline 10 20 10 38
+out p1.0007_9

@@ -5,4 +5,5 @@ How nativeMons works under the hood: the detail that would otherwise crowd the c
 - [launcher.md](launcher.md): the launcher (`launcher/NativeMonsLauncher.cs`): command line, engines, saves, mods, PC games, pictures, updates.
 - [mon-bridge.md](mon-bridge.md): `tools/mon-bridge`, which reads saves and moves Pokemon with PKHeX.Core.
 - [engine-sync.md](engine-sync.md): the twice-daily workflow that pulls upstream engine updates and moves the pins.
+- [rust-launcher.md](rust-launcher.md): `launcher-rs`, the Rust rebuild of the launcher (not released yet): its crates, drawing, Light mode and parity checks.
 - [stable-check.md](stable-check.md): `tests/stable-check`, the suite a package passes before it becomes the stable build.

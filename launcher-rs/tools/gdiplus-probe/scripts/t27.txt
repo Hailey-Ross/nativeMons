@@ -1,0 +1,18 @@
+canvas 120 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5 flat flat miter dash dash
+drawline 10 10 110 10
+out l15 png
+canvas 120 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1 flat flat miter dash dash
+drawline 10 10 110 10
+out l10 png
+canvas 120 80
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5 flat flat miter dash dash
+drawrect 10 10 100 60
+out r15 png

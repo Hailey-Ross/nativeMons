@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/nm-draw", "crates/nm-ui", "crates/nm-platform", "crates/nativemons", "crates/golden-diff"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

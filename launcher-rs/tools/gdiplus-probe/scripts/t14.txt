@@ -1,0 +1,7 @@
+canvas 300 200
+clear 255 255 255 255
+smooth 1
+text @NotoSans-SemiBold.ttf 28.7 255 0 0 0 10 10 280 52 0 0 1 Settings
+text @NotoSans-Regular.ttf 20.29 255 0 0 0 10 80 280 49 0 0 1 Download Pokedex
+text @NotoSans-Regular.ttf 16.43 255 0 0 0 10 140 280 60 1 0 0 Pokemon Fulldex by mamesj
+out txt

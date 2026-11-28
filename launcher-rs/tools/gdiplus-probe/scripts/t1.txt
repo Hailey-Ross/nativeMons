@@ -1,0 +1,36 @@
+canvas 64 64
+clear 255 255 255 255
+smooth 1
+solid 255 0 0 0
+fillpoly 3 10.3 5.7 50.1 20.2 20.4 55.9
+out tri
+canvas 64 64
+clear 255 255 255 255
+smooth 1
+solid 255 0 0 0
+fillellipse 5.3 6.1 40.7 50.2
+out ell
+canvas 64 64
+clear 255 255 255 255
+smooth 1
+solid 255 0 0 0
+fillround 5.3 6.1 50.7 40.2 9
+out round
+canvas 64 64
+clear 255 255 255 255
+smooth 0
+solid 255 0 0 0
+fillellipse 5.3 6.1 40.7 50.2
+out ell_alias
+canvas 64 64
+clear 255 255 255 255
+smooth 1
+solid 255 0 0 0
+fillellipse 20.5 20.5 10 10
+out ell_small
+canvas 300 300
+clear 255 255 255 255
+smooth 1
+solid 255 0 0 0
+fillellipse 10.25 10.75 270 240
+out ell_big

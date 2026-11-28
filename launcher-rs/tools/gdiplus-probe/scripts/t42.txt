@@ -1,0 +1,684 @@
+# t42: DrawImage NearestNeighbor + PixelOffsetMode.Half (DrawSprite) at in-between sizes, and the setup leave's
+# ColorMatrix alpha DrawImage into a rounded Rectangle (Bilinear).
+canvas 16 12
+clear 0 0 0 0
+smooth 0
+solid 0 0 0 0
+fillrect 0 0 1 1
+solid 255 16 0 7
+fillrect 1 0 1 1
+solid 255 32 0 14
+fillrect 2 0 1 1
+solid 255 48 0 21
+fillrect 3 0 1 1
+solid 255 64 0 28
+fillrect 4 0 1 1
+solid 0 80 0 35
+fillrect 5 0 1 1
+solid 255 96 0 42
+fillrect 6 0 1 1
+solid 255 112 0 49
+fillrect 7 0 1 1
+solid 255 128 0 56
+fillrect 8 0 1 1
+solid 255 144 0 63
+fillrect 9 0 1 1
+solid 0 160 0 70
+fillrect 10 0 1 1
+solid 255 176 0 77
+fillrect 11 0 1 1
+solid 255 192 0 84
+fillrect 12 0 1 1
+solid 255 208 0 91
+fillrect 13 0 1 1
+solid 255 224 0 98
+fillrect 14 0 1 1
+solid 0 240 0 105
+fillrect 15 0 1 1
+solid 255 0 20 13
+fillrect 0 1 1 1
+solid 255 16 20 20
+fillrect 1 1 1 1
+solid 255 32 20 27
+fillrect 2 1 1 1
+solid 255 48 20 34
+fillrect 3 1 1 1
+solid 0 64 20 41
+fillrect 4 1 1 1
+solid 255 80 20 48
+fillrect 5 1 1 1
+solid 255 96 20 55
+fillrect 6 1 1 1
+solid 255 112 20 62
+fillrect 7 1 1 1
+solid 255 128 20 69
+fillrect 8 1 1 1
+solid 0 144 20 76
+fillrect 9 1 1 1
+solid 255 160 20 83
+fillrect 10 1 1 1
+solid 255 176 20 90
+fillrect 11 1 1 1
+solid 255 192 20 97
+fillrect 12 1 1 1
+solid 255 208 20 104
+fillrect 13 1 1 1
+solid 0 224 20 111
+fillrect 14 1 1 1
+solid 255 240 20 118
+fillrect 15 1 1 1
+solid 255 0 40 26
+fillrect 0 2 1 1
+solid 255 16 40 33
+fillrect 1 2 1 1
+solid 255 32 40 40
+fillrect 2 2 1 1
+solid 0 48 40 47
+fillrect 3 2 1 1
+solid 255 64 40 54
+fillrect 4 2 1 1
+solid 255 80 40 61
+fillrect 5 2 1 1
+solid 255 96 40 68
+fillrect 6 2 1 1
+solid 255 112 40 75
+fillrect 7 2 1 1
+solid 0 128 40 82
+fillrect 8 2 1 1
+solid 255 144 40 89
+fillrect 9 2 1 1
+solid 255 160 40 96
+fillrect 10 2 1 1
+solid 255 176 40 103
+fillrect 11 2 1 1
+solid 255 192 40 110
+fillrect 12 2 1 1
+solid 0 208 40 117
+fillrect 13 2 1 1
+solid 255 224 40 124
+fillrect 14 2 1 1
+solid 255 240 40 131
+fillrect 15 2 1 1
+solid 255 0 60 39
+fillrect 0 3 1 1
+solid 255 16 60 46
+fillrect 1 3 1 1
+solid 0 32 60 53
+fillrect 2 3 1 1
+solid 255 48 60 60
+fillrect 3 3 1 1
+solid 255 64 60 67
+fillrect 4 3 1 1
+solid 255 80 60 74
+fillrect 5 3 1 1
+solid 255 96 60 81
+fillrect 6 3 1 1
+solid 0 112 60 88
+fillrect 7 3 1 1
+solid 255 128 60 95
+fillrect 8 3 1 1
+solid 255 144 60 102
+fillrect 9 3 1 1
+solid 255 160 60 109
+fillrect 10 3 1 1
+solid 255 176 60 116
+fillrect 11 3 1 1
+solid 0 192 60 123
+fillrect 12 3 1 1
+solid 255 208 60 130
+fillrect 13 3 1 1
+solid 255 224 60 137
+fillrect 14 3 1 1
+solid 255 240 60 144
+fillrect 15 3 1 1
+solid 255 0 80 52
+fillrect 0 4 1 1
+solid 0 16 80 59
+fillrect 1 4 1 1
+solid 255 32 80 66
+fillrect 2 4 1 1
+solid 255 48 80 73
+fillrect 3 4 1 1
+solid 255 64 80 80
+fillrect 4 4 1 1
+solid 255 80 80 87
+fillrect 5 4 1 1
+solid 0 96 80 94
+fillrect 6 4 1 1
+solid 255 112 80 101
+fillrect 7 4 1 1
+solid 255 128 80 108
+fillrect 8 4 1 1
+solid 255 144 80 115
+fillrect 9 4 1 1
+solid 255 160 80 122
+fillrect 10 4 1 1
+solid 0 176 80 129
+fillrect 11 4 1 1
+solid 255 192 80 136
+fillrect 12 4 1 1
+solid 255 208 80 143
+fillrect 13 4 1 1
+solid 255 224 80 150
+fillrect 14 4 1 1
+solid 255 240 80 157
+fillrect 15 4 1 1
+solid 0 0 100 65
+fillrect 0 5 1 1
+solid 255 16 100 72
+fillrect 1 5 1 1
+solid 255 32 100 79
+fillrect 2 5 1 1
+solid 255 48 100 86
+fillrect 3 5 1 1
+solid 255 64 100 93
+fillrect 4 5 1 1
+solid 0 80 100 100
+fillrect 5 5 1 1
+solid 255 96 100 107
+fillrect 6 5 1 1
+solid 255 112 100 114
+fillrect 7 5 1 1
+solid 255 128 100 121
+fillrect 8 5 1 1
+solid 255 144 100 128
+fillrect 9 5 1 1
+solid 0 160 100 135
+fillrect 10 5 1 1
+solid 255 176 100 142
+fillrect 11 5 1 1
+solid 255 192 100 149
+fillrect 12 5 1 1
+solid 255 208 100 156
+fillrect 13 5 1 1
+solid 255 224 100 163
+fillrect 14 5 1 1
+solid 0 240 100 170
+fillrect 15 5 1 1
+solid 255 0 120 78
+fillrect 0 6 1 1
+solid 255 16 120 85
+fillrect 1 6 1 1
+solid 255 32 120 92
+fillrect 2 6 1 1
+solid 255 48 120 99
+fillrect 3 6 1 1
+solid 0 64 120 106
+fillrect 4 6 1 1
+solid 255 80 120 113
+fillrect 5 6 1 1
+solid 255 96 120 120
+fillrect 6 6 1 1
+solid 255 112 120 127
+fillrect 7 6 1 1
+solid 255 128 120 134
+fillrect 8 6 1 1
+solid 0 144 120 141
+fillrect 9 6 1 1
+solid 255 160 120 148
+fillrect 10 6 1 1
+solid 255 176 120 155
+fillrect 11 6 1 1
+solid 255 192 120 162
+fillrect 12 6 1 1
+solid 255 208 120 169
+fillrect 13 6 1 1
+solid 0 224 120 176
+fillrect 14 6 1 1
+solid 255 240 120 183
+fillrect 15 6 1 1
+solid 255 0 140 91
+fillrect 0 7 1 1
+solid 255 16 140 98
+fillrect 1 7 1 1
+solid 255 32 140 105
+fillrect 2 7 1 1
+solid 0 48 140 112
+fillrect 3 7 1 1
+solid 255 64 140 119
+fillrect 4 7 1 1
+solid 255 80 140 126
+fillrect 5 7 1 1
+solid 255 96 140 133
+fillrect 6 7 1 1
+solid 255 112 140 140
+fillrect 7 7 1 1
+solid 0 128 140 147
+fillrect 8 7 1 1
+solid 255 144 140 154
+fillrect 9 7 1 1
+solid 255 160 140 161
+fillrect 10 7 1 1
+solid 255 176 140 168
+fillrect 11 7 1 1
+solid 255 192 140 175
+fillrect 12 7 1 1
+solid 0 208 140 182
+fillrect 13 7 1 1
+solid 255 224 140 189
+fillrect 14 7 1 1
+solid 255 240 140 196
+fillrect 15 7 1 1
+solid 255 0 160 104
+fillrect 0 8 1 1
+solid 255 16 160 111
+fillrect 1 8 1 1
+solid 0 32 160 118
+fillrect 2 8 1 1
+solid 255 48 160 125
+fillrect 3 8 1 1
+solid 255 64 160 132
+fillrect 4 8 1 1
+solid 255 80 160 139
+fillrect 5 8 1 1
+solid 255 96 160 146
+fillrect 6 8 1 1
+solid 0 112 160 153
+fillrect 7 8 1 1
+solid 255 128 160 160
+fillrect 8 8 1 1
+solid 255 144 160 167
+fillrect 9 8 1 1
+solid 255 160 160 174
+fillrect 10 8 1 1
+solid 255 176 160 181
+fillrect 11 8 1 1
+solid 0 192 160 188
+fillrect 12 8 1 1
+solid 255 208 160 195
+fillrect 13 8 1 1
+solid 255 224 160 202
+fillrect 14 8 1 1
+solid 255 240 160 209
+fillrect 15 8 1 1
+solid 255 0 180 117
+fillrect 0 9 1 1
+solid 0 16 180 124
+fillrect 1 9 1 1
+solid 255 32 180 131
+fillrect 2 9 1 1
+solid 255 48 180 138
+fillrect 3 9 1 1
+solid 255 64 180 145
+fillrect 4 9 1 1
+solid 255 80 180 152
+fillrect 5 9 1 1
+solid 0 96 180 159
+fillrect 6 9 1 1
+solid 255 112 180 166
+fillrect 7 9 1 1
+solid 255 128 180 173
+fillrect 8 9 1 1
+solid 255 144 180 180
+fillrect 9 9 1 1
+solid 255 160 180 187
+fillrect 10 9 1 1
+solid 0 176 180 194
+fillrect 11 9 1 1
+solid 255 192 180 201
+fillrect 12 9 1 1
+solid 255 208 180 208
+fillrect 13 9 1 1
+solid 255 224 180 215
+fillrect 14 9 1 1
+solid 255 240 180 222
+fillrect 15 9 1 1
+solid 0 0 200 130
+fillrect 0 10 1 1
+solid 255 16 200 137
+fillrect 1 10 1 1
+solid 255 32 200 144
+fillrect 2 10 1 1
+solid 255 48 200 151
+fillrect 3 10 1 1
+solid 255 64 200 158
+fillrect 4 10 1 1
+solid 0 80 200 165
+fillrect 5 10 1 1
+solid 255 96 200 172
+fillrect 6 10 1 1
+solid 255 112 200 179
+fillrect 7 10 1 1
+solid 255 128 200 186
+fillrect 8 10 1 1
+solid 255 144 200 193
+fillrect 9 10 1 1
+solid 0 160 200 200
+fillrect 10 10 1 1
+solid 255 176 200 207
+fillrect 11 10 1 1
+solid 255 192 200 214
+fillrect 12 10 1 1
+solid 255 208 200 221
+fillrect 13 10 1 1
+solid 255 224 200 228
+fillrect 14 10 1 1
+solid 0 240 200 235
+fillrect 15 10 1 1
+solid 255 0 220 143
+fillrect 0 11 1 1
+solid 255 16 220 150
+fillrect 1 11 1 1
+solid 255 32 220 157
+fillrect 2 11 1 1
+solid 255 48 220 164
+fillrect 3 11 1 1
+solid 0 64 220 171
+fillrect 4 11 1 1
+solid 255 80 220 178
+fillrect 5 11 1 1
+solid 255 96 220 185
+fillrect 6 11 1 1
+solid 255 112 220 192
+fillrect 7 11 1 1
+solid 255 128 220 199
+fillrect 8 11 1 1
+solid 0 144 220 206
+fillrect 9 11 1 1
+solid 255 160 220 213
+fillrect 10 11 1 1
+solid 255 176 220 220
+fillrect 11 11 1 1
+solid 255 192 220 227
+fillrect 12 11 1 1
+solid 255 208 220 234
+fillrect 13 11 1 1
+solid 0 224 220 241
+fillrect 14 11 1 1
+solid 255 240 220 248
+fillrect 15 11 1 1
+grabsub 0 0 16 12
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 16 12
+out nn_0
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 16 12
+out nn_1
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 16 12
+out nn_2
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 16 12
+out nn_3
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 16 12
+out nn_4
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 20.8 15.6
+out nn_5
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 20.8 15.6
+out nn_6
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 20.8 15.6
+out nn_7
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 20.8 15.6
+out nn_8
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 20.8 15.6
+out nn_9
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 27.2 20.4
+out nn_10
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 27.2 20.4
+out nn_11
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 27.2 20.4
+out nn_12
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 27.2 20.4
+out nn_13
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 27.2 20.4
+out nn_14
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 36 27
+out nn_15
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 36 27
+out nn_16
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 36 27
+out nn_17
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 36 27
+out nn_18
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 36 27
+out nn_19
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 40.3 30.2
+out nn_20
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 40.3 30.2
+out nn_21
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 40.3 30.2
+out nn_22
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 40.3 30.2
+out nn_23
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 40.3 30.2
+out nn_24
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 46.4 34.8
+out nn_25
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 46.4 34.8
+out nn_26
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 46.4 34.8
+out nn_27
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 46.4 34.8
+out nn_28
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 46.4 34.8
+out nn_29
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 52.1 39.1
+out nn_30
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 52.1 39.1
+out nn_31
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 52.1 39.1
+out nn_32
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 52.1 39.1
+out nn_33
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 52.1 39.1
+out nn_34
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.0 3.13 57.6 43.2
+out nn_35
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.25 3.38 57.6 43.2
+out nn_36
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.5 3.63 57.6 43.2
+out nn_37
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.71 3.84 57.6 43.2
+out nn_38
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+drawimagenn 3.9 4.03 57.6 43.2
+out nn_39
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+translate 3.1 2.2
+scale 1.013 1.013
+drawimagenn 1.5 1.5 32 24
+out nnt_40
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+translate 3.6 2.2
+scale 1.013 1.013
+drawimagenn 1.5 1.5 32 24
+out nnt_41
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+translate 3.1 2.2
+scale 1.27 1.27
+drawimagenn 1.5 1.5 32 24
+out nnt_42
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+translate 3.6 2.2
+scale 1.27 1.27
+drawimagenn 1.5 1.5 32 24
+out nnt_43
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+translate 3.1 2.2
+scale 0.83 0.83
+drawimagenn 1.5 1.5 32 24
+out nnt_44
+canvas 70 56
+clear 255 255 255 255
+smooth 1
+translate 3.6 2.2
+scale 0.83 0.83
+drawimagenn 1.5 1.5 32 24
+out nnt_45
+canvas 64 48
+clear 255 242 242 247
+smooth 1
+solid 255 40 120 220
+fillellipse 6 5 30 22
+solid 200 230 60 60
+fillround 22 18 36 24 8
+pen 255 20 20 30 2
+drawline 3 44 60 4
+grabsub 0 0 64 48
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr 0 0 64 48 0.96
+out al_0
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr 0 0 64 48 0.9
+out al_1
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr -1 0 65 49 0.71
+out al_2
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr -1 -1 67 50 0.5
+out al_3
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr -2 -1 68 51 0.27
+out al_4
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr -3 -2 69 52 0.04
+out al_5
+canvas 70 56
+clear 255 242 242 247
+smooth 1
+translate 3 4
+drawimageattr -2 -1 67 50 0.33
+out al_6

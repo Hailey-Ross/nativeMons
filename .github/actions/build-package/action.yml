@@ -43,7 +43,7 @@ runs:
         Move-Item "love-unpacked\love-$env:LOVE_VERSION-win64" "$dist\love"
 
         # Fulldex: its own published Windows build, unmodified.
-        gh release download $env:FULLDEX_RELEASE -R mamesj/pokemon-fulldex -p "pokemon-ds-wide-pc-windows-x86_64.zip" -O fulldex.zip
+        gh release download $env:FULLDEX_RELEASE -R mamesj/fulldex -p "pokemon-ds-wide-pc-windows-x86_64.zip" -O fulldex.zip
         Expand-Archive fulldex.zip fulldex-unpacked
         Move-Item "fulldex-unpacked\pokemon-ds-wide" "$dist\engines\fulldex"
 

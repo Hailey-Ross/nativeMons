@@ -1,0 +1,17 @@
+# Root goldens-pc with NATIVEMONS_TEST_PC_REPO at the data's local git repo. Download (git clone), then Update
+# (nothing new: the Rust shows Not updated over the game page, the C# hides it; deliberate closes it there).
+screen main 3.0
+page PcGamePage infinitefusion
+key down
+key down
+key enter
+expect Imported
+key escape
+expect Pokemon Infinite Fusion
+wait 0.5
+snap pc-cloned
+key down
+key enter
+deliberate Updated|Not updated
+expect Pokemon Infinite Fusion
+until 7.25

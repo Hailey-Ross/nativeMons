@@ -1,0 +1,6 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, NATIVEMONS_TEST_FETCH (one sprite and its shiny; nothing else answers).
+screen settings 3.0
+clickitem 5
+wait 3.0
+snap sprites-done
+until 7.25

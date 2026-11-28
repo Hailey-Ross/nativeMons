@@ -6,6 +6,8 @@ The window, splash, tiles and detail panel come from the steam launcher on the S
 
 It builds with the C# compiler that ships with Windows (`launcher/build.bat`), which means C# 5: no string interpolation and no `?.`.
 
+A Rust rebuild that keeps every screen the same is under way in `launcher-rs` ([rust-launcher.md](rust-launcher.md)). Until it replaces this one, a change to the C# launcher's look or behavior should be made there too, or held back.
+
 ## Command line
 
 | Flags | What it does |
@@ -23,6 +25,7 @@ It builds with the C# compiler that ships with Windows (`launcher/build.bat`), w
 | `--install-index-mod <id> <mod id> <result file>` | Find mods' Install. |
 | `--mod-clashes <id> <result file>` / `--mod-deps <id> <result file>` | What the Mods page shows for clashes and missing mods. |
 | `--roms`, `--update`, `--saves` | For tests: the scan's findings, an update with no window, and the save actions (`list`, `new`, `use`, `copy`, `delete`, `recover`). |
+| `--snapshot-anim <folder> <screen> <w>x<h> <from> <to> <fps>`, `--replay <script> <out folder> [<w>x<h>]` | Test only, for comparing with the Rust launcher: an animation's frames, and a script of input played with no window ([rust-launcher.md](rust-launcher.md#parity)). |
 
 Snapshot screens include `main`, `games`, `game`, `mods`, `folders`, `credits`, `settings`, `controls`, `controls-<n>`, `screenshots`, `job`, `splash`, `sprites`, `updatebanner`, `clashbanner`, `clashes:<game>`, `clashon:<game>,<mod>`, `deps:<game>`, `dep:<game>,<mod>` and `boxes`, `boxheld`, `boxchoose:<top>,<bottom>`. A banner preview with nothing real to show uses a sample instead.
 

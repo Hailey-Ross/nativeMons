@@ -1,0 +1,66 @@
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.0
+drawline 10 10 30 10
+out w1.0
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.2
+drawline 10 10 30 10
+out w1.2
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.4
+drawline 10 10 30 10
+out w1.4
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.49
+drawline 10 10 30 10
+out w1.49
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.5
+drawline 10 10 30 10
+out w1.5
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.51
+drawline 10 10 30 10
+out w1.51
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.6
+drawline 10 10 30 10
+out w1.6
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.75
+drawline 10 10 30 10
+out w1.75
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.9
+drawline 10 10 30 10
+out w1.9
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 1.99
+drawline 10 10 30 10
+out w1.99
+canvas 40 20
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 2.0
+drawline 10 10 30 10
+out w2.0

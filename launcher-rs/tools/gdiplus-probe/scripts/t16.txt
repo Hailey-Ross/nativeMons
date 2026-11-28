@@ -1,0 +1,75 @@
+canvas 560 440
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 400 255 0 0 0 0 0 560 440 0 0 0 
+out iE711_400
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 10.12 255 0 0 0 9 9 22 22 0 1 1 
+out iE711_10
+canvas 50 50
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 17.25 255 0 0 0 8.3 8.7 33.8 33.8 0 1 1 
+out iE711_17
+canvas 560 440
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 400 255 0 0 0 0 0 560 440 0 0 0 
+out iE921_400
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 10.12 255 0 0 0 9 9 22 22 0 1 1 
+out iE921_10
+canvas 50 50
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 17.25 255 0 0 0 8.3 8.7 33.8 33.8 0 1 1 
+out iE921_17
+canvas 560 440
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 400 255 0 0 0 0 0 560 440 0 0 0 
+out iE790_400
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 10.12 255 0 0 0 9 9 22 22 0 1 1 
+out iE790_10
+canvas 50 50
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 17.25 255 0 0 0 8.3 8.7 33.8 33.8 0 1 1 
+out iE790_17
+canvas 560 440
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 400 255 0 0 0 0 0 560 440 0 0 0 
+out iE8BD_400
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 10.12 255 0 0 0 9 9 22 22 0 1 1 
+out iE8BD_10
+canvas 50 50
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 17.25 255 0 0 0 8.3 8.7 33.8 33.8 0 1 1 
+out iE8BD_17
+canvas 560 440
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 400 255 0 0 0 0 0 560 440 0 0 0 
+out iE72D_400
+canvas 40 40
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 10.12 255 0 0 0 9 9 22 22 0 1 1 
+out iE72D_10
+canvas 50 50
+clear 255 255 255 255
+smooth 1
+text Segoe_MDL2_Assets 17.25 255 0 0 0 8.3 8.7 33.8 33.8 0 1 1 
+out iE72D_17

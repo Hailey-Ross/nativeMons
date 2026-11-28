@@ -1,0 +1,12 @@
+[package]
+name = "nm-ui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+nm-draw = { path = "../nm-draw" }
+nm-core = { path = "../nm-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = { version = "1", default-features = false, features = ["std", "perf"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

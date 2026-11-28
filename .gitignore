@@ -12,3 +12,4 @@ obj/
 *.exe
 *.log
 build-output.txt
+launcher-rs/target/

@@ -1,0 +1,22 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, root goldens: Fulldex's settings, a few switched (settings.cfg written).
+screen settings 3.0
+clickitem 0
+wait 0.5
+snap fulldex-settings
+key enter
+key down
+key down
+key enter
+key down
+key down
+key down
+key down
+key enter
+key enter
+wait 0.3
+key escape
+wait 0.3
+clickitem 0
+wait 0.5
+snap fulldex-settings-again
+until 7.25

@@ -1,0 +1,27 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, seed: the patcher. NATIVEMONS_TEST_PYTHON=no: Python 3 needed; Get Python
+# (a fake package, NATIVEMONS_TEST_SHA256 its hash) unpacks but doesn't start; Not now; I'll install it myself.
+screen main 3.0
+page PatchPage black
+wait 0.3
+key enter
+wait 0.3
+snap python-needed
+key enter
+wait 1.0
+snap python-failed
+key escape
+wait 0.3
+page PatchPage black
+key enter
+wait 0.3
+key down
+key down
+key enter
+wait 0.3
+page PatchPage black
+key enter
+wait 0.3
+key down
+key enter
+effect OpenUrl
+until 7.25

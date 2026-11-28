@@ -1,0 +1,19 @@
+# Dry run with a placeholder nativeplat.exe in both sides' engines (made for this run, removed after): quick start's
+# tick (the `quick` command: the menu idle 2 s) on Black makes its title-screen snapshot (Fulldex DS, noted, not
+# started); Platinum switched to nativeplat gets its slot ready and its waiting game noted. Then Discord's frames.
+screen main 3.0
+quick black
+effect Launch
+screen game:platinum 3.0
+key down
+key enter
+wait 0.3
+key down
+key down
+key enter
+wait 0.3
+key escape
+wait 0.3
+quick platinum
+effect Launch
+discord all

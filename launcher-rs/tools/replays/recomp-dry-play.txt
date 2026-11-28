@@ -1,0 +1,12 @@
+# Root goldens-recomp, dry run: Play on Pokemon X (built, "old": 30 findings since its build) hands its save to Zakuro
+# and notes Zakuro's start with the library, window place and scale; then the game page's build item, Build now: the
+# build job is noted with its Idle priority and cores. Nothing starts.
+screen game:x 3.0
+key enter
+effect Launch
+screen game:x 3.0
+key down
+key enter
+expect Build Pokemon X?
+key enter
+effect Launch

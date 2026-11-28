@@ -209,9 +209,9 @@ check_releases() {
 
   # Only releases with a Windows, Linux or macOS file: console- or phone-only builds are not updates for us.
   local desktop='win(dows|32|64)|linux|appimage|mac|osx|darwin'
-  newest=$(gh api "repos/mamesj/pokemon-fulldex/releases?per_page=20" --jq "[.[] | select((.tag_name | test(\"^(pc-|fulldex-[0-9]|v[0-9])\")) and any(.assets[]; .name | test(\"$desktop\"; \"i\"))) | .tag_name][0]")
+  newest=$(gh api "repos/mamesj/fulldex/releases?per_page=20" --jq "[.[] | select((.tag_name | test(\"^(pc-|fulldex-[0-9]|v[0-9])\")) and any(.assets[]; .name | test(\"$desktop\"; \"i\"))) | .tag_name][0]")
   [ -n "$newest" ] && [ "$newest" != "$fulldex_tag" ] && problem "Fulldex $newest released" "We pin \`$fulldex_tag\`. Test \`$newest\` on copies (skill engine-updates), then move the pin in build-all.ps1 and action.yml."
-  digest=$(gh api "repos/mamesj/pokemon-fulldex/releases/tags/$fulldex_tag" --jq '.assets[] | select(.name == "pokemon-ds-wide-pc-windows-x86_64.zip") | .digest')
+  digest=$(gh api "repos/mamesj/fulldex/releases/tags/$fulldex_tag" --jq '.assets[] | select(.name == "pokemon-ds-wide-pc-windows-x86_64.zip") | .digest')
   if [ -n "$digest" ] && ! grep -qx "Fulldex $digest" "$pins"; then
     sed -i "s|^Fulldex .*|Fulldex $digest|" "$pins"
     CHANGES+=("Fulldex $fulldex_tag re-uploaded upstream: rebuilding with it")
@@ -231,7 +231,7 @@ check_releases() {
 }
 
 sync_fork Gen1Recomp "$OWNER/gen1recomp" bryanthaboi/gen1recomp dev 1
-sync_fork Fulldex "$OWNER/pokemon-fulldex" mamesj/pokemon-fulldex main 1
+sync_fork Fulldex "$OWNER/pokemon-fulldex" mamesj/fulldex main 1
 sync_fork gen4recomp "$OWNER/gen4recomp" sohamb117/gen4recomp main 1
 # 3DS emulators: the liaison follows upstream at every run; hails-additions only takes upstream's stable releases.
 sync_fork Azahar "$OWNER/azahar" azahar-emu/azahar master release

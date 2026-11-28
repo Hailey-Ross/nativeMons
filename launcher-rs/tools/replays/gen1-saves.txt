@@ -1,0 +1,14 @@
+# Root goldens-gen1 with the Gen1Recomp slot fixture. The saves list: Enter opens the save, Escape comes back,
+# New save asks for a name (no golden: the selection moved).
+screen saves:red 3.0
+key enter
+wait 0.5
+expect Save 1
+snap gen1-savepage
+key escape
+expect Pokemon Red saves
+key down
+key enter
+effect AskText
+until 7.25
+snap saves-red-newsave

@@ -1,0 +1,28 @@
+canvas 120 180
+clear 255 40 90 160
+solid 255 255 255 255
+fillellipse 30 50 50 40
+solid 255 200 30 30
+fillrect 70 120 33 47
+out src
+grab
+canvas 70 100
+clear 255 200 200 200
+drawimagehq 0 0 33.3 50
+out hq0
+canvas 70 100
+clear 255 200 200 200
+drawimagehq 2.4 1.7 33.3 50
+out hq1
+canvas 70 100
+clear 255 200 200 200
+drawimagehq 0 0 60 90
+out hq2
+canvas 70 100
+clear 255 200 200 200
+drawimagehq 1.1 0.6 47.5 71.2
+out hq3
+canvas 70 100
+clear 255 200 200 200
+drawimagehq 0 0 25 37.5
+out hq4

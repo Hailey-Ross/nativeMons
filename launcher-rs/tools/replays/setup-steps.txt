@@ -1,0 +1,21 @@
+# The guided setup from the welcome: each step slides in, Escape slides back (no golden; C# replay only).
+screen setup-0 3.0
+key enter
+wait 0.2
+snap setupsteps-slide
+wait 0.6
+expect Where are your games?
+key enter
+wait 0.6
+expect Play 3DS games too?
+key enter
+wait 0.6
+expect Pick a wallpaper
+key enter
+wait 0.6
+expect You're all set
+key escape
+wait 0.6
+expect Pick a wallpaper
+until 7.25
+snap setupsteps-back

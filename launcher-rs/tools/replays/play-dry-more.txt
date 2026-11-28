@@ -1,0 +1,16 @@
+# Dry run with placeholder nativeplat.exe and gbawide.exe in both sides' engines (made for this run, removed after):
+# FireRed on our GBA player, then Platinum switched to nativeplat (its ROM copy and save slot made), then Play.
+screen game:firered 3.0
+key enter
+effect Launch
+screen game:platinum 3.0
+key down
+key enter
+wait 0.3
+key down
+key down
+key enter
+wait 0.3
+key up
+key enter
+effect Launch

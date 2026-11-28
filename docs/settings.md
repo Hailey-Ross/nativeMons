@@ -34,8 +34,8 @@ intro again.
 
 **Updates** checks for new releases when the launcher starts and every 6 hours while it's open. When a new build is
 ready, a banner shows for a few seconds and Settings gets a badge. Nothing downloads until you choose to.
-- **Stable or Dev:** the same page switches between them, and names what you have: a stable build as "version 0.0.5,
-  build N", a dev build as "build N, after version 0.0.5".
+- **Stable or Dev:** the same page switches between them, and names what you have: a stable build as "version 0.0.8d,
+  build N", a dev build as "build N, after version 0.0.8d".
 - **One checked download** replaces the launcher and every engine together, changing only the files that differ.
   Your saves, ROM copies, wallpapers, Pokédex data, settings and anything in `games\` stay as they are.
 - A copy built from source shows as a local build, and any release counts as newer until you build again.

@@ -97,14 +97,30 @@ official package from python.org into its own `tools\python` folder, without ins
 | [Mods](docs/mods.md) | Gen1Recomp mods: installing, finding, and mods that need or clash with others |
 | [Settings](docs/settings.md) | Game options, quick start, Discord, updates, controls |
 | [Engines](docs/engines.md) | nativeplat, the Platinum PC port, and everything nativeMons is built from |
-| [Building from source](docs/building.md) | Building it yourself, and the pre-release check |
+| [Building from source](docs/building.md) | Building it yourself, the Rust launcher, and the pre-release check |
 | [Linux and Steam Deck (early)](docs/linux.md) | Early, not ready for everyone: running it under Proton or Wine |
+
+## A Rust launcher, coming later
+
+The launcher you download today is a Windows program written in C#. A rebuild of it in Rust is under way in
+`launcher-rs/`. It isn't released yet, and today's launcher is still the one to use.
+
+- **Why:** it will run natively on Linux and the Steam Deck, without Proton or Wine, and it's lighter on low-end
+  PCs. A still menu redraws only what changes, and a **Light mode** (on by itself where it helps, with a switch in
+  Settings) runs animations at 30 frames a second and pauses a 3DS game's background build while you play.
+- **It looks the same.** Every screen, icon, color, layout and animation matches today's launcher; only text can
+  draw slightly differently. Each screen is checked against today's launcher, picture by picture.
+- **How it will ship:** once it does everything today's launcher does, it replaces it through the normal update.
+  There's nothing to download or set up: it uses the same folders, saves and settings as today's launcher.
+
+So far it's built and tested on Windows only. [Building from source](docs/building.md#the-rust-launcher-not-released-yet)
+covers building it, and [notes/rust-launcher.md](notes/rust-launcher.md) how it works.
 
 ## Credits
 
 Parts of Gen1Recomp inspired this project and helped with research along the way. For the Gen1Recomp engine included here: Based on the Pokemon Gen 1 Recompilation Project by BOIS CLUB GAMES, LLC (https://github.com/bryanthaboi/gen1recomp).
 
-- [Pokémon Fulldex](https://github.com/mamesj/pokemon-fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp) by ClickingMaster, using [melonDS](https://github.com/melonDS-emu/melonDS) and [mGBA](https://github.com/mgba-emu/mgba).
+- [Pokémon Fulldex](https://github.com/mamesj/fulldex) by mamesj, a fork of [ssrecomp](https://github.com/ClickingMaster/ssrecomp) by ClickingMaster, using [melonDS](https://github.com/melonDS-emu/melonDS) and [mGBA](https://github.com/mgba-emu/mgba).
 - [nativeplat](https://github.com/sohamb117/gen4recomp) by sohamb117, from the pret decompilations. Not affiliated with nativeMons.
 - [Pokémon Platinum PC port](https://github.com/cybervisi0n/pokeplatinum) by cybervisi0n and contributors, using [libntr](https://github.com/cybervisi0n/libntr) (MIT), from the [pret](https://github.com/pret/pokeplatinum) decompilation. Not affiliated with nativeMons.
 - [Zakuro](https://github.com/fearkov/zakuro) and [3dsrecomp](https://github.com/fearkov/3dsrecomp) by fearkov (both MIT), for 3DSrecomp+Zakuro, built from [our fork](https://github.com/Hailey-Ross/zakuro) with our own tool that builds each game's code on your PC. [Zig](https://ziglang.org) (MIT), the C compiler it uses, is fetched from ziglang.org for the first build. Not affiliated with nativeMons.
@@ -124,6 +140,7 @@ Parts of Gen1Recomp inspired this project and helped with research along the way
 - Pokémon pictures served by [hailsDotGO](https://github.com/Hailey-Ross/hailsDotGO) at pogo.hails.app, from the [PokeAPI sprites](https://github.com/PokeAPI/sprites) collection. The busy Poké Ball is based on its "Updating" page.
 - [Noto Sans](https://notofonts.github.io) by Google (SIL Open Font License 1.1), included for where Windows' own fonts aren't installed, such as Linux.
 - Launcher design from the Skate 3 Rust Engine's [hails-additions](https://github.com/Hailey-Ross/rusty-trucks/tree/hails-additions) branch.
+- Rust launcher (not yet released): Noto Sans Symbols 2: Copyright 2022 The Noto Project Authors (github.com/notofonts/symbols), SIL Open Font License 1.1, see `fonts/NotoSansSymbols2-OFL.txt`.
 
 Not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc. or The Pokémon Company. Pokémon and all
 related names belong to their owners.

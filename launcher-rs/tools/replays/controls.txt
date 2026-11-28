@@ -1,0 +1,14 @@
+# Settings: eight downs to Controls, Enter (golden: controls).
+screen settings 3.0
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key enter
+expect Controls
+until 7.25
+snap controls

@@ -1,0 +1,42 @@
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 4
+drawline 30 20 30 180
+pen 255 240 230 220 2
+drawline 80 20 80 180
+pen 255 240 230 220 6
+drawline 120 20 180 180
+out vert_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 4
+drawline 30 20 30 180
+pen 255 240 230 220 2
+drawline 80 20 80 180
+pen 255 240 230 220 6
+drawline 120 20 180 180
+out vert_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 4
+drawline 30 20 30 180
+pen 255 240 230 220 2
+drawline 80 20 80 180
+pen 255 240 230 220 6
+drawline 120 20 180 180
+out vert_0_13

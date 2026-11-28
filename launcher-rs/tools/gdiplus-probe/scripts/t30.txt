@@ -1,0 +1,396 @@
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 1
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line1_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 2
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line2_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 4
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line4_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 1.5
+drawround 20 20 160 60 12
+pen 200 240 230 220 3
+drawround 20 100 160 80 20
+out round_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 2.25
+drawellipse 30 30 140 140
+solid 200 250 120 80
+fillellipse 60 60 80 80
+out ellipse_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+solid 255 250 250 250
+fillrect 0 0 200 3
+fillrect 0 50.5 200 1
+fillround 20 100 160 40 10
+linear 0 0 200 200 90 255 200 60 40 255 30 90 200
+fillrect 0 150 200 50
+out fills_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+text @NotoSans-Regular.ttf 20 255 250 250 250 0 20 200 40 0 0 0 Hello Pokemon
+text @NotoSans-SemiBold.ttf 14 255 250 250 250 0 90 200 40 0 0 0 Settings and more 123
+out text_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.58
+translate -100 -100
+pen 255 240 230 220 1.5
+drawline 10 10 190 190
+pen 255 240 230 220 3
+drawline 10 190 190 30
+out diag_0_58
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 1
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line1_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 2
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line2_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 4
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line4_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 1.5
+drawround 20 20 160 60 12
+pen 200 240 230 220 3
+drawround 20 100 160 80 20
+out round_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 2.25
+drawellipse 30 30 140 140
+solid 200 250 120 80
+fillellipse 60 60 80 80
+out ellipse_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+solid 255 250 250 250
+fillrect 0 0 200 3
+fillrect 0 50.5 200 1
+fillround 20 100 160 40 10
+linear 0 0 200 200 90 255 200 60 40 255 30 90 200
+fillrect 0 150 200 50
+out fills_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+text @NotoSans-Regular.ttf 20 255 250 250 250 0 20 200 40 0 0 0 Hello Pokemon
+text @NotoSans-SemiBold.ttf 14 255 250 250 250 0 90 200 40 0 0 0 Settings and more 123
+out text_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.31
+translate -100 -100
+pen 255 240 230 220 1.5
+drawline 10 10 190 190
+pen 255 240 230 220 3
+drawline 10 190 190 30
+out diag_0_31
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 1
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line1_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 2
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line2_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 4
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line4_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 1.5
+drawround 20 20 160 60 12
+pen 200 240 230 220 3
+drawround 20 100 160 80 20
+out round_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 2.25
+drawellipse 30 30 140 140
+solid 200 250 120 80
+fillellipse 60 60 80 80
+out ellipse_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+solid 255 250 250 250
+fillrect 0 0 200 3
+fillrect 0 50.5 200 1
+fillround 20 100 160 40 10
+linear 0 0 200 200 90 255 200 60 40 255 30 90 200
+fillrect 0 150 200 50
+out fills_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+text @NotoSans-Regular.ttf 20 255 250 250 250 0 20 200 40 0 0 0 Hello Pokemon
+text @NotoSans-SemiBold.ttf 14 255 250 250 250 0 90 200 40 0 0 0 Settings and more 123
+out text_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.13
+translate -100 -100
+pen 255 240 230 220 1.5
+drawline 10 10 190 190
+pen 255 240 230 220 3
+drawline 10 190 190 30
+out diag_0_13
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+pen 255 240 230 220 1
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line1_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+pen 255 240 230 220 2
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line2_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+pen 255 240 230 220 4
+drawline 10 20.3 190 20.3
+drawline 10 60 190 60
+drawline 10 100.5 190 100.5
+drawline 10 140.25 190 140.25
+out line4_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+pen 255 240 230 220 1.5
+drawround 20 20 160 60 12
+pen 200 240 230 220 3
+drawround 20 100 160 80 20
+out round_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+pen 255 240 230 220 2.25
+drawellipse 30 30 140 140
+solid 200 250 120 80
+fillellipse 60 60 80 80
+out ellipse_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+solid 255 250 250 250
+fillrect 0 0 200 3
+fillrect 0 50.5 200 1
+fillround 20 100 160 40 10
+linear 0 0 200 200 90 255 200 60 40 255 30 90 200
+fillrect 0 150 200 50
+out fills_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+text @NotoSans-Regular.ttf 20 255 250 250 250 0 20 200 40 0 0 0 Hello Pokemon
+text @NotoSans-SemiBold.ttf 14 255 250 250 250 0 90 200 40 0 0 0 Settings and more 123
+out text_0_047
+canvas 220 220
+clear 255 8 8 10
+smooth 1
+translate 10 10
+translate 100 100
+scale 1 0.047
+translate -100 -100
+pen 255 240 230 220 1.5
+drawline 10 10 190 190
+pen 255 240 230 220 3
+drawline 10 190 190 30
+out diag_0_047

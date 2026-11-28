@@ -1,0 +1,288 @@
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.0 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b0
+canvas 2 708
+clear 255 0 0 0
+smooth 1
+linear 0 10.0 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 708
+out b1
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.0 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b2
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.0625 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b3
+canvas 2 708
+clear 255 0 0 0
+smooth 1
+linear 0 10.0625 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 708
+out b4
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.0625 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b5
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.125 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b6
+canvas 2 708
+clear 255 0 0 0
+smooth 1
+linear 0 10.125 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 708
+out b7
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.125 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b8
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.1875 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b9
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.1875 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b10
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.1875 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b11
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.25 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b12
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.25 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b13
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.25 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b14
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.3125 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b15
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.3125 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b16
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.3125 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b17
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.375 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b18
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.375 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b19
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.375 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b20
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.4375 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b21
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.4375 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b22
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.4375 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b23
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.5 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b24
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.5 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b25
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.5 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b26
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.5625 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b27
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.5625 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b28
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.5625 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b29
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.625 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b30
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.625 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b31
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.625 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b32
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.6875 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b33
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.6875 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b34
+canvas 2 316
+clear 255 0 0 0
+smooth 1
+linear 0 10.6875 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 316
+out b35
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.75 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b36
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.75 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b37
+canvas 2 317
+clear 255 0 0 0
+smooth 1
+linear 0 10.75 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 317
+out b38
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.8125 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b39
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.8125 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b40
+canvas 2 317
+clear 255 0 0 0
+smooth 1
+linear 0 10.8125 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 317
+out b41
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.875 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b42
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.875 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b43
+canvas 2 317
+clear 255 0 0 0
+smooth 1
+linear 0 10.875 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 317
+out b44
+canvas 2 116
+clear 255 0 0 0
+smooth 1
+linear 0 10.9375 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 116
+out b45
+canvas 2 709
+clear 255 0 0 0
+smooth 1
+linear 0 10.9375 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 709
+out b46
+canvas 2 317
+clear 255 0 0 0
+smooth 1
+linear 0 10.9375 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 317
+out b47

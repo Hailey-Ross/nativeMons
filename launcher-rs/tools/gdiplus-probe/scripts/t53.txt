@@ -1,0 +1,43 @@
+# HighQualityBicubic rotated with a ColorMatrix alpha (CapturePc's swirl): the affine path, a model
+canvas 1 1
+noise 41 50 40 alpha
+canvas 120 100
+clear 255 0 0 0
+drawimagebcrot -31 -25 62 50 60 50 0 1
+out r0
+canvas 120 100
+clear 0 0 0 0
+drawimagebcrot -31 -25 62 50 60 50 0 1
+out r1
+canvas 120 100
+clear 255 0 0 0
+drawimagebcrot -31 -25 62 50 60 50 5 1
+out r2
+canvas 120 100
+clear 0 0 0 0
+drawimagebcrot -31 -25 62 50 60 50 5 1
+out r3
+canvas 120 100
+clear 255 0 0 0
+drawimagebcrot -31 -25 62 50 60.5 50.25 -7 0.82
+out r4
+canvas 120 100
+clear 0 0 0 0
+drawimagebcrot -31 -25 62 50 60.5 50.25 -7 0.82
+out r5
+canvas 120 100
+clear 255 0 0 0
+drawimagebcrot -31 -25 62 50 59.7 49.1 3.3 0.9
+out r6
+canvas 120 100
+clear 0 0 0 0
+drawimagebcrot -31 -25 62 50 59.7 49.1 3.3 0.9
+out r7
+canvas 120 100
+clear 255 0 0 0
+drawimagebcrot -31 -25 62 50 60 50 17 1
+out r8
+canvas 120 100
+clear 0 0 0 0
+drawimagebcrot -31 -25 62 50 60 50 17 1
+out r9

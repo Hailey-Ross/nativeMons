@@ -1,0 +1,9 @@
+# Setup's last step: Start playing fades the step out over the home screen (golden: main at the end).
+screen setup-4 3.0
+key enter
+expect nativeMons
+effect AskAboutRecomp
+wait 0.25
+snap setupleave-mid
+until 7.25
+snap main

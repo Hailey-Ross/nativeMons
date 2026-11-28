@@ -1,0 +1,42 @@
+canvas 120 180
+clear 255 40 90 160
+solid 255 255 255 255
+fillellipse 30 50 50 40
+solid 255 200 30 30
+fillrect 70 120 33 47
+solid 255 20 220 90
+fillrect 5 5 9 170
+out src
+grab
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 0 0 120 180
+out b0
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 2.4 1.7 120 180
+out b1
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 0 0 60 90
+out b2
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 1.1 0.6 47.5 71.2
+out b3
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 0 0 160 240
+out b4
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 3.3 2.2 150.5 220.7
+out b5
+canvas 170 250
+clear 255 200 200 200
+drawimagebc 0 0 100 150
+out b6
+canvas 170 250
+clear 255 200 200 200
+drawimagebc -7.25 0 120 180
+out b7

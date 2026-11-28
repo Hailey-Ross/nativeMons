@@ -1,0 +1,865 @@
+# t39: clips under a scale near 1 (GDI+ treats a scale within 0.000595 of 1 as a plain offset for regions?).
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0005864 1.0005864
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0005864_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0005864 1.0005864
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0005864_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 0.99945 0.99945
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.99945_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 0.99945 0.99945
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.99945_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0003 1.0003
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0003_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0003 1.0003
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0003_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0006 1.0006
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0006_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0006 1.0006
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0006_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0007 1.0007
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_1.0007_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 1.0007 1.0007
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_1.0007_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.0300
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_0
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.1550
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_1
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.2800
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_2
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.4050
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_3
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.5300
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_4
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.6550
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_5
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.7800
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_6
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 0.9993 0.9993
+clipround 10 50.3 60 19.4 9.7
+fillrect 0 0 80 80
+out r_0.9993_7
+canvas 80 80
+clear 255 255 255 255
+smooth 1
+solid 255 40 90 200
+translate 3 0.9050
+scale 0.9993 0.9993
+cliprect 10 50.3 60 19.4
+fillrect 0 0 80 80
+out q_0.9993_7

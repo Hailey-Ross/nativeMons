@@ -1,0 +1,10 @@
+canvas 4 1024
+clear 255 0 0 0
+linear 0 0 4 1024 90 255 0 0 0 255 255 100 37
+fillrect 0 0 4 1024
+out g1024
+canvas 4 256
+clear 255 0 0 0
+linear 0 0 4 256 90 255 0 0 0 255 255 255 255
+fillrect 0 0 4 256
+out g256

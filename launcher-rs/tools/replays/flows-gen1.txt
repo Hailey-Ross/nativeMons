@@ -1,0 +1,52 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, root goldens, seed: Gen1Recomp's main.lua; NATIVEMONS_TEST_GEN1_CLI answers
+# Gen1Recomp's command line (export, import, options). Crystal: Bring back canceled, refused (unlisted), a footer,
+# done; Open in PKHeX and OpenHome on the exported copy; Gen1Recomp's settings switched.
+screen game:crystal 3.0
+answer -
+clickitem 8
+wait 0.3
+answer %FLOWDATA%\other.sav
+clickitem 8
+wait 0.5
+snap bringback-refused
+key escape
+wait 0.3
+answer %FLOWDATA%\footer.sav
+clickitem 8
+wait 0.5
+key escape
+wait 0.3
+answer %FLOWDATA%\edited.sav
+clickitem 8
+wait 0.5
+snap bringback-done
+key escape
+wait 0.3
+answer %FLOWDATA%\PKHeX\PKHeX.exe
+clickitem 6
+wait 0.5
+effect Launch
+snap pkhex-gen1
+key escape
+wait 0.3
+answer %FLOWDATA%\OpenHome\OpenHome.exe
+clickitem 7
+wait 0.5
+effect Launch
+key escape
+screen settings 3.0
+clickitem 1
+wait 0.5
+snap gen1-settings
+key enter
+key down
+key enter
+key down
+key enter
+wait 0.3
+until 7.25
+screen game:crystal 3.0
+clickitem 2
+wait 0.5
+snap gen1-slot-saves
+until 7.25

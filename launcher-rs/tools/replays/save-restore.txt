@@ -1,0 +1,28 @@
+# Root goldens-pc with NATIVEMONS_TEST_SAVE_FLOWS=1. FireRed's backups: the damaged one fails its check, the good
+# one is restored (the save in use backed up first); a damaged page restores the newest healthy one (the copy made
+# just before); the conflict page's choices.
+screen main 3.0
+page BackupsPage firered
+wait 0.5
+snap save-backups
+key enter
+expect Not restored
+key escape
+key down
+key enter
+expect Restored
+key escape
+page DamagedPage firered Its checksum doesn't match.
+key enter
+expect Restored
+key escape
+page ConflictPage firered
+key enter
+page ConflictPage firered
+key down
+key enter
+page ConflictPage firered
+key down
+key down
+key enter
+until 7.25

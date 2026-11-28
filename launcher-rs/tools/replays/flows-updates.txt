@@ -1,0 +1,33 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, NATIVEMONS_TEST_FETCH: Dev has no release.json (404), Stable has one whose
+# package lacks the launcher. Updates: can't look; switch to Stable; ready; Update now stops; Not now.
+screen settings 3.0
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key enter
+wait 0.5
+snap updates-none
+key enter
+wait 0.5
+snap updates-stable
+key enter
+wait 1.0
+snap update-stopped
+key escape
+wait 0.3
+key enter
+wait 0.5
+key down
+key enter
+wait 0.3
+until 7.25

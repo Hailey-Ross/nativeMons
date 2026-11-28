@@ -1,0 +1,43 @@
+# Root goldens-boxes with its ROMs (FireRed, Platinum) and NATIVEMONS_TEST_SAVE_FLOWS=1 (save copies only). Move
+# Pokemon from the menu: FireRed's first Pokemon to Platinum (MoveNow, a clean plan), back to FireRed (forced: the
+# resolve page, Retry), then FireRed in both places and a move inside its save (relocate).
+screen main 3.0
+pad DOWN
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad A
+wait 0.5
+expect Move Pokemon
+snap move-open
+key enter
+key enter
+wait 0.5
+snap move-moved
+key enter
+key enter
+wait 0.5
+snap move-resolve
+key enter
+wait 0.5
+snap move-back
+key escape
+wait 0.3
+key tab
+key up
+key enter
+wait 0.3
+snap move-choose
+key enter
+wait 0.3
+snap move-same
+key down
+key enter
+key e
+wait 0.3
+key enter
+wait 0.5
+snap move-relocated
+until 7.25

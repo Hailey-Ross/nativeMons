@@ -1,0 +1,4 @@
+# Residuals the user accepted one by one (2026-11-25): <script>/<frame>	<name>	<x y w h>. run-replay.ps1 adds them
+# to the Rust frame's accept list; golden-diff lets a morph-stack pixel differ by up to 3, no more.
+# tablet-morph mid-morph, a translucent layer over the scaled shell gradient: 1 px off by 3 under the narrower gradient-stack.
+tablet-morph/f-003800-0.png	morph-stack	572 718 1 1

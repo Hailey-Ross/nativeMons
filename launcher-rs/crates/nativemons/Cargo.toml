@@ -1,0 +1,16 @@
+[package]
+name = "nativemons"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+nm-core = { path = "../nm-core" }
+nm-draw = { path = "../nm-draw" }
+nm-ui = { path = "../nm-ui" }
+nm-platform = { path = "../nm-platform" }
+
+[features]
+# The windowed launcher on SDL3 (built from source: needs CMake and a C compiler).
+window = ["nm-platform/sdl"]
+prof = ["nm-draw/prof"]

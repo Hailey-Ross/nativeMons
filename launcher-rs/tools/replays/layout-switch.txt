@@ -1,0 +1,31 @@
+# Root goldens. Settings > Wide layout: the window becomes the wide shape at once (ApplyLayout), then back to the
+# phone, on the replay's 1920x1040 work area (both launchers).
+screen settings 3.0
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key enter
+wait 0.5
+expect Settings
+snap layout-wide
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key enter
+wait 0.5
+snap layout-phone
+until 7.25

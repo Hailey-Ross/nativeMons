@@ -1,0 +1,6 @@
+# Back from Games with Escape: the home screen again (golden: main).
+screen games 5.0
+key escape
+expect nativeMons
+until 7.25
+snap main

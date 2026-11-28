@@ -1,0 +1,9 @@
+# Keys: Down to Games, Enter: the icon grows, then Games opens (golden: games).
+screen main 5.0
+key down
+expect nativeMons
+key enter
+wait 0.5
+expect Games
+until 7.25
+snap games

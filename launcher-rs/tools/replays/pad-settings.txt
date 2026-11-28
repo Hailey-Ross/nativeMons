@@ -1,0 +1,14 @@
+# Controller: down, right six times, A on Settings (golden: settings).
+screen main 3.0
+pad DOWN
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad A
+wait 0.6
+expect Settings
+until 7.25
+snap settings

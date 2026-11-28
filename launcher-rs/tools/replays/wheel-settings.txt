@@ -1,0 +1,9 @@
+# The wheel moves the home grid; a click on Settings opens it (golden: settings).
+screen main 3.0
+wheel -120
+wheel 120
+clickitem 7
+wait 0.6
+expect Settings
+until 7.25
+snap settings

@@ -1,0 +1,28 @@
+# Root goldens-gen1 (scratch), GEN1DATA = a folder with fast_text.zip. Kanto Colors needs fast_text: Missing mods,
+# fast_text, From the mod index (a replay notes it), then Choose a downloaded .zip (installed: the list is done).
+screen main 3.0
+key down
+key right
+key right
+key enter
+wait 0.5
+expect Mods: choose a game
+key enter
+wait 0.5
+clickitem 1
+expect Needs other mods
+snap deps
+clickitem 0
+expect fast_text
+snap dep-fast-text
+clickitem 0
+expect Needs other mods
+effect InstallFromIndex
+clickitem 0
+expect fast_text
+answer %GEN1DATA%\fast_text.zip
+clickitem 1
+expect Needs other mods
+wait 0.5
+snap deps-done
+until 7.25

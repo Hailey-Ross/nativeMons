@@ -9,7 +9,7 @@ It runs as the sync GitHub App, so its commits show as the App's bot, with the s
 | Fork | Liaison branch | Upstream | Merged into hails-additions |
 | --- | --- | --- | --- |
 | Hailey-Ross/gen1recomp | `dev` | bryanthaboi/gen1recomp | yes |
-| Hailey-Ross/pokemon-fulldex | `main` | mamesj/pokemon-fulldex | yes (`--rom`) |
+| Hailey-Ross/pokemon-fulldex | `main` | mamesj/fulldex | yes (`--rom`) |
 | Hailey-Ross/gen4recomp | `main` | sohamb117/gen4recomp | yes |
 | Hailey-Ross/azahar | `master` | azahar-emu/azahar | upstream's latest release only |
 | Hailey-Ross/AzaharPlus | `AzaharPlus` | AzaharPlus/AzaharPlus | upstream's latest release only |

@@ -1,0 +1,108 @@
+canvas 2 118
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 118
+out b0
+canvas 2 218
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 200 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 218
+out b1
+canvas 2 273
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 255 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 273
+out b2
+canvas 2 274
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 256 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 274
+out b3
+canvas 2 275
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 257 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 275
+out b4
+canvas 2 318
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 300.3 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 318
+out b5
+canvas 2 418
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 400 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 418
+out b6
+canvas 2 518
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 500 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 518
+out b7
+canvas 2 529
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 511 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 529
+out b8
+canvas 2 530
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 512 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 530
+out b9
+canvas 2 531
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 513 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 531
+out b10
+canvas 2 618
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 600 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 618
+out b11
+canvas 2 710
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 710
+out b12
+canvas 2 718
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 700 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 718
+out b13
+canvas 2 1018
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 1000 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 1018
+out b14
+canvas 2 1041
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 1023 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 1041
+out b15
+canvas 2 1042
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 1024 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 1042
+out b16
+canvas 2 1043
+clear 255 0 0 0
+smooth 1
+linear 0 10 2 1025 90 255 0 0 0 255 255 255 255
+fillrect 0 0 2 1043
+out b17

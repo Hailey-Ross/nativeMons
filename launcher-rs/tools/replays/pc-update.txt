@@ -1,0 +1,11 @@
+# Root goldens-pc after pc-download and goldens-pc.ps1 commit: Update gets the new release (git fetch, reset). The Rust
+# shows Updated over the game page (the C# hides it; the user's call): deliberate closes it there.
+screen main 3.0
+page PcGamePage infinitefusion
+key down
+key enter
+deliberate Updated|Not updated
+expect Pokemon Infinite Fusion
+wait 0.5
+snap pc-updated
+until 7.25

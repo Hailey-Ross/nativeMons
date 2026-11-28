@@ -1,0 +1,10 @@
+# Root goldens-gen1. My Collection from the home screen. The real collection, not the snapshots' sample: no golden,
+# compared with the C# replay only.
+screen main 3.0
+key down
+key right
+key enter
+wait 0.5
+expect Pokedex
+until 7.25
+snap dex-opened

@@ -1,0 +1,17 @@
+# Root goldens-boxes, 1600x1000 (the tablet, no morph). A Pokemon dragged: it follows the pointer, the other game's
+# box turns while it hovers over an arrow, and it's dropped on an empty slot there.
+screen boxes:firered,platinum 3.0
+down 280 345
+move 300 360
+move 500 400
+wait 0.1
+snap boxdrag-held
+move 1460 246
+wait 1.0
+snap boxdrag-turned
+move 875 345
+up 875 345
+wait 0.3
+snap boxdrag-dropped
+until 7.25
+snap boxdrag-end

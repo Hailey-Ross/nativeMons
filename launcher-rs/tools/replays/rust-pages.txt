@@ -1,0 +1,46 @@
+# Pages the fixture can't reach by keys, pushed by name on both sides (no golden; C# replay only). Root goldens-boxes.
+screen main 3.0
+page SavePage firered 1
+wait 0.5
+snap page-savepage
+key escape
+page BackupsPage firered
+wait 0.5
+snap page-backups
+key escape
+page ExportGamesPage
+wait 0.5
+snap page-exportgames
+page ExportPage firered
+wait 0.5
+snap page-export
+key escape
+key escape
+page ConflictPage firered
+wait 0.5
+snap page-conflict
+key escape
+page DamagedPage firered Its checksum doesn't match: the game would call it corrupted.
+wait 0.5
+snap page-damaged
+key escape
+page PatchPage firered
+wait 0.5
+snap page-patch
+key escape
+page CustomGamePage firered
+wait 0.5
+snap page-customgame
+key escape
+page RemoveRomFilePage C:\Games\roms\Pokemon Red.gb
+wait 0.5
+snap page-removerom
+key escape
+page RemoveUnzippedPage C:\Games\roms\unzipped
+wait 0.5
+snap page-removeunzipped
+key escape
+page RemoveFolderPage C:\Games\roms
+wait 0.5
+snap page-removefolder
+until 7.25

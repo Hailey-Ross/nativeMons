@@ -1,0 +1,13 @@
+# Root goldens-pc with an added PC game (state\pc-games.json, id pc-test, a launcher copy in games\pc-test): Rename
+# asks for a name (noted in a replay), Remove from the launcher deletes the copy, then Games.
+screen main 3.0
+page CustomGamePage pc-test
+key down
+key enter
+effect AskText
+key down
+key down
+key enter
+wait 0.5
+snap custom-removed
+until 7.25

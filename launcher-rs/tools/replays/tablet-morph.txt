@@ -1,0 +1,14 @@
+# Root goldens-boxes. The box screen at phone size: the phone grows into the tablet, then folds back on Escape.
+screen boxes:firered,platinum 3.0
+wait 0.2
+snap morph-opening
+wait 0.5
+snap morph-tablet
+effect SetBounds
+key escape
+wait 0.2
+snap morph-folding
+wait 0.5
+effect SetBounds
+until 7.25
+snap morph-phone

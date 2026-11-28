@@ -1,0 +1,50 @@
+canvas 120 180
+clear 255 40 90 160
+solid 255 255 255 255
+fillellipse 30 50 50 40
+solid 255 200 30 30
+fillrect 70 120 33 47
+solid 255 20 220 90
+fillrect 5 5 9 170
+out src
+grab
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 5.19 5.14 63.37 89.13
+out m0
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 1.14 4.82 83.59 128.87
+out m1
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 0.56 1.82 30.85 53.52
+out m2
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 3.81 3.57 152.76 231.8
+out m3
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 3.69 0.94 140.87 235.33
+out m4
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 0.21 5.28 24.48 38.0
+out m5
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 2.64 5.05 42.16 64.77
+out m6
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 0.03 0.51 61.86 88.32
+out m7
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 5.97 5.04 87.49 121.34
+out m8
+canvas 170 250
+clear 255 200 200 200
+drawimagehq 3.08 0.18 34.02 46.45
+out m9

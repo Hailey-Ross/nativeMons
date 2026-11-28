@@ -1,0 +1,29 @@
+# A root with Infinite Fusion installed (a stand-in Game.exe, copies of species.dat and a save): My Collection reads
+# its own Pokedex (IfDex); Romhacks and fan games shows its row, then its list.
+screen main 3.0
+pad DOWN
+pad RIGHT
+pad A
+wait 0.5
+expect Pokedex
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+key down
+wait 0.5
+snap ifdex-home
+key enter
+wait 0.5
+expect Romhacks and fan games
+snap ifdex-other
+key enter
+wait 0.5
+snap ifdex-list
+until 7.25

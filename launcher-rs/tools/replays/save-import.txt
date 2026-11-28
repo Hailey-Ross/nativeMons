@@ -1,0 +1,33 @@
+# Root goldens-pc. Settings, Import saves: nothing found in the ROM folder; Add a save folder (the drop folder), the
+# list again with its save; Choose a file; then the found row (Replace your save?, Replace it).
+screen main 3.0
+pad DOWN
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad RIGHT
+pad A
+wait 0.6
+expect Settings
+clickitem 3
+expect Import saves
+wait 0.5
+snap save-import-none
+answer %PCDATA%\drop
+clickitem 1
+expect Import saves
+wait 0.5
+snap save-import-found
+answer %PCDATA%\drop\Pokemon FireRed.sav
+clickitem 1
+expect Replace your Pokemon FireRed save?
+key enter
+expect Import saves
+clickitem 0
+expect Replace your Pokemon FireRed save?
+key down
+key enter
+expect Imported
+until 7.25

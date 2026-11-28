@@ -1,0 +1,13 @@
+# Root goldens-boxes, 1600x1000. Keys on the boxes: pick up, the other game, its next box, then Escape puts it back.
+screen boxes:firered,platinum 3.0
+key right
+key enter
+key tab
+key e
+wait 0.3
+snap boxkeys-held
+key escape
+wait 0.3
+key q
+until 7.25
+snap boxkeys-end

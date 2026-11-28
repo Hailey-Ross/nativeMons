@@ -1,0 +1,5 @@
+# Deliberate differences the user decided (the Rust fixes a C# bug): <script>	<log step line>	<from ms>	<to ms>	<why>.
+# run-replay.ps1 leaves that step's log line and the frames drawn in [from, to] out of the comparison and counts them.
+# UpdatePc shows its result over the rebuilt game page (user, 2026-11-25); the C# pops it at once.
+pc-update	6	3032	3300	UpdatePc shows Updated over the game page
+pc-download	14	3592	3900	UpdatePc shows Not updated over the game page

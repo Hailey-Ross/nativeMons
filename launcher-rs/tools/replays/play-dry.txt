@@ -1,0 +1,12 @@
+# Dry run (run-replay.ps1 -DryRun, NATIVEMONS_TEST_DRYRUN=1): Play on a game's page starts nothing; both launchers note
+# the program, arguments, folder and environment they would start it with. Fulldex for a GBA game (no gbawide here: the
+# ROM is copied into Fulldex's roms folder), Fulldex for a DS game, and the Platinum PC port (its files extracted).
+screen game:firered 3.0
+key enter
+effect Launch
+screen game:black 3.0
+key enter
+effect Launch
+screen game:platinum 3.0
+key enter
+effect Launch

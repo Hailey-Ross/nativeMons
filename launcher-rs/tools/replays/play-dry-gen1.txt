@@ -1,0 +1,4 @@
+# Root goldens-gen1, dry run: Play on Pokemon Red starts Gen1Recomp (LOVE) with its options; nothing starts.
+screen game:red 3.0
+key enter
+effect Launch

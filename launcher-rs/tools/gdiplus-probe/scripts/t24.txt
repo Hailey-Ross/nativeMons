@@ -1,0 +1,21 @@
+# Dots and dashes on curves: Widen outlines (dash placement) and renders.
+canvas 60 60
+clear 255 255 255 255
+smooth 1
+pen 255 196 196 204 2.25 flat flat miter dash dot
+widen w_knob ellipse 12 12 32 32
+drawellipse 12 12 32 32
+out dot_ellipse
+canvas 240 240
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 6 flat flat miter dash dot
+widen w_big ellipse 20 20 200 200
+drawellipse 20 20 200 200
+out dot_big
+pen 255 0 0 0 6 flat flat miter dash dash
+widen w_bigdash ellipse 20 20 200 200
+pen 255 0 0 0 6 flat flat miter dash dot
+widen w_arc arc 20 20 200 200 30 120
+flatten f_big ellipse 20 20 200 200
+flatten f_knob ellipse 12 12 32 32

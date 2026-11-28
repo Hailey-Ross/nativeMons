@@ -1,0 +1,11 @@
+# A right click goes back; clicking Play asks to start the game; clicking empty shell drags the window (golden: main).
+screen folders 3.0
+click 300 600 right
+expect nativeMons
+down 5 5
+effect DragWindow
+up 5 5
+clickitem 0
+effect Play
+until 7.25
+snap main

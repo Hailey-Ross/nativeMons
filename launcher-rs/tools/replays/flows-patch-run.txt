@@ -1,0 +1,8 @@
+# As flows-patch with NATIVEMONS_TEST_PYTHON=yes: the patcher's launch plan (a job), then its page again.
+screen main 3.0
+page PatchPage black
+wait 0.3
+key enter
+wait 1.0
+effect Launch
+until 7.25

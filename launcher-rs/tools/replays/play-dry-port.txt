@@ -1,0 +1,12 @@
+# Dry run: Platinum switched to the Platinum PC port on its page, then Play: the port's files are extracted from the ROM
+# copy and the save handed over (fixture copies), then the start is noted.
+screen game:platinum 3.0
+key down
+key enter
+wait 0.3
+key down
+key enter
+wait 0.3
+key up
+key enter
+effect Launch

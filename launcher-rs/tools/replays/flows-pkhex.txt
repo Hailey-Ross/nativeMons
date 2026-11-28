@@ -1,0 +1,21 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, root goldens, FLOWDATA = fake PKHeX and OpenHome folders. Open in PKHeX:
+# canceled, then picked (its launch plan); OpenHome picked (plan and its page); PKHeX again, remembered.
+screen game:firered 3.0
+answer -
+clickitem 5
+wait 0.5
+answer %FLOWDATA%\PKHeX\PKHeX.exe
+clickitem 5
+wait 1.0
+effect Launch
+answer %FLOWDATA%\OpenHome\OpenHome.exe
+clickitem 6
+wait 1.0
+effect Launch
+snap openhome-starting
+key escape
+wait 0.5
+clickitem 5
+wait 1.0
+effect Launch
+until 7.25

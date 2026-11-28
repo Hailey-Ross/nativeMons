@@ -1,0 +1,11 @@
+# Root goldens, seed: Red with a picture of its own. Remove your picture.
+screen wallpapers 3.0
+clickitem 2
+wait 0.3
+key enter
+wait 0.3
+snap wall-own
+clickitem 2
+wait 0.5
+snap wall-removed
+until 7.25

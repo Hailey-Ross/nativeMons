@@ -1,0 +1,7 @@
+# Games: the first game, Enter (golden: game).
+screen games 4.0
+key down
+key enter
+expect Pokemon FireRed
+until 7.25
+snap game

@@ -1,0 +1,10 @@
+# Root goldens-recomp, dry run: Pokemon Y isn't built. Play asks; Build, then play asks to fix its header; Fix, then
+# build fixes the fixture's copy, rescans, and the build job is noted. The rescan's questions follow: X's quiet
+# improvement is noted, and Y is asked about once.
+screen game:y 3.0
+key enter
+expect Build Pokemon Y?
+key enter
+expect Fix 3DS header?
+key enter
+effect Launch

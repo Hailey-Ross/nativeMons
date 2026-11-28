@@ -1,0 +1,131 @@
+# HighQualityBicubic downscaling at many ratios (some land on kernel-table ties, see the bicubic note)
+canvas 1 1
+noise 31 240 160 opaque
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 237.6238 158.4158
+out d0
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 237.6238 158.4158
+out d1
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 200.0000 133.3333
+out d2
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 200.0000 133.3333
+out d3
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 160.0000 106.6667
+out d4
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 160.0000 106.6667
+out d5
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 120.0000 80.0000
+out d6
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 120.0000 80.0000
+out d7
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 96.0000 64.0000
+out d8
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 96.0000 64.0000
+out d9
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 85.7143 57.1429
+out d10
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 85.7143 57.1429
+out d11
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 80.0000 53.3333
+out d12
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 80.0000 53.3333
+out d13
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 72.7273 48.4848
+out d14
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 72.7273 48.4848
+out d15
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 60.0000 40.0000
+out d16
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 60.0000 40.0000
+out d17
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 53.3333 35.5556
+out d18
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 53.3333 35.5556
+out d19
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 48.0000 32.0000
+out d20
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 48.0000 32.0000
+out d21
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 40.0000 26.6667
+out d22
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 40.0000 26.6667
+out d23
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 34.2857 22.8571
+out d24
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 34.2857 22.8571
+out d25
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 30.0000 20.0000
+out d26
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 30.0000 20.0000
+out d27
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 24.0000 16.0000
+out d28
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 24.0000 16.0000
+out d29
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2 2 20.0000 13.3333
+out d30
+canvas 245 165
+clear 255 0 0 0
+drawimagebc 2.4 2.7 20.0000 13.3333
+out d31

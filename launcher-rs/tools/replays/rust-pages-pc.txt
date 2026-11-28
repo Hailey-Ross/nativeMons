@@ -1,0 +1,19 @@
+# Root goldens-boxes, with a placeholder Infinite Fusion program in each side's games folder (no download).
+# The PC game page and its uninstall question; Keep it goes back (no golden; C# replay only).
+screen main 3.0
+page PcGamePage infinitefusion
+wait 0.5
+snap page-pcgame
+key down
+key down
+key down
+key down
+key down
+key enter
+wait 0.5
+expect Uninstall Pokemon Infinite Fusion?
+snap page-pcremove
+key down
+key enter
+expect Pokemon Infinite Fusion
+until 7.25

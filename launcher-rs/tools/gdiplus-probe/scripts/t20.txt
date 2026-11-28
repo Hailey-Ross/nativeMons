@@ -1,0 +1,24 @@
+canvas 200 120
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 10 flat flat miter
+drawlines 3 20 100 100 20 30 100
+out miter_clip_10deg
+canvas 200 120
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 8 flat flat miter
+drawlines 3 20 100 100 20 60 100
+out miter_ok
+canvas 200 120
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 12 flat flat miter
+drawlines 3 20 60 180 62 20 64
+out miter_reverse
+canvas 200 120
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 9 round round miter
+drawbezier 30 100 60 60 160 10 120 60
+out bezier_curl

@@ -1,0 +1,30 @@
+canvas 60 60
+clear 255 255 255 255
+smooth 1
+pen 255 196 196 204 2.25 flat flat miter dash dot
+drawellipse 12 12 32 32
+out dot_ellipse
+canvas 120 40
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3 flat flat miter dash dot
+drawline 10 20 110 20
+out dot_line
+canvas 120 40
+clear 255 255 255 255
+smooth 1
+pen 255 0 0 0 3 flat flat miter dash dash
+drawline 10 20 110 20
+out dash_line
+canvas 120 80
+clear 255 255 255 255
+smooth 1
+pen 200 40 120 220 1.5 flat flat miter dash dash
+drawround 10 10 100 60 9
+out dash_round
+canvas 120 80
+clear 255 255 255 255
+smooth 1
+pen 200 40 120 220 3 flat flat miter dash dash
+drawround 10 10 100 60 9
+out dash_round3

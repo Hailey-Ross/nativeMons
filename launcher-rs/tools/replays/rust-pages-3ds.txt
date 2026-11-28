@@ -1,0 +1,18 @@
+# 3DS pages pushed by name (no golden; C# replay only). Root goldens-boxes; the game is the 3DS entry "x".
+screen main 3.0
+page ShareHintsPage x
+wait 0.5
+snap page-sharehints
+key escape
+page ShareHintsPage x true
+wait 0.5
+snap page-sharehints-after
+key escape
+page HeaderFixPage x
+wait 0.5
+snap page-headerfix
+key escape
+page Setup3dsPage x
+wait 0.5
+snap page-setup3ds
+until 7.25

@@ -1,0 +1,82 @@
+canvas 10 200
+clear 255 0 0 0
+solid 255 255 255 255
+fillrect 0 50 10 1
+fillrect 0 101 10 1
+fillrect 0 152 10 1
+grab
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 1
+translate 0 -100
+drawimage 0 0 10 200
+out imp1
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.9
+translate 0 -100
+drawimage 0 0 10 200
+out imp0_9
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.58
+translate 0 -100
+drawimage 0 0 10 200
+out imp0_58
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.31
+translate 0 -100
+drawimage 0 0 10 200
+out imp0_31
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.13
+translate 0 -100
+drawimage 0 0 10 200
+out imp0_13
+canvas 10 200
+clear 255 255 255 255
+grab
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 1
+translate 0 -100
+drawimage 0 0 10 200
+out full1
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.58
+translate 0 -100
+drawimage 0 0 10 200
+out full0_58
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.31
+translate 0 -100
+drawimage 0 0 10 200
+out full0_31
+canvas 10 220
+clear 255 0 0 0
+translate 0 10
+translate 0 100
+scale 1 0.13
+translate 0 -100
+drawimage 0 0 10 200
+out full0_13

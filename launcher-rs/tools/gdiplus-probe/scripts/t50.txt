@@ -1,0 +1,87 @@
+# HighQualityBicubic edges: transparent beyond the picture, alpha, off-canvas rects, three backgrounds
+canvas 1 1
+noise 11 30 24 alpha
+canvas 40 32
+clear 255 0 0 0
+drawimagebc 0 0 30 24
+out e0_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc 0 0 30 24
+out e0_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc 0 0 30 24
+out e0_0_0
+canvas 40 32
+clear 255 0 0 0
+drawimagebc -3.5 -2.25 30 24
+out e1_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc -3.5 -2.25 30 24
+out e1_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc -3.5 -2.25 30 24
+out e1_0_0
+canvas 40 32
+clear 255 0 0 0
+drawimagebc 20.3 10.6 30 24
+out e2_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc 20.3 10.6 30 24
+out e2_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc 20.3 10.6 30 24
+out e2_0_0
+canvas 40 32
+clear 255 0 0 0
+drawimagebc -7.7 5.1 45.5 33.3
+out e3_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc -7.7 5.1 45.5 33.3
+out e3_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc -7.7 5.1 45.5 33.3
+out e3_0_0
+canvas 40 32
+clear 255 0 0 0
+drawimagebc 15.25 -4.75 20.2 14.9
+out e4_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc 15.25 -4.75 20.2 14.9
+out e4_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc 15.25 -4.75 20.2 14.9
+out e4_0_0
+canvas 40 32
+clear 255 0 0 0
+drawimagebc 30 20 12 9
+out e5_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc 30 20 12 9
+out e5_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc 30 20 12 9
+out e5_0_0
+canvas 40 32
+clear 255 0 0 0
+drawimagebc -10 -8 60 48
+out e6_0_255
+canvas 40 32
+clear 255 90 160 200
+drawimagebc -10 -8 60 48
+out e6_90_255
+canvas 40 32
+clear 0 0 0 0
+drawimagebc -10 -8 60 48
+out e6_0_0

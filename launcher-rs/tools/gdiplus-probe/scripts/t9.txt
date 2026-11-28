@@ -1,0 +1,30 @@
+canvas 4 122
+clear 255 0 0 0
+smooth 1
+linear 0 10 4 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 4 122
+out wrap0
+canvas 4 122
+clear 255 0 0 0
+smooth 1
+linear 0 10.5 4 100 90 255 0 0 0 255 255 255 255
+fillrect 0 0 4 122
+out wrap1
+canvas 4 122
+clear 255 0 0 0
+smooth 1
+linear 0 10.25 4 100.5 90 255 0 0 0 255 255 255 255
+fillrect 0 0 4 122
+out wrap2
+canvas 4 805
+clear 255 0 0 0
+smooth 1
+linear 0 101.08 4 692.84 90 255 0 0 0 255 255 255 255
+fillrect 0 0 4 805
+out wrap3
+canvas 4 55
+clear 255 0 0 0
+smooth 1
+linear 0 3.3 4 40.2 90 255 0 0 0 255 255 255 255
+fillrect 0 0 4 55
+out wrap4

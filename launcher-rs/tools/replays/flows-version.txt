@@ -1,0 +1,19 @@
+# Dry run with NATIVEMONS_TEST_FLOWS=1, root goldens (crystal has two dumps). ChooseVersion: the one in use (back),
+# then the other (state, rescan, the game's page rebuilt), then back to the first.
+screen game:crystal 3.0
+clickitem 1
+wait 0.5
+snap versions
+key enter
+wait 0.5
+clickitem 1
+wait 0.5
+key down
+key enter
+wait 1.0
+snap version-changed
+clickitem 1
+wait 0.5
+key enter
+wait 1.0
+until 7.25

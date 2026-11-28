@@ -1,0 +1,275 @@
+# HighQualityBicubic 1:1 at fractional offsets (x and y), incl. the near-integer copy and mirror regimes
+canvas 1 1
+noise 7 64 40 opaque
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0000000 6.0000000 64 40
+out f0
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0000000 6.2500000 64 40
+out f1
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0000000 6.0156250 64 40
+out f2
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0000000 6.7000000 64 40
+out f3
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0039062 6.0000000 64 40
+out f4
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0039062 6.2500000 64 40
+out f5
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0039062 6.0156250 64 40
+out f6
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0039062 6.7000000 64 40
+out f7
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0078125 6.0000000 64 40
+out f8
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0078125 6.2500000 64 40
+out f9
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0078125 6.0156250 64 40
+out f10
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0078125 6.7000000 64 40
+out f11
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0156250 6.0000000 64 40
+out f12
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0156250 6.2500000 64 40
+out f13
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0156250 6.0156250 64 40
+out f14
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0156250 6.7000000 64 40
+out f15
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0234375 6.0000000 64 40
+out f16
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0234375 6.2500000 64 40
+out f17
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0234375 6.0156250 64 40
+out f18
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0234375 6.7000000 64 40
+out f19
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0312500 6.0000000 64 40
+out f20
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0312500 6.2500000 64 40
+out f21
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0312500 6.0156250 64 40
+out f22
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0312500 6.7000000 64 40
+out f23
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0390625 6.0000000 64 40
+out f24
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0390625 6.2500000 64 40
+out f25
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0390625 6.0156250 64 40
+out f26
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.0390625 6.7000000 64 40
+out f27
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.1000000 6.0000000 64 40
+out f28
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.1000000 6.2500000 64 40
+out f29
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.1000000 6.0156250 64 40
+out f30
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.1000000 6.7000000 64 40
+out f31
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.2500000 6.0000000 64 40
+out f32
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.2500000 6.2500000 64 40
+out f33
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.2500000 6.0156250 64 40
+out f34
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.2500000 6.7000000 64 40
+out f35
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.3000000 6.0000000 64 40
+out f36
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.3000000 6.2500000 64 40
+out f37
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.3000000 6.0156250 64 40
+out f38
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.3000000 6.7000000 64 40
+out f39
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.5000000 6.0000000 64 40
+out f40
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.5000000 6.2500000 64 40
+out f41
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.5000000 6.0156250 64 40
+out f42
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.5000000 6.7000000 64 40
+out f43
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.6000000 6.0000000 64 40
+out f44
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.6000000 6.2500000 64 40
+out f45
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.6000000 6.0156250 64 40
+out f46
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.6000000 6.7000000 64 40
+out f47
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.7500000 6.0000000 64 40
+out f48
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.7500000 6.2500000 64 40
+out f49
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.7500000 6.0156250 64 40
+out f50
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.7500000 6.7000000 64 40
+out f51
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9000000 6.0000000 64 40
+out f52
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9000000 6.2500000 64 40
+out f53
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9000000 6.0156250 64 40
+out f54
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9000000 6.7000000 64 40
+out f55
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9531250 6.0000000 64 40
+out f56
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9531250 6.2500000 64 40
+out f57
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9531250 6.0156250 64 40
+out f58
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9531250 6.7000000 64 40
+out f59
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9843750 6.0000000 64 40
+out f60
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9843750 6.2500000 64 40
+out f61
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9843750 6.0156250 64 40
+out f62
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9843750 6.7000000 64 40
+out f63
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9960938 6.0000000 64 40
+out f64
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9960938 6.2500000 64 40
+out f65
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9960938 6.0156250 64 40
+out f66
+canvas 80 56
+clear 255 30 30 30
+drawimagebc 5.9960938 6.7000000 64 40
+out f67

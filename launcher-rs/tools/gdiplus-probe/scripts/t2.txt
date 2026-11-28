@@ -1,0 +1,141 @@
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+solid 1 20 140 250
+fillrect 2 2 8 40
+solid 1 250 30 90
+fillellipse 2 50 7.3 30.6
+solid 10 20 140 250
+fillrect 10 2 8 40
+solid 10 250 30 90
+fillellipse 10 50 7.3 30.6
+solid 37 20 140 250
+fillrect 18 2 8 40
+solid 37 250 30 90
+fillellipse 18 50 7.3 30.6
+solid 64 20 140 250
+fillrect 26 2 8 40
+solid 64 250 30 90
+fillellipse 26 50 7.3 30.6
+solid 90 20 140 250
+fillrect 34 2 8 40
+solid 90 250 30 90
+fillellipse 34 50 7.3 30.6
+solid 127 20 140 250
+fillrect 42 2 8 40
+solid 127 250 30 90
+fillellipse 42 50 7.3 30.6
+solid 128 20 140 250
+fillrect 50 2 8 40
+solid 128 250 30 90
+fillellipse 50 50 7.3 30.6
+solid 129 20 140 250
+fillrect 58 2 8 40
+solid 129 250 30 90
+fillellipse 58 50 7.3 30.6
+solid 170 20 140 250
+fillrect 66 2 8 40
+solid 170 250 30 90
+fillellipse 66 50 7.3 30.6
+solid 200 20 140 250
+fillrect 74 2 8 40
+solid 200 250 30 90
+fillellipse 74 50 7.3 30.6
+solid 254 20 140 250
+fillrect 82 2 8 40
+solid 254 250 30 90
+fillellipse 82 50 7.3 30.6
+out alpha
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10.5 8.25 70 60.5 90 255 250 84 72 255 20 30 200
+fillrect 5 5 80 80
+out lin90
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10.5 8.25 70 60.5 0 255 250 84 72 255 20 30 200
+fillrect 5 5 80 80
+out lin0
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10.5 8.25 70 60.5 45 255 250 84 72 255 20 30 200
+fillrect 5 5 80 80
+out lin45
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10.5 8.25 70 60.5 60 255 250 84 72 255 20 30 200
+fillrect 5 5 80 80
+out lin60
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10.5 8.25 70 60.5 78 255 250 84 72 255 20 30 200
+fillrect 5 5 80 80
+out lin78
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10.5 8.25 70 60.5 135 255 250 84 72 255 20 30 200
+fillrect 5 5 80 80
+out lin135
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10 10 60 60 90 200 255 255 255 6 255 255 255
+fillellipse 4 4 80 70
+out lin_alpha
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+linear 10 10 60 60 90 255 0 0 0 255 255 255 255
+fillround 10 10 60 60 12
+out lin_round
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+pathellipse 10 10 70 60 245 255 252 220 0 255 252 220
+fillellipse 10 10 70 60
+out pathgrad
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+solid 255 0 0 0
+translate 48 48
+rotate 33
+scale 1.3 0.7
+fillrect -20 -10 40 20
+out xform
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+solid 255 10 100 200
+fillpie 10 10 70 70 180 180
+solid 230 255 255 255
+fillpie 10 10 70 70 0 180
+out pie
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+clipround 10.3 10.6 70 60 15
+solid 255 0 0 0
+fillrect 0 0 96 96
+out clipround
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+cliprect 10.3 10.6 50.5 40.2
+solid 255 0 0 0
+fillellipse 0 0 96 96
+out cliprect
+canvas 96 96
+clear 255 230 200 170
+smooth 1
+translate 3.5 2.25
+clipround 10.3 10.6 70 60 15
+solid 120 0 0 0
+fillellipse 0 0 96 96
+out clipxf
