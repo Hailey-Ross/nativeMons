@@ -4,6 +4,11 @@
 [![Bleeding Edge](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/nativeMons/bleeding-edge.yml?branch=dev&label=Bleeding%20Edge&style=for-the-badge)](https://github.com/Hailey-Ross/nativeMons/releases/tag/bleeding-edge)
 [![Release](https://img.shields.io/github/actions/workflow/status/Hailey-Ross/nativeMons/release.yml?branch=main&label=Release&style=for-the-badge)](https://github.com/Hailey-Ross/nativeMons/releases/latest)
 
+> [!NOTE]
+> **The launcher is being rewritten in Rust.** Bug fixes are paused until the rewrite is complete; fixes for
+> today's launcher go into the new one, which replaces it through the normal update.
+> [More about the Rust launcher](#a-rust-launcher-coming-later).
+
 **nativeMons** is a Windows launcher for playing every Pokémon generation, from Red to Ultra Moon, as native PC
 games. Pick a game from one menu with a controller, keyboard or mouse, and it starts on its own engine.
 
